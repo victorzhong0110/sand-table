@@ -1,6 +1,6 @@
-# researchos-workbench
+# sand-table
 
-[LLM Research OS](https://github.com/victorzhong0110/llm-research-os) 的图形交互界面。源码取自上游 `web/`，对应 `main` 的 `c6b21b9`。
+沙盘。[LLM Research OS](https://github.com/victorzhong0110/llm-research-os) 的图形交互界面。源码取自上游 `web/`，对应 `main` 的 `c6b21b9`。
 
 浏览器里可以查看同一份已记录研究事实：项目、规范修订、执行图、Run、事件与日志、决策与授权、指标、制品、环境，以及研究流程和操作。界面不另存配置。执行图只展示已验证的规范或计划节点和依赖边，不能把布局写回语义身份。
 

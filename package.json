@@ -1,5 +1,5 @@
 {
-  "name": "researchos-workbench",
+  "name": "sand-table",
   "private": true,
   "version": "0.0.0",
   "description": "Browser workbench for LLM Research OS. Graphical inspection of recorded research evidence.",
