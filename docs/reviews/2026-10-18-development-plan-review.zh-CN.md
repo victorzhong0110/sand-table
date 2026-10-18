@@ -174,7 +174,7 @@ Agent 的修改应在独立 worktree／分支中进行，不碰用户的工作�
 Sand Table 是一个 MCP 服务器，加上一块用 MCP App 画出来的板子。分发时包进各家已经有的插件格式（Cursor、Claude Code、Codex 能安装的那种）。不给每个 harness 写一套界面插件，也不做 DeepSeek Harness 那种换掉会话视图的插件。
 
 - 选择理由是推广：用户已经订着 Claude、ChatGPT、Cursor、Copilot。插件负责装进这些订阅，MCP 负责工具和板子。
-- 各家插件的共同标准是技能和 MCP 服务器。斜杠命令、钩子、界面不在这份标准里。DeepSeek Harness 能在网页会话中间注册自己的视图，这个能力别的 harness 没有。
+- 各家插件的共同标准是技能和 MCP 服务器。斜杠命令、钩子、界面不在这份标准里。DeepSeek Harness 能在网页会话中间注册自己的视图，这个能力别的 harness 没有（此说法不准确，VS Code 与 Cursor 扩展也能开自己的视图，见 9.1）。
 - 会画 MCP App 的宿主里出现板子。Claude、ChatGPT、Copilot 可以全屏；Cursor 只有行内。Claude Code 命令行和 Codex 不画这块界面时，仍然提供工具和文字。
 - 这收窄了问题 1 里“人站在白板前、对话框贴在白板上”的摆法。人站在已经订着的对话里，板子是这场对话中的一块界面。输入框仍是宿主的输入框。
 
