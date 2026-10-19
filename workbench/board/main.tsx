@@ -403,7 +403,12 @@ function Workbench() {
             ))}
           </div>
           {tab === "changes" ? (
-            <ChangePanel board={board} busy={busy} action={action} />
+            <ChangePanel
+              board={board}
+              viewId={viewId}
+              busy={busy}
+              action={action}
+            />
           ) : tab === "components" ? (
             <ComponentPanel
               board={board}

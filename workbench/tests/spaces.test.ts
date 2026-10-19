@@ -136,3 +136,26 @@ test("non-code components, typed data validation and presets use the same spatia
   });
   assert.equal(b.instances.at(-1)!.type, "unrecognized-type");
 });
+
+test("containment cannot cycle even beyond twenty nested spaces", () => {
+  const store = new BoardStore();
+  let b = store.open({ ...p, objects: [] }, "deep");
+  const spaces = new Spaces(store);
+  openView(store.get(b.id), "v");
+  const op = (operation: any) => {
+    b = spaces.update(b.id, store.get(b.id).revision, "v", operation);
+  };
+  let first = "",
+    last = "";
+  for (let n = 0; n < 25; n++) {
+    op({ kind: "create", type: "board", title: "Level " + n, data: {} });
+    const entry = b.instances.find((i) => i.id === b.views.v.selection[0])!;
+    if (n === 0) first = entry.id;
+    last = String(entry.data.spaceId);
+    op({ kind: "navigate", spaceId: last });
+  }
+  assert.throws(
+    () => op({ kind: "move", instanceId: first, spaceId: last }),
+    /cycle/,
+  );
+});

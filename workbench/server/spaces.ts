@@ -113,7 +113,7 @@ export class Spaces {
     const ancestor = (parent: string, child: string): boolean => {
       let cursor = b.spaces.find((s) => s.id === child);
       let count = 0;
-      while (cursor && count++ < 20) {
+      while (cursor && count++ <= b.spaces.length) {
         if (cursor.id === parent) return true;
         cursor = b.spaces.find((s) => s.id === cursor!.parentId);
       }

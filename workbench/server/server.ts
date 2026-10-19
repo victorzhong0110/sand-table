@@ -200,6 +200,32 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
     },
   );
   tool(
+    "sand_read_arrangement",
+    "Page current notes, placements, groups or manual links omitted from bounded context.",
+    {
+      ...board,
+      collection: z.enum(["notes", "placements", "groups", "links"]),
+      offset: z.number().int().nonnegative().default(0),
+      limit: z.number().int().min(1).max(30).default(20),
+    },
+    (a) => {
+      const b = store.get(a.boardId);
+      const value = a.collection === "links" ? b.spaceLinks : b[a.collection];
+      const items = Array.isArray(value)
+        ? value
+        : Object.entries(value).map(([id, value]) => ({ id, value }));
+      return {
+        boardId: b.id,
+        revision: b.revision,
+        collection: a.collection,
+        total: items.length,
+        items: items.slice(a.offset, a.offset + a.limit),
+        nextOffset:
+          a.offset + a.limit < items.length ? a.offset + a.limit : null,
+      };
+    },
+  );
+  tool(
     "sand_read_context",
     "Read the current human selection, arrangement and notes. They are context, not file-edit permission.",
     board,

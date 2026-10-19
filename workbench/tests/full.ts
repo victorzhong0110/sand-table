@@ -122,6 +122,15 @@ try {
   const boards = await call("sand_list_boards"),
     boardId = boards.boards[0].boardId;
   const readBoard = () => call("sand_read_board", { boardId });
+  const untilBoard = async (predicate: (b: any) => boolean) => {
+    const end = Date.now() + 10000;
+    while (Date.now() < end) {
+      const b = await readBoard();
+      if (predicate(b)) return b;
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    throw Error("Board did not reach expected state after UI operation.");
+  };
   await page.getByRole("button", { name: "返回白板" }).click();
   await frame.getByRole("textbox", { name: "搜索对象" }).fill("src/index.js");
   await frame
@@ -257,7 +266,11 @@ try {
     .getByRole("textbox", { name: /数据.*每行/ })
     .fill("基线,10\n实验,15");
   await frame.getByRole("button", { name: "保存组件", exact: true }).click();
-  b = await readBoard();
+  b = await untilBoard(
+    (b) =>
+      b.instances.find((c: any) => c.id === chart.id).data.points?.[1]
+        ?.value === 15,
+  );
   assert.equal(
     b.instances.find((c: any) => c.id === chart.id).data.points[1].value,
     15,
@@ -268,7 +281,10 @@ try {
   await card.focus();
   const width = b.instances.find((c: any) => c.id === chart.id).rect.width;
   await card.press("Alt+ArrowRight");
-  b = await readBoard();
+  b = await untilBoard(
+    (b) =>
+      b.instances.find((c: any) => c.id === chart.id).rect.width === width + 10,
+  );
   assert.equal(
     b.instances.find((c: any) => c.id === chart.id).rect.width,
     width + 10,
@@ -316,7 +332,7 @@ try {
   await frame
     .getByRole("button", { name: "应用自定义外观", exact: true })
     .click();
-  b = await readBoard();
+  b = await untilBoard((b) => b.theme?.background === "#e8f0ff");
   assert.equal(b.theme.background, "#e8f0ff");
   assert.equal(
     await frame
@@ -331,7 +347,7 @@ try {
   });
   assert.deepEqual(errors, []);
   console.log(
-    "FULL WORKFLOW PASSED: explicit intent, exact browser confirmation, independent host write, external-code assertion, actual scope verification, nested research components, chart form, keyboard resize, unknown component and custom theme.",
+    "FULL WORKFLOW PASSED: explicit intent, exact browser confirmation, independent host write, external-code assertion, actual scope verification, nested research components, chart form, keyboard resize, unknown component, media attachment and custom theme.",
   );
 } finally {
   await client?.close().catch(() => {});

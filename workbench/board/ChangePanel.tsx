@@ -79,10 +79,12 @@ function FileDiff({
 }
 export function ChangePanel({
   board: b,
+  viewId,
   busy,
   action,
 }: {
   board: Board;
+  viewId: string;
   busy: boolean;
   action: (name: string, args?: Record<string, unknown>) => Promise<any>;
 }) {
@@ -92,8 +94,11 @@ export function ChangePanel({
     [excluded, setExcluded] = useState<string[]>([]),
     [workspace, setWorkspace] = useState(b.workspaces[0]?.id || ""),
     [path, setPath] = useState("");
+  const objectIds = b.instances
+    .filter((c) => b.views[viewId]?.selection.includes(c.id) && c.objectId)
+    .map((c) => c.objectId!);
   const selected = b.objects
-    .filter((o) => b.selection.includes(o.id) && o.source)
+    .filter((o) => objectIds.includes(o.id) && o.source)
     .map((o) => ({ workspaceId: o.workspaceId, path: o.source!.path }));
   const refs = [
     ...new Map(
@@ -188,7 +193,8 @@ export function ChangePanel({
           const result = await action("sand_create_intent", {
             revision: b.revision,
             request,
-            objectIds: b.selection,
+            objectIds,
+            viewId,
             allowedFiles: allowed,
             intentId: editing?.id,
           });
@@ -310,7 +316,8 @@ function ProposalCard({
       {p.decision === "accepted" && (
         <p className="muted">
           已确认这份具体内容。Agent
-          仍需核对前置条件并使用宿主工具写入；确认按钮本身不写文件。
+          仍需核对前置条件并使用宿主工具写入；确认按钮本身不写文件。回到 AI
+          对话说“继续处理白板中已确认的提案，并核对实际结果”。
         </p>
       )}
       <button

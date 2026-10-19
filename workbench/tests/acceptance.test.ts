@@ -64,6 +64,10 @@ test("acceptance materials separate solver, private references and anonymous sco
     ];
     assert.equal(score(packet, reviews)[0].weightedScore, 3);
     assert.throws(
+      () => score({ ...packet, task: "changed after sealing" }, reviews),
+      /content changed/,
+    );
+    assert.throws(
       () => score(packet, [{ ...reviews[0], condition: "board" }]),
       /blind/,
     );

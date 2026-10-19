@@ -1,3 +1,4 @@
+import type { Space, SpaceLink, ComponentInstance } from "./spaces.ts";
 import type { Placement } from "./model.ts";
 export type FileRef = { workspaceId: string; path: string };
 export type ChangeIntent = {
@@ -10,6 +11,15 @@ export type ChangeIntent = {
     placements: Record<string, Placement>;
     notes: Record<string, string>;
     groups: { title: string; objectIds: string[] }[];
+    viewId?: string;
+    spaceId?: string;
+    spaces: Space[];
+    instances: Pick<
+      ComponentInstance,
+      "id" | "spaceId" | "type" | "objectId" | "title" | "rect"
+    >[];
+    links: SpaceLink[];
+    selectedInstances: string[];
   };
   createdAt: number;
 };
@@ -86,3 +96,24 @@ export const proposalSummary = (p: Proposal) => ({
   })),
   verification: p.verification,
 });
+
+export function intentSummary(i: ChangeIntent) {
+  return {
+    id: i.id,
+    version: i.version,
+    request: i.request,
+    objectIds: i.objectIds,
+    allowedFiles: i.allowedFiles,
+    createdAt: i.createdAt,
+    arrangement: {
+      viewId: i.arrangement.viewId,
+      spaceId: i.arrangement.spaceId,
+      selectedInstances: i.arrangement.selectedInstances,
+      instanceCount: i.arrangement.instances.length,
+      spaceCount: i.arrangement.spaces.length,
+      linkCount: i.arrangement.links.length,
+      continuation:
+        "Use sand_read_intent_arrangement to page the frozen arrangement; current layout uses sand_read_spaces.",
+    },
+  };
+}

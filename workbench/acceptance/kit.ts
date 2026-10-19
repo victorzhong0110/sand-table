@@ -2,6 +2,16 @@ import { createHash, randomBytes, randomInt } from "node:crypto";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
+function canonical(value: any): any {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonical(value[key])]),
+    );
+  return value;
+}
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 function write(dir: string, name: string, value: unknown) {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -59,7 +69,7 @@ export function seal(input: any, out: string) {
     ),
     criteria,
   };
-  const digest = hash(JSON.stringify(packet));
+  const digest = hash(JSON.stringify(canonical(packet)));
   const solver = join(out, "solver"),
     privateDir = join(out, "private");
   if (existsSync(out)) throw Error("Output must be a new directory.");
@@ -128,6 +138,11 @@ export function blind(input: any, out: string) {
 export function score(task: any, reviews: any[]) {
   if (!Array.isArray(task.criteria) || !task.digest)
     throw Error("Read a sealed solver task.");
+  const { digest, ...packet } = task;
+  if (hash(JSON.stringify(canonical(packet))) !== digest)
+    throw Error(
+      "Sealed task content changed; criteria and scope must be frozen before scoring.",
+    );
   const groups = new Map<string, any[]>();
   for (const r of reviews) {
     if (r.taskDigest !== task.digest)

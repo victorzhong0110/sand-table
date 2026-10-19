@@ -201,7 +201,7 @@ export function SpaceCanvas({
     });
   const parents = [];
   let space = b.spaces.find((s) => s.id === view.spaceId);
-  while (space && parents.length < 20) {
+  while (space && parents.length < b.spaces.length) {
     parents.unshift(space);
     space = b.spaces.find((s) => s.id === space?.parentId);
   }

@@ -57,7 +57,7 @@ test:full 在 clsx 的独立副本中模拟页面操作者与宿主，确认具�
 
 先 sand_list_boards，附着已有 boardId。回答白板问题前 sand_read_context；只读取所需源码，区分推断、依据和未知项。用 sand_report_activity 如实报告任务、实际工作区和对象；用 sand_publish_guide 提交带引用的功能路径。
 
-context.intentDiff 说明自上次读取后变化的组件、备注和明确意图；只保留上一份内存快照。布局不构成改代码授权。大图通过 sand_find_objects、sand_read_spaces 分页，组件完整数据通过 sand_read_component 获取。
+context.intentDiff 说明自上次读取后变化的组件、备注和明确意图；只保留上一份内存快照。布局不构成改代码授权。大图通过 sand_find_objects、sand_read_spaces 分页，组件完整数据通过 sand_read_component 获取；更多备注与关系通过 sand_read_arrangement 分页。明确意图附带当时的空间、实例布局与关系，可用 sand_read_intent_arrangement 分页追溯。
 
 改动遵循 sand_read_intents → sand_read_target → sand_publish_proposal → 人确认 → sand_prepare_apply → sand_read_approved_file → 宿主文件工具 → sand_verify_proposal → sand_report_validation。读取原始基线后立即比较，避免覆盖并发变化。不要以工具可见性元数据冒充人的身份认证或宿主强制写入限制。
 

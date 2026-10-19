@@ -3,7 +3,8 @@ import {
   syncSourceInstances,
   syncSelection,
 } from "./space-state.ts";
-import { randomUUID } from "node:crypto";
+import { intentSummary } from "./changes.ts";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   Board,
   Projection,
@@ -186,7 +187,10 @@ export class BoardStore {
     if (!b.selection.length && !active?.selection.length)
       throw Error("Select objects or components on the board first.");
     const parts: Record<string, string> = {};
-    for (const i of b.instances) parts["instance:" + i.id] = JSON.stringify(i);
+    for (const i of b.instances)
+      parts["instance:" + i.id] = createHash("sha256")
+        .update(JSON.stringify(i))
+        .digest("hex");
     for (const g of b.groups) parts["group:" + g.id] = JSON.stringify(g);
     for (const [key, note] of Object.entries(b.notes))
       parts["note:" + key] = note;
@@ -198,6 +202,11 @@ export class BoardStore {
       });
     for (const s of b.spaces) parts["space:" + s.id] = JSON.stringify(s);
     for (const l of b.spaceLinks) parts["link:" + l.id] = JSON.stringify(l);
+    parts.view = JSON.stringify(
+      active
+        ? { id: active.id, spaceId: active.spaceId, camera: active.camera }
+        : null,
+    );
     parts.selection = JSON.stringify({
       objectIds: b.selection,
       viewId: active?.id,
@@ -243,18 +252,16 @@ export class BoardStore {
           "Use sand_read_spaces / sand_read_component and sand_find_objects for omitted details.",
       },
       focusedView: active,
-      instances: chosen
-        .slice(0, 30)
-        .map((i) => ({
-          ...i,
-          data:
-            JSON.stringify(i.data).length > 4000
-              ? {
-                  omitted: true,
-                  instruction: "Read this instance with sand_read_component.",
-                }
-              : i.data,
-        })),
+      instances: chosen.slice(0, 30).map((i) => ({
+        ...i,
+        data:
+          JSON.stringify(i.data).length > 4000
+            ? {
+                omitted: true,
+                instruction: "Read this instance with sand_read_component.",
+              }
+            : i.data,
+      })),
       spaces: b.spaces,
       objects: selectedObjects.slice(0, 30),
       workspaces: b.workspaces.map(
@@ -271,10 +278,29 @@ export class BoardStore {
       relations: b.relations.filter(
         (r) => b.selection.includes(r.source) || b.selection.includes(r.target),
       ),
-      placements: b.placements,
-      groups: b.groups,
-      notes: b.notes,
-      intents: b.intents,
+      placements: Object.fromEntries(
+        Object.entries(b.placements).filter(([id]) =>
+          b.selection.slice(0, 30).includes(id),
+        ),
+      ),
+      groups: b.groups.slice(0, 30).map((g) => ({
+        ...g,
+        objectIds: g.objectIds.slice(0, 30),
+        instanceIds: g.instanceIds?.slice(0, 30),
+      })),
+      notes: Object.fromEntries(
+        Object.entries(b.notes).filter(([id]) =>
+          b.selection.slice(0, 30).includes(id),
+        ),
+      ),
+      intents: b.intents.map(intentSummary),
+      arrangementCounts: {
+        notes: Object.keys(b.notes).length,
+        placements: Object.keys(b.placements).length,
+        groups: b.groups.length,
+        links: b.spaceLinks.length,
+      },
+      links: b.spaceLinks.slice(0, 30),
       proposals: b.proposals.map((p) => ({
         id: p.id,
         version: p.version,

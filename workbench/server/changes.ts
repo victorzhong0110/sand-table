@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { BoardStore } from "../core/store.ts";
 import type { Binding } from "./repository.ts";
 import type { FileRef, FileTarget, Proposal } from "../core/changes.ts";
-import { proposalSummary } from "../core/changes.ts";
+import { intentSummary, proposalSummary } from "../core/changes.ts";
 import { viewResult } from "../core/results.ts";
 import {
   currentFile,
@@ -52,6 +52,7 @@ export class Changes {
       objectIds: string[];
       allowedFiles: FileRef[];
       intentId?: string;
+      viewId?: string;
     },
   ) {
     const b = this.store.get(boardId);
@@ -71,6 +72,12 @@ export class Changes {
     if (a.intentId && !old) throw Error("Unknown intent.");
     if (!old && b.intents.length >= 8)
       throw Error("Intent limit reached; revise an existing intent.");
+    const view = a.viewId
+      ? b.views[a.viewId]
+      : b.focusedViewId
+        ? b.views[b.focusedViewId]
+        : undefined;
+    if (a.viewId && !view) throw Error("Unknown view.");
     const intent = {
       id: old?.id || randomUUID(),
       version: (old?.version || 0) + 1,
@@ -78,6 +85,21 @@ export class Changes {
       objectIds: [...a.objectIds],
       allowedFiles: structuredClone(a.allowedFiles),
       arrangement: {
+        viewId: view?.id,
+        spaceId: view?.spaceId,
+        spaces: structuredClone(b.spaces),
+        instances: b.instances.map(
+          ({ id, spaceId, type, objectId, title, rect }) => ({
+            id,
+            spaceId,
+            type,
+            objectId,
+            title,
+            rect: structuredClone(rect),
+          }),
+        ),
+        links: structuredClone(b.spaceLinks),
+        selectedInstances: [...(view?.selection || [])],
         placements: structuredClone(b.placements),
         notes: structuredClone(b.notes),
         groups: b.groups.map((g) => ({
@@ -340,6 +362,7 @@ export function registerChangeTools(tool: RegisterTool, changes: Changes) {
       objectIds: z.array(id).max(1200),
       allowedFiles: z.array(ref).min(1).max(12),
       intentId: id.optional(),
+      viewId: id.optional(),
     },
     (a) => changes.createIntent(a.boardId, a.revision, a),
     true,
@@ -348,7 +371,41 @@ export function registerChangeTools(tool: RegisterTool, changes: Changes) {
     "sand_read_intents",
     "Read explicit human change requests, exact edit scope and arrangement context.",
     { ...board },
-    (a) => changes.store.get(a.boardId).intents,
+    (a) => changes.store.get(a.boardId).intents.map(intentSummary),
+  );
+  tool(
+    "sand_read_intent_arrangement",
+    "Page the frozen spatial arrangement attached to a human intent. This is context, not additional edit authority.",
+    {
+      ...board,
+      intentId: id,
+      collection: z.enum([
+        "instances",
+        "spaces",
+        "links",
+        "notes",
+        "groups",
+        "placements",
+      ]),
+      offset: z.number().int().nonnegative().default(0),
+      limit: z.number().int().min(1).max(30).default(20),
+    },
+    (a) => {
+      const { i } = changes.intent(a.boardId, a.intentId);
+      const collection = i.arrangement[a.collection];
+      const items = Array.isArray(collection)
+        ? collection
+        : Object.entries(collection).map(([id, value]) => ({ id, value }));
+      return {
+        intentId: i.id,
+        version: i.version,
+        collection: a.collection,
+        total: items.length,
+        items: items.slice(a.offset, a.offset + a.limit),
+        nextOffset:
+          a.offset + a.limit < items.length ? a.offset + a.limit : null,
+      };
+    },
   );
   tool(
     "sand_read_target",
@@ -365,6 +422,8 @@ export function registerChangeTools(tool: RegisterTool, changes: Changes) {
         throw Error("Outside requested edit scope.");
       const f = currentFile(changes.bindings, a);
       const lines = f.text?.split("\n");
+      if (lines && a.startLine > lines.length)
+        throw Error("Requested line is outside this file.");
       return {
         workspaceId: a.workspaceId,
         path: a.path,
