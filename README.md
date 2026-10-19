@@ -1,4 +1,12 @@
-# sand-table
+# Sand Table
+
+人和 AI 共享的交互沙盘：从总览进入真实代码，圈定关注范围，并看到 Agent 在哪个工作区做什么。
+
+**开发状态：** 新实现位于 [`workbench/`](workbench/README.md)，提供只读 MCP 服务器与 MCP App 的 P0/P1 开发切片。已验证本地协议链路，真实 AI 客户端和真人验收尚未完成。完整方向见 [v0.3 开发规划](docs/DEVELOPMENT_PLAN.zh-CN.md)。
+
+## 旧 Research OS 界面
+
+以下为保留的旧实现；与新的 MCP 工作台独立。
 
 沙盘。[LLM Research OS](https://github.com/victorzhong0110/llm-research-os) 的图形交互界面。源码取自上游 `web/`，对应 `main` 的 `c6b21b9`。
 

@@ -1,0 +1,36 @@
+{
+  "name": "@sand-table/workbench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
+    "start": "node --experimental-strip-types server/main.ts",
+    "dev": "node --experimental-strip-types dev/host.ts",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:browser": "node --experimental-strip-types tests/browser.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/ext-apps": "2.0.3",
+    "@modelcontextprotocol/server": "2.0.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "5.9.3",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.30",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "5.1.0",
+    "playwright": "1.62.1",
+    "prettier": "3.9.10",
+    "vite": "7.3.6",
+    "vite-plugin-singlefile": "2.3.0"
+  }
+}
