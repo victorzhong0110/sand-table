@@ -116,7 +116,7 @@ export async function startLocal(options: {
         res.setHeader("Content-Type", "text/html; charset=utf-8");
         res.setHeader(
           "Content-Security-Policy",
-          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; frame-src 'self'; img-src 'self' data:; media-src data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
         );
         res.end(
           `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sand Table · 本地工作台</title><style>${css}</style></head><body><nav><b>Sand Table</b><span id="connection">正在连接工作台…</span><button id="setup">连接我的 AI</button><button id="new-board">重新打开白板</button></nav><section id="setup-panel" hidden><h1>和你自己的 AI 共用这张白板</h1><p>在本机 MCP 客户端中安装一次，然后在它的对话里提问。白板不自带模型，也不需要新的 API Key。</p><label>Codex CLI 安装命令<textarea id="codex" readonly></textarea></label><button data-copy="codex">复制命令</button><details><summary>通用 MCP JSON / Codex TOML</summary><label>JSON<textarea id="json" readonly></textarea></label><button data-copy="json">复制 JSON</button><label>TOML<textarea id="toml" readonly></textarea></label><button data-copy="toml">复制 TOML</button></details><label>安装后，在 AI 对话中发送<textarea id="prompt" readonly></textarea></label><button id="ask">复制当前选区提问</button><p id="setup-status" role="status"></p><p class="muted">这里显示 MCP 接入进程与工具通信，不代表 AI 正在思考。浏览器聊天网页不能直接读取本机 stdio 配置；请使用本机 MCP 客户端。无需把此服务暴露到公网。</p><button id="close-setup">返回白板</button></section><div id="error" role="alert" hidden></div><iframe title="Sand Table 白板" sandbox="allow-scripts"></iframe><script src="/host.js"></script></body></html>`,
@@ -154,7 +154,7 @@ export async function startLocal(options: {
       let body = "";
       for await (const chunk of req) {
         body += chunk;
-        if (Buffer.byteLength(body) > 100000) {
+        if (Buffer.byteLength(body) > 4_000_000) {
           json({ error: "Request too large" }, 413);
           return;
         }

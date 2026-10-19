@@ -1,4 +1,10 @@
-import { randomUUID } from "node:crypto";
+import {
+  initializeSpaces,
+  syncSourceInstances,
+  syncSelection,
+} from "./space-state.ts";
+import { intentSummary } from "./changes.ts";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   Board,
   Projection,
@@ -10,6 +16,10 @@ import type {
 } from "./model.ts";
 export class BoardStore {
   boards = new Map<string, Board>();
+  contextSnapshots = new Map<
+    string,
+    { revision: number; parts: Record<string, string> }
+  >();
   now: () => number;
   ttl: number;
   constructor(now = Date.now, ttl = 30 * 60 * 1000) {
@@ -18,7 +28,10 @@ export class BoardStore {
   }
   sweep() {
     for (const [id, b] of this.boards)
-      if (b.expiresAt <= this.now()) this.boards.delete(id);
+      if (b.expiresAt <= this.now()) {
+        this.boards.delete(id);
+        this.contextSnapshots.delete(id);
+      }
   }
   get(id: string) {
     this.sweep();
@@ -32,6 +45,8 @@ export class BoardStore {
   }
   read(id: string) {
     const b = structuredClone(this.get(id));
+    b.assets.forEach((a) => delete a.dataUrl);
+    b.proposals.forEach((p) => p.baseline.forEach((s) => (s.files = {})));
     b.activities.forEach((a) => (a.stale = this.now() - a.reportedAt > 60_000));
     return b;
   }
@@ -51,8 +66,17 @@ export class BoardStore {
       groups: [],
       activities: [],
       explanations: [],
+      spaces: [],
+      instances: [],
+      views: {},
+      spaceLinks: [],
+      assets: [],
       guides: [],
+      intents: [],
+      proposals: [],
+      validations: [],
     };
+    initializeSpaces(b);
     this.boards.set(b.id, b);
     return this.read(b.id);
   }
@@ -67,6 +91,7 @@ export class BoardStore {
     id: string,
     revision: number,
     edit: {
+      viewId?: string;
       selection?: string[];
       placements?: Record<string, Placement>;
       note?: { objectId: string; text: string };
@@ -145,12 +170,70 @@ export class BoardStore {
       b.groups.push({ id: randomUUID(), ...structuredClone(edit.group) });
     if (edit.removeGroup)
       b.groups = b.groups.filter((g) => g.id !== edit.removeGroup);
+    if (edit.viewId && b.views[edit.viewId]) b.focusedViewId = edit.viewId;
+    if (edit.viewId && (edit.selection || edit.guideFocus))
+      syncSelection(b, edit.viewId, b.selection);
+    if (edit.placements)
+      for (const [objectId, p] of Object.entries(edit.placements)) {
+        const instance = b.instances.find((i) => i.id === `ref:${objectId}`);
+        if (instance) instance.rect = { ...instance.rect, ...p };
+      }
     b.revision++;
     return this.read(id);
   }
   context(id: string) {
     const b = this.get(id);
-    if (!b.selection.length) throw Error("Select objects on the board first.");
+    const active = b.focusedViewId ? b.views[b.focusedViewId] : undefined;
+    if (!b.selection.length && !active?.selection.length)
+      throw Error("Select objects or components on the board first.");
+    const parts: Record<string, string> = {};
+    for (const i of b.instances)
+      parts["instance:" + i.id] = createHash("sha256")
+        .update(JSON.stringify(i))
+        .digest("hex");
+    for (const g of b.groups) parts["group:" + g.id] = JSON.stringify(g);
+    for (const [key, note] of Object.entries(b.notes))
+      parts["note:" + key] = note;
+    for (const i of b.intents)
+      parts["intent:" + i.id] = JSON.stringify({
+        version: i.version,
+        request: i.request,
+        allowedFiles: i.allowedFiles,
+      });
+    for (const s of b.spaces) parts["space:" + s.id] = JSON.stringify(s);
+    for (const l of b.spaceLinks) parts["link:" + l.id] = JSON.stringify(l);
+    parts.view = JSON.stringify(
+      active
+        ? { id: active.id, spaceId: active.spaceId, camera: active.camera }
+        : null,
+    );
+    parts.selection = JSON.stringify({
+      objectIds: b.selection,
+      viewId: active?.id,
+      instanceIds: active?.selection,
+    });
+    const previous = this.contextSnapshots.get(id);
+    const changed = Object.keys(parts).filter(
+      (key) => previous?.parts[key] !== parts[key],
+    );
+    const removed = Object.keys(previous?.parts || {}).filter(
+      (key) => !(key in parts),
+    );
+    const intentDiff = {
+      sinceRevision: previous?.revision ?? null,
+      firstRead: !previous,
+      changed: changed.slice(0, 200),
+      removed: removed.slice(0, 200),
+      changedCount: changed.length,
+      removedCount: removed.length,
+      meaning:
+        "Attention and arrangement changes only. Explicit change intents define requested file scope; host permissions remain separate.",
+    };
+    this.contextSnapshots.set(id, { revision: b.revision, parts });
+    const chosen = active
+      ? b.instances.filter((i) => active.selection.includes(i.id))
+      : [];
+    const selectedObjects = b.objects.filter((o) => b.selection.includes(o.id));
     b.lastContextRead = {
       at: this.now(),
       revision: b.revision,
@@ -160,7 +243,27 @@ export class BoardStore {
       boardId: id,
       revision: b.revision,
       selection: b.selection,
-      objects: b.objects.filter((o) => b.selection.includes(o.id)),
+      intentDiff,
+      contextLimits: {
+        selectedInstances: chosen.length,
+        selectedObjects: selectedObjects.length,
+        returnedLimit: 30,
+        continuation:
+          "Use sand_read_spaces / sand_read_component and sand_find_objects for omitted details.",
+      },
+      focusedView: active,
+      instances: chosen.slice(0, 30).map((i) => ({
+        ...i,
+        data:
+          JSON.stringify(i.data).length > 4000
+            ? {
+                omitted: true,
+                instruction: "Read this instance with sand_read_component.",
+              }
+            : i.data,
+      })),
+      spaces: b.spaces,
+      objects: selectedObjects.slice(0, 30),
       workspaces: b.workspaces.map(
         ({ id, label, head, branch, snapshot, files, omitted }) => ({
           id,
@@ -175,9 +278,36 @@ export class BoardStore {
       relations: b.relations.filter(
         (r) => b.selection.includes(r.source) || b.selection.includes(r.target),
       ),
-      placements: b.placements,
-      groups: b.groups,
-      notes: b.notes,
+      placements: Object.fromEntries(
+        Object.entries(b.placements).filter(([id]) =>
+          b.selection.slice(0, 30).includes(id),
+        ),
+      ),
+      groups: b.groups.slice(0, 30).map((g) => ({
+        ...g,
+        objectIds: g.objectIds.slice(0, 30),
+        instanceIds: g.instanceIds?.slice(0, 30),
+      })),
+      notes: Object.fromEntries(
+        Object.entries(b.notes).filter(([id]) =>
+          b.selection.slice(0, 30).includes(id),
+        ),
+      ),
+      intents: b.intents.map(intentSummary),
+      arrangementCounts: {
+        notes: Object.keys(b.notes).length,
+        placements: Object.keys(b.placements).length,
+        groups: b.groups.length,
+        links: b.spaceLinks.length,
+      },
+      links: b.spaceLinks.slice(0, 30),
+      proposals: b.proposals.map((p) => ({
+        id: p.id,
+        version: p.version,
+        digest: p.digest,
+        decision: p.decision,
+        verification: p.verification,
+      })),
       guideFocus: b.guideFocus,
       guide: b.guideFocus
         ? b.guides.find((g) => g.id === b.guideFocus!.guideId)
@@ -312,10 +442,12 @@ export class BoardStore {
       );
     }
     Object.assign(b, p);
+    syncSourceInstances(b);
     b.revision++;
     return this.read(id);
   }
   end(id: string) {
+    this.contextSnapshots.delete(id);
     this.get(id);
     this.boards.delete(id);
     return { ended: true, boardId: id };

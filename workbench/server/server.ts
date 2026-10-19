@@ -10,6 +10,8 @@ import {
   RESOURCE_MIME_TYPE,
 } from "@modelcontextprotocol/ext-apps/server";
 import { z } from "zod";
+import { Spaces, registerSpaceTools } from "./spaces.ts";
+import { Changes, registerChangeTools } from "./changes.ts";
 import { boardSummary } from "../core/results.ts";
 import { BoardStore } from "../core/store.ts";
 import { scan, sourceFor, verifyEvidence, type Binding } from "./repository.ts";
@@ -33,7 +35,8 @@ export type Forwarder = {
 };
 export function createServer(bindings: Binding[], forward?: Forwarder) {
   const store = new BoardStore();
-  const server = new McpServer({ name: "sand-table", version: "0.1.0" });
+  const changes = new Changes(store, bindings);
+  const server = new McpServer({ name: "sand-table", version: "0.3.0" });
   const timer = setInterval(() => store.sweep(), 60_000);
   timer.unref();
   function tool<T extends z.ZodRawShape>(
@@ -78,13 +81,27 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
             "placements" in data &&
             "id" in data,
           );
-          const visible = isBoard
-            ? boardSummary(data as ReturnType<typeof store.read>)
-            : data;
+          const envelope =
+            data &&
+            typeof data === "object" &&
+            "__sandView" in data &&
+            "summary" in data &&
+            "value" in data
+              ? (data as { summary: unknown; value: unknown })
+              : undefined;
+          const visible = envelope
+            ? envelope.summary
+            : isBoard
+              ? boardSummary(data as ReturnType<typeof store.read>)
+              : data;
           return {
             content: [{ type: "text", text: JSON.stringify(visible) }],
             structuredContent: { data: visible },
-            ...(isBoard ? { _meta: { data } } : {}),
+            ...(envelope
+              ? { _meta: { data: envelope.value } }
+              : isBoard
+                ? { _meta: { data } }
+                : {}),
           };
         } catch (e) {
           return {
@@ -135,7 +152,18 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
     "sand_refresh_board",
     "Rescan actual tracked working-tree contents. Changes invalidate evidence.",
     board,
-    (a) => store.refresh(a.boardId, scan(bindings)),
+    (a) => {
+      store.refresh(a.boardId, scan(bindings));
+      for (const p of store.get(a.boardId).proposals) {
+        const v = changes.observe(a.boardId, p);
+        if (
+          p.decision === "pending" &&
+          (v.files.some((f) => f.state !== "before") || v.outsideChanges.length)
+        )
+          p.decision = "stale";
+      }
+      return store.read(a.boardId);
+    },
   );
   tool(
     "sand_find_objects",
@@ -168,6 +196,32 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
         objects: matches.slice(a.offset, a.offset + a.limit),
         nextOffset:
           a.offset + a.limit < matches.length ? a.offset + a.limit : null,
+      };
+    },
+  );
+  tool(
+    "sand_read_arrangement",
+    "Page current notes, placements, groups or manual links omitted from bounded context.",
+    {
+      ...board,
+      collection: z.enum(["notes", "placements", "groups", "links"]),
+      offset: z.number().int().nonnegative().default(0),
+      limit: z.number().int().min(1).max(30).default(20),
+    },
+    (a) => {
+      const b = store.get(a.boardId);
+      const value = a.collection === "links" ? b.spaceLinks : b[a.collection];
+      const items = Array.isArray(value)
+        ? value
+        : Object.entries(value).map(([id, value]) => ({ id, value }));
+      return {
+        boardId: b.id,
+        revision: b.revision,
+        collection: a.collection,
+        total: items.length,
+        items: items.slice(a.offset, a.offset + a.limit),
+        nextOffset:
+          a.offset + a.limit < items.length ? a.offset + a.limit : null,
       };
     },
   );
@@ -294,6 +348,7 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
     {
       ...board,
       revision: z.number().int().nonnegative(),
+      viewId: id.optional(),
       selection: ids.optional(),
       placements: z
         .record(
@@ -322,6 +377,8 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
     (a) => store.end(a.boardId),
     true,
   );
+  registerChangeTools(tool, changes);
+  registerSpaceTools(tool, new Spaces(store));
   registerAppResource(server, "Sand Table overview", uri, {}, async () =>
     forward
       ? forward.resource()

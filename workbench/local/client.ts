@@ -1,3 +1,4 @@
+import { safeUrl } from "../core/spaces.ts";
 import { resultData } from "../core/results.ts";
 import {
   AppBridge,
@@ -53,7 +54,7 @@ function showSetup(show: boolean) {
   document.querySelector("iframe")!.hidden = show;
 }
 function makePrompt(id: string, names: string[] = []) {
-  return `这次使用浏览器中已有的 Sand Table boardId="${id}"，不要另建白板。先用 sand_read_context 读取最新选区和备注，额外查找用 sand_find_objects 分页搜索。${names.length ? `当前选中的对象：${names.join("、")}。` : "如果没有选区，用 sand_find_objects 查找 README 文件并读取项目说明，向我说明用途。"}请用我能理解的方式解释这些部分如何配合，读取真实源码，说明输入、输出和仍不确定的地方，并用 sand_publish_guide 把带引用的功能讲解放到这张板子。实际工作时用 sand_report_activity 报告正确的 workspaceId 与对象。不要因为我整理了白板就修改代码；改代码前先讨论具体改法。`;
+  return `这次使用浏览器中已有的 Sand Table boardId="${id}"，不要另建白板。先用 sand_read_context 读取最新选区和备注，额外查找用 sand_find_objects 分页搜索。${names.length ? `当前选中的对象：${names.join("、")}。` : "如果没有选区，用 sand_find_objects 查找 README 文件并读取项目说明，向我说明用途。"}请用我能理解的方式解释这些部分如何配合，读取真实源码，说明输入、输出和仍不确定的地方，并用 sand_publish_guide 把带引用的功能讲解放到这张板子。实际工作时用 sand_report_activity 报告正确的 workspaceId 与对象。不要因为我整理了白板就修改代码；改代码时先读 sand_read_intents 中人的明确请求和允许文件，用 sand_read_target 获取实际基线，再用 sand_publish_proposal 提交具体目标内容和验证计划。等待人在页面确认完全相同的版本和 digest；用 sand_prepare_apply 和 sand_read_approved_file 重新核对，再使用你自己的宿主文件工具写入。最后 sand_verify_proposal 核对实际结果，并用 sand_report_validation 如实报告测试命令、环境和输出。没有确认不要写入；编排本身不是授权。用 sand_read_spaces / sand_read_component 了解嵌套白板与组件，用 sand_edit_space 维护人要求的编排；不要把白板当作工作区。`;
 }
 function renderStatus(data: any) {
   const entries = data.connections || [];
@@ -83,8 +84,8 @@ async function mount() {
   old.replaceWith(frame);
   bridge = new AppBridge(
     null,
-    { name: "Sand Table local workbench", version: "0.2.0" },
-    { serverTools: {} },
+    { name: "Sand Table local workbench", version: "0.3.0" },
+    { serverTools: {}, openLinks: {} },
     {
       hostContext: {
         theme: "light",
@@ -94,6 +95,12 @@ async function mount() {
       },
     },
   );
+  bridge.onopenlink = async ({ url }) => {
+    const safe = safeUrl(url);
+    if (!safe) return { isError: true };
+    window.open(safe, "_blank", "noopener,noreferrer");
+    return {};
+  };
   bridge.oncalltool = (params) =>
     request("/rpc", { method: "tools/call", params });
   bridge.oninitialized = async () => {
@@ -105,7 +112,7 @@ async function mount() {
   );
   frame.srcdoc = resource.contents[0].text.replace(
     "<head>",
-    `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'">`,
+    `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; connect-src 'none'">`,
   );
   showSetup(false);
 }

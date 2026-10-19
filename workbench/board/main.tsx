@@ -1,8 +1,12 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
-import type { Board, Placement, Item, GuideFocus } from "../core/model.ts";
+import type { Board, Item, GuideFocus } from "../core/model.ts";
 import "./style.css";
+import { SpaceCanvas } from "./SpaceCanvas.tsx";
+import { ChangePanel } from "./ChangePanel.tsx";
+import { ComponentPanel, ThemePanel } from "./ComponentPanel.tsx";
+import { safeUrl } from "../core/spaces.ts";
 import { resultData } from "../core/results.ts";
 import { GuidePanel } from "./GuidePanel.tsx";
 const relationLabels = {
@@ -15,6 +19,10 @@ function unpack(r: any) {
   return resultData(r) ?? JSON.parse(r.content[0].text);
 }
 function Workbench() {
+  const [viewId] = useState(() => crypto.randomUUID());
+  const [tab, setTab] = useState("inspect");
+  const opening = useRef(false);
+  const operations = useRef<Promise<unknown>>(Promise.resolve());
   const [board, setBoard] = useState<Board>(),
     [error, setError] = useState(""),
     [ended, setEnded] = useState(false),
@@ -34,25 +42,30 @@ function Workbench() {
       nextLine: number | null;
     }>(),
     [note, setNote] = useState(""),
-    [groupTitle, setGroupTitle] = useState(""),
-    [zoom, setZoom] = useState(1),
-    [pan, setPan] = useState({ x: 24, y: 24 }),
-    [draft, setDraft] = useState<Record<string, Placement>>({});
-  const canvasRef = useRef<HTMLElement>(null);
+    [groupTitle, setGroupTitle] = useState("");
   const boardRef = useRef(board);
   boardRef.current = board;
-  const drag = useRef<
-    | { id?: string; x: number; y: number; base: Placement; moving: boolean }
-    | undefined
-  >(undefined);
-  const { app, error: connectionError } = useApp({
-    appInfo: { name: "Sand Table", version: "0.1.0" },
+  const {
+    app,
+    error: connectionError,
+    isConnected,
+  } = useApp({
+    appInfo: { name: "Sand Table", version: "0.3.0" },
     capabilities: {},
     onAppCreated: (a) => {
       a.ontoolresult = (r) => {
         try {
           const data = unpack(r);
-          if (data.objects) setBoard(data);
+          if (
+            data.objects &&
+            data.spaces &&
+            (!boardRef.current ||
+              data.id !== boardRef.current.id ||
+              data.revision >= boardRef.current.revision)
+          ) {
+            boardRef.current = data;
+            setBoard(data);
+          }
         } catch (e) {
           setError(String(e));
         }
@@ -73,11 +86,20 @@ function Workbench() {
     setError("");
     try {
       const data = await call(name, args);
-      if (data.objects) setBoard(data);
+      if (
+        data.objects &&
+        data.spaces &&
+        (!boardRef.current ||
+          data.id !== boardRef.current.id ||
+          data.revision >= boardRef.current.revision)
+      ) {
+        boardRef.current = data;
+        setBoard(data);
+      }
       return data;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      if (name === "sand_edit_view")
+      if (name !== "sand_read_board")
         try {
           setBoard(await call("sand_read_board"));
         } catch {}
@@ -89,9 +111,38 @@ function Workbench() {
   function edit(data: Record<string, unknown>) {
     return action("sand_edit_view", {
       revision: boardRef.current?.revision,
+      viewId,
       ...data,
     });
   }
+  const operate = (operation: any) => {
+    const next = operations.current.then(() =>
+      action("sand_edit_space", {
+        revision: boardRef.current?.revision,
+        viewId,
+        author: "human",
+        operation,
+      }),
+    );
+    operations.current = next.catch(() => undefined);
+    return next;
+  };
+  const clearFilters = () => {
+    setQuery("");
+    setKind("all");
+    setScope("all");
+  };
+  useEffect(() => {
+    if (!board?.id || !isConnected || board.views[viewId] || opening.current)
+      return;
+    opening.current = true;
+    void action("sand_open_view", { viewId }).finally(
+      () => (opening.current = false),
+    );
+  }, [board?.id, isConnected, Boolean(board?.views[viewId])]);
+  useEffect(() => {
+    if (board?.theme) setTheme("custom");
+  }, [JSON.stringify(board?.theme)]);
   async function readSource(object: Item, startLine?: number) {
     const result = await action("sand_read_source", {
       objectId: object.id,
@@ -119,44 +170,6 @@ function Workbench() {
     setScope("all");
     setQuery("");
     setArrows(true);
-    const objects = updated.objects.filter((o) => o.kind !== "workspace");
-    const routeIds = new Set(
-      updated.guides
-        .find((g) => g.id === focus.guideId)!
-        .steps.flatMap((s) => s.objectIds),
-    );
-    const points = objects.flatMap((o, i) =>
-      routeIds.has(o.id)
-        ? [
-            updated.placements[o.id] || {
-              x: (i % 3) * 280,
-              y: Math.floor(i / 3) * 150,
-              pinned: false,
-            },
-          ]
-        : [],
-    );
-    const left = Math.min(...points.map((p) => p.x)),
-      top = Math.min(...points.map((p) => p.y));
-    const right = Math.max(...points.map((p) => p.x)) + 252,
-      bottom = Math.max(...points.map((p) => p.y)) + 125;
-    const width = canvasRef.current?.clientWidth || 700,
-      height = canvasRef.current?.clientHeight || 660;
-    const scale = Math.min(
-      1,
-      Math.max(
-        0.1,
-        Math.min(
-          (width - 60) / (right - left),
-          (height - 100) / (bottom - top),
-        ),
-      ),
-    );
-    setZoom(scale);
-    setPan({
-      x: width / 2 - ((left + right) * scale) / 2,
-      y: (height - 36) / 2 - ((top + bottom) * scale) / 2,
-    });
   }
   async function openDocument(object: Item) {
     const updated = await edit({ selection: [object.id] });
@@ -165,9 +178,6 @@ function Workbench() {
     setKind("file");
     setScope(object.workspaceId);
     setQuery(object.title);
-    setZoom(1);
-    const p = updated.placements[object.id] || { x: 0, y: 0 };
-    setPan({ x: 24 - p.x, y: 24 - p.y });
     await readSource(object);
   }
   useEffect(() => {
@@ -178,7 +188,13 @@ function Workbench() {
     }, 5000);
     return () => clearInterval(timer);
   }, [board?.id, busy, ended]);
-  const selected = board?.objects.find((o) => o.id === board.selection.at(-1));
+  const view = board?.views[viewId];
+  const selectedInstance = board?.instances.find(
+    (c) => c.id === view?.selection.at(-1),
+  );
+  const selected = board?.objects.find(
+    (o) => o.id === selectedInstance?.objectId,
+  );
   useEffect(() => {
     setSource(undefined);
     setNote(selected ? board?.notes[selected.id] || "" : "");
@@ -200,29 +216,6 @@ function Workbench() {
   const focusedGuide = board.guides.find(
     (g) => g.id === board.guideFocus?.guideId,
   );
-  const routeIds = new Set(
-    focusedGuide?.steps.flatMap((s) => s.objectIds) || [],
-  );
-  const visible = board.objects.filter(
-    (o) =>
-      o.kind !== "workspace" &&
-      (kind === "all" || o.kind === kind) &&
-      (scope === "all" || o.workspaceId === scope) &&
-      `${o.title} ${o.source?.path || ""}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-  );
-  const positions = Object.fromEntries(
-    visible.map((o, i) => [
-      o.id,
-      draft[o.id] ||
-        board.placements[o.id] || {
-          x: (i % 3) * 280,
-          y: Math.floor(i / 3) * 150,
-          pinned: false,
-        },
-    ]),
-  );
   function choose(id: string, shift = false) {
     const old = boardRef.current!.selection;
     void edit({
@@ -235,8 +228,30 @@ function Workbench() {
   }
   const workLabel = (id: string) =>
     board.workspaces.find((w) => w.id === id)?.label || "未知";
+  const custom = theme === "custom" ? board.theme : undefined;
+  const customStyle = custom
+    ? ({
+        "--bg": custom.background,
+        "--surface": custom.surface,
+        "--ink": custom.ink,
+        "--muted": custom.muted,
+        "--line": custom.line,
+        "--accent": custom.accent,
+        "--soft": custom.background,
+        "--radius": `${custom.radius}px`,
+        fontFamily:
+          custom.font === "serif"
+            ? "Georgia,serif"
+            : custom.font === "mono"
+              ? "ui-monospace,monospace"
+              : "system-ui,sans-serif",
+      } as CSSProperties)
+    : undefined;
   return (
-    <main className={theme}>
+    <main
+      className={`${theme === "custom" ? board.theme?.base || "paper" : theme} ${custom?.density === "compact" ? "compact" : ""} ${custom?.reduceMotion ? "reduce-motion" : ""}`}
+      style={customStyle}
+    >
       <header>
         <div>
           <span className="eyebrow">SAND TABLE / SHARED UNDERSTANDING</span>
@@ -249,6 +264,9 @@ function Workbench() {
           >
             {theme === "paper" ? "切换黑白" : "切换纸张"}
           </button>
+          {board.theme && theme !== "custom" && (
+            <button onClick={() => setTheme("custom")}>使用自定义外观</button>
+          )}
           <button
             disabled={busy}
             onClick={() => void action("sand_refresh_board")}
@@ -278,9 +296,9 @@ function Workbench() {
           <strong>{board.activities.length}</strong> 活动报告
         </div>
         <div>
-          <strong>{board.selection.length}</strong> 已选对象
+          <strong>{view?.selection.length || 0}</strong> 已选组件
         </div>
-        <span>只读源码 · 本次整理不写入文件</span>
+        <span>白板确认改动 · Agent 使用宿主工具写入</span>
       </section>
       <section className="workspaces">
         <button
@@ -311,7 +329,10 @@ function Workbench() {
           ].map(([id, title]) => (
             <button
               className={mode === id ? "active" : ""}
-              onClick={() => setMode(id)}
+              onClick={() => {
+                setMode(id);
+                setTab(id === "arrange" ? "components" : "inspect");
+              }}
               key={id}
             >
               {title}
@@ -343,440 +364,300 @@ function Workbench() {
         </div>
       )}
       <div className="layout">
-        <section
-          ref={canvasRef}
-          className="canvas"
-          aria-label="项目白板"
-          onPointerDown={(e) => {
-            if (e.target === e.currentTarget) {
-              drag.current = {
-                x: e.clientX,
-                y: e.clientY,
-                base: { ...pan, pinned: false },
-                moving: false,
-              };
-              e.currentTarget.setPointerCapture(e.pointerId);
-            }
+        <SpaceCanvas
+          board={board}
+          viewId={viewId}
+          mode={mode}
+          query={query}
+          kind={kind}
+          scope={scope}
+          arrows={arrows}
+          busy={busy}
+          operate={operate}
+          call={call}
+          clearFilters={clearFilters}
+          onOpenLink={(url) => {
+            const safe = safeUrl(url);
+            if (safe)
+              void app
+                ?.openLink({ url: safe })
+                .catch(() => setError(`宿主无法打开链接，请复制：${safe}`));
           }}
-          onPointerMove={(e) => {
-            const d = drag.current;
-            if (!d) return;
-            const dx = e.clientX - d.x,
-              dy = e.clientY - d.y;
-            if (Math.abs(dx) + Math.abs(dy) > 3) d.moving = true;
-            if (d.id)
-              setDraft({
-                [d.id]: {
-                  ...d.base,
-                  x: d.base.x + dx / zoom,
-                  y: d.base.y + dy / zoom,
-                },
-              });
-            else setPan({ x: d.base.x + dx, y: d.base.y + dy });
-          }}
-          onPointerUp={() => {
-            const d = drag.current;
-            drag.current = undefined;
-            if (d?.id && d.moving && draft[d.id])
-              void edit({ placements: { [d.id]: draft[d.id] } }).then(() =>
-                setDraft({}),
-              );
-            else setDraft({});
-          }}
-        >
-          <div className="canvas-hint">
-            {focusedGuide
-              ? "功能路径定位 · 其他对象淡化"
-              : mode === "arrange"
-                ? "拖动卡片 · 双击选择 · 固定位置"
-                : "点击查看 · Shift 多选 · 拖动空白平移"}
-          </div>
-          <div
-            className="world"
-            style={{
-              transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})`,
-            }}
-          >
-            {board.groups.map((g) => {
-              const pts = g.objectIds
-                .map((id) => positions[id])
-                .filter(Boolean);
-              if (!pts.length) return null;
-              const x = Math.min(...pts.map((p) => p.x)) - 12,
-                y = Math.min(...pts.map((p) => p.y)) - 30;
-              return (
-                <div
-                  key={g.id}
-                  className="group"
-                  style={{
-                    left: x,
-                    top: y,
-                    width: Math.max(...pts.map((p) => p.x)) + 264 - x,
-                    height: Math.max(...pts.map((p) => p.y)) + 126 - y,
-                  }}
-                >
-                  <span>{g.title} · 阅读分组</span>
-                </div>
-              );
-            })}
-            {arrows && (
-              <svg className="edges">
-                <defs>
-                  <marker
-                    id="arrow"
-                    viewBox="0 0 10 10"
-                    refX="9"
-                    refY="5"
-                    markerWidth="6"
-                    markerHeight="6"
-                    orient="auto-start-reverse"
-                  >
-                    <path d="M0 0L10 5L0 10z" />
-                  </marker>
-                </defs>
-                {board.relations
-                  .filter(
-                    (r) =>
-                      positions[r.source] &&
-                      positions[r.target] &&
-                      (!focusedGuide ||
-                        (routeIds.has(r.source) && routeIds.has(r.target))),
-                  )
-                  .map((r, i) => {
-                    const a = positions[r.source],
-                      b = positions[r.target];
-                    const dx = b.x - a.x,
-                      dy = b.y - a.y;
-                    const ratio =
-                      1 / Math.max(Math.abs(dx) / 132, Math.abs(dy) / 68, 1);
-                    const sx = a.x + 126 + dx * ratio,
-                      sy = a.y + 55 + dy * ratio;
-                    const tx = b.x + 126 - dx * ratio,
-                      ty = b.y + 55 - dy * ratio;
-                    return (
-                      <g key={i}>
-                        <path
-                          d={`M${sx} ${sy} L${tx} ${ty}`}
-                          markerEnd="url(#arrow)"
-                        />
-                        <text
-                          x={(a.x + b.x) / 2 + 126}
-                          y={(a.y + b.y) / 2 + 45}
-                        >
-                          {relationLabels[r.kind]}
-                        </text>
-                      </g>
-                    );
-                  })}
-              </svg>
-            )}
-            {visible.map((o) => {
-              const p = positions[o.id],
-                activity = board.activities.find((a) =>
-                  a.objectIds.includes(o.id),
-                );
-              return (
-                <button
-                  key={o.id}
-                  data-object-id={o.id}
-                  className={`card ${board.selection.includes(o.id) ? "selected" : ""} ${focusedGuide && !routeIds.has(o.id) ? "dimmed" : ""}`}
-                  style={{ left: p.x, top: p.y }}
-                  title={`${o.title}\n${o.source?.path}\n${workLabel(o.workspaceId)}`}
-                  onClick={(e) => {
-                    if (mode !== "arrange") choose(o.id, e.shiftKey);
-                  }}
-                  onDoubleClick={() => {
-                    if (mode === "arrange") choose(o.id);
-                  }}
-                  onPointerDown={(e) => {
-                    if (mode === "arrange" && !p.pinned) {
-                      e.stopPropagation();
-                      drag.current = {
-                        id: o.id,
-                        x: e.clientX,
-                        y: e.clientY,
-                        base: p,
-                        moving: false,
-                      };
-                      e.currentTarget.setPointerCapture(e.pointerId);
-                    }
-                  }}
-                >
-                  <span className="card-type">
-                    {o.kind === "symbol" ? "代码入口" : "源码文件"} ·{" "}
-                    {workLabel(o.workspaceId)} {p.pinned ? "· 已固定" : ""}
-                  </span>
-                  {focusedGuide && routeIds.has(o.id) && (
-                    <span className="step-badge">
-                      步骤{" "}
-                      {focusedGuide.steps
-                        .flatMap((s, i) =>
-                          s.objectIds.includes(o.id) ? [i + 1] : [],
-                        )
-                        .join("、")}
-                    </span>
-                  )}
-                  <strong>{o.title}</strong>
-                  <span className="path">
-                    {o.source?.path}:{o.source?.startLine}
-                  </span>
-                  {activity && (
-                    <span
-                      className={`activity ${activity.stale ? "stale" : activity.state}`}
-                    >
-                      ● {activity.stale ? "最后已知" : activity.state} ·{" "}
-                      {activity.action}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-          {!visible.length && (
-            <p className="empty">没有匹配对象。尝试切换到文件或清除筛选。</p>
-          )}
-          <div className="zoom">
-            <button
-              aria-label="缩小"
-              onClick={() => setZoom(Math.max(0.3, zoom - 0.1))}
-            >
-              −
-            </button>
-            <span>{Math.round(zoom * 100)}%</span>
-            <button
-              aria-label="放大"
-              onClick={() => setZoom(Math.min(2, zoom + 0.1))}
-            >
-              +
-            </button>
-            <button
-              onClick={() => {
-                setZoom(1);
-                setPan({ x: 24, y: 24 });
-              }}
-            >
-              复位
-            </button>
-          </div>
-        </section>
+        />
         <aside>
-          <GuidePanel
-            board={board}
-            busy={busy}
-            onFocus={(focus) => void focusGuide(focus)}
-            onDocument={(object) => void openDocument(object)}
-          />
-          <span className="eyebrow">
-            {mode === "ai" ? "SHARED CONTEXT" : "INSPECT"}
-          </span>
-          <h2>
-            {mode === "ai"
-              ? "AI 看到了什么"
-              : selected?.title || "从一个入口开始"}
-          </h2>
-          {mode === "ai" ? (
-            <>
-              <p>
-                已选 {board.selection.length} 个对象。请在宿主对话中提问，Agent
-                调用 sand_read_context 后读取此处的选区、分组和备注。
-              </p>
-              <p className="muted">
-                选区表示关注范围，不代表写入授权。这里不展示宿主全部上下文。
-              </p>
-              <p>
-                最近读取：
-                {board.lastContextRead
-                  ? new Date(board.lastContextRead.at).toLocaleTimeString() +
-                    " · 修订 " +
-                    board.lastContextRead.revision
-                  : "尚未读取"}
-              </p>
-              <ul>
-                {board.selection.map((id) => (
-                  <li key={id}>
-                    {board.objects.find((o) => o.id === id)?.title}
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : selected ? (
-            <>
-              <p>
-                {workLabel(selected.workspaceId)} / {selected.source?.path}
-              </p>
+          <div className="side-tabs" role="tablist" aria-label="工作面板">
+            {[
+              ["inspect", "理解"],
+              ["changes", "改动"],
+              ["components", "组件"],
+              ["theme", "外观"],
+            ].map(([id, title]) => (
               <button
-                disabled={!selected.source || busy}
-                onClick={() => void readSource(selected)}
+                key={id}
+                role="tab"
+                aria-selected={tab === id}
+                onClick={() => setTab(id)}
               >
-                查看源码依据
+                {title}
               </button>
-              {source?.objectId === selected.id &&
-                source.hash === selected.source?.hash && (
-                  <section className="source-reader">
-                    <small>
-                      源码 {source.startLine}–{source.endLine} 行
-                    </small>
-                    <pre className="source">{source.text}</pre>
-                    {source.nextLine && (
-                      <button
-                        disabled={busy}
-                        onClick={() =>
-                          void readSource(selected, source.nextLine!)
-                        }
-                      >
-                        继续读取下一段
-                      </button>
-                    )}
-                    {source.startLine !== selected.source?.startLine && (
-                      <button
-                        disabled={busy}
-                        onClick={() => void readSource(selected)}
-                      >
-                        回到开头
-                      </button>
-                    )}
-                  </section>
-                )}
-              <label>
-                给 AI 的备注
-                <textarea
-                  value={note}
-                  maxLength={2000}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="我想了解这一部分如何配合…"
-                />
-              </label>
-              <button
-                disabled={busy}
-                onClick={() =>
-                  void edit({ note: { objectId: selected.id, text: note } })
-                }
-              >
-                保存备注
-              </button>
-              <button
-                onClick={() => {
-                  const p = positions[selected.id] ||
-                    board.placements[selected.id] || {
-                      x: 0,
-                      y: 0,
-                      pinned: false,
-                    };
-                  void edit({
-                    placements: { [selected.id]: { ...p, pinned: !p.pinned } },
-                  });
-                }}
-              >
-                {board.placements[selected.id]?.pinned
-                  ? "取消固定"
-                  : "固定位置"}
-              </button>
-              <h3>关联对象</h3>
-              {board.relations
-                .filter(
-                  (r) => r.source === selected.id || r.target === selected.id,
-                )
-                .map((r, i) => {
-                  const target = r.source === selected.id ? r.target : r.source,
-                    o = board.objects.find((o) => o.id === target);
-                  return (
-                    <button
-                      className="relation"
-                      key={i}
-                      onClick={() => choose(target)}
-                    >
-                      {relationLabels[r.kind]} → {o?.title}
-                    </button>
-                  );
-                })}
-              <small>“可能调用”来自语法匹配，不保证运行时实际发生。</small>
-            </>
+            ))}
+          </div>
+          {tab === "changes" ? (
+            <ChangePanel
+              board={board}
+              viewId={viewId}
+              busy={busy}
+              action={action}
+            />
+          ) : tab === "components" ? (
+            <ComponentPanel
+              board={board}
+              viewId={viewId}
+              busy={busy}
+              operate={operate}
+              action={action}
+              selectNew={clearFilters}
+            />
+          ) : tab === "theme" ? (
+            <ThemePanel
+              board={board}
+              operate={operate}
+              onUseCustom={() => setTheme("custom")}
+            />
           ) : (
-            <p>
-              点击卡片查看真实源码，按需打开关系箭头。按住 Shift
-              选择多个对象，再向你的 AI 提问。
-            </p>
-          )}
-          {mode === "arrange" && (
-            <section>
-              <h3>阅读分组</h3>
-              <input
-                aria-label="分组名称"
-                placeholder="这组对象表达什么？"
-                value={groupTitle}
-                onChange={(e) => setGroupTitle(e.target.value)}
+            <>
+              <GuidePanel
+                board={board}
+                busy={busy}
+                onFocus={(focus) => void focusGuide(focus)}
+                onDocument={(object) => void openDocument(object)}
               />
-              <button
-                disabled={board.selection.length < 2 || !groupTitle.trim()}
-                onClick={async () => {
-                  if (
-                    await edit({
-                      group: { title: groupTitle, objectIds: board.selection },
-                    })
-                  )
-                    setGroupTitle("");
-                }}
-              >
-                将选区分组
-              </button>
-              {board.groups.map((g) => (
-                <p key={g.id}>
-                  {g.title}{" "}
-                  <button onClick={() => void edit({ removeGroup: g.id })}>
-                    解散
-                  </button>
-                </p>
-              ))}
-            </section>
-          )}
-          <section>
-            <h3>Agent 在哪里</h3>
-            {board.activities.length ? (
-              board.activities.map((a) => (
-                <div className="report" key={a.agentId}>
-                  <b>{a.agentId}</b>
-                  <p>{a.task}</p>
+              <span className="eyebrow">
+                {mode === "ai" ? "SHARED CONTEXT" : "INSPECT"}
+              </span>
+              <h2>
+                {mode === "ai"
+                  ? "AI 看到了什么"
+                  : selected?.title || "从一个入口开始"}
+              </h2>
+              {mode === "ai" ? (
+                <>
                   <p>
-                    {workLabel(a.workspaceId)} ·{" "}
-                    {a.stale ? "最后已知 / 已过期" : a.state}
+                    已选 {board.selection.length}{" "}
+                    个对象。请在宿主对话中提问，Agent 调用 sand_read_context
+                    后读取此处的选区、分组和备注。
                   </p>
-                  <small>
-                    {a.action} · {new Date(a.reportedAt).toLocaleTimeString()}
-                    <br />
-                    来源：Agent 自报
-                  </small>
-                </div>
-              ))
-            ) : (
-              <p className="muted">尚无活动报告。没有报告不代表 Agent 空闲。</p>
-            )}
-          </section>
-          <section>
-            <h3>AI 解读</h3>
-            {board.explanations
-              .filter(
-                (e) =>
-                  !selected ||
-                  e.evidence.some(
-                    (ref) =>
-                      ref.path === selected.source?.path &&
-                      ref.workspaceId === selected.workspaceId,
-                  ),
-              )
-              .map((e) => (
-                <div className="report" key={e.id}>
-                  <small>
-                    {e.stale ? "依据已过期" : "Agent 推断 · 非已证实结论"}
-                  </small>
-                  <p>{e.text}</p>
-                  <small>
-                    {e.evidence
-                      .map((r) => `${r.path}:${r.startLine}`)
-                      .join(" · ")}
-                  </small>
-                </div>
-              ))}
-          </section>
+                  <p className="muted">
+                    选区表示关注范围，不代表写入授权。这里不展示宿主全部上下文。
+                  </p>
+                  <p>
+                    最近读取：
+                    {board.lastContextRead
+                      ? new Date(
+                          board.lastContextRead.at,
+                        ).toLocaleTimeString() +
+                        " · 修订 " +
+                        board.lastContextRead.revision
+                      : "尚未读取"}
+                  </p>
+                  <ul>
+                    {board.selection.map((id) => (
+                      <li key={id}>
+                        {board.objects.find((o) => o.id === id)?.title}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : selected ? (
+                <>
+                  <p>
+                    {workLabel(selected.workspaceId)} / {selected.source?.path}
+                  </p>
+                  <button
+                    disabled={!selected.source || busy}
+                    onClick={() => void readSource(selected)}
+                  >
+                    查看源码依据
+                  </button>
+                  {source?.objectId === selected.id &&
+                    source.hash === selected.source?.hash && (
+                      <section className="source-reader">
+                        <small>
+                          源码 {source.startLine}–{source.endLine} 行
+                        </small>
+                        <pre className="source">{source.text}</pre>
+                        {source.nextLine && (
+                          <button
+                            disabled={busy}
+                            onClick={() =>
+                              void readSource(selected, source.nextLine!)
+                            }
+                          >
+                            继续读取下一段
+                          </button>
+                        )}
+                        {source.startLine !== selected.source?.startLine && (
+                          <button
+                            disabled={busy}
+                            onClick={() => void readSource(selected)}
+                          >
+                            回到开头
+                          </button>
+                        )}
+                      </section>
+                    )}
+                  <label>
+                    给 AI 的备注
+                    <textarea
+                      value={note}
+                      maxLength={2000}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="我想了解这一部分如何配合…"
+                    />
+                  </label>
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      void edit({ note: { objectId: selected.id, text: note } })
+                    }
+                  >
+                    保存备注
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (selectedInstance)
+                        void operate({
+                          kind: "place",
+                          items: [
+                            {
+                              id: selectedInstance.id,
+                              rect: {
+                                ...selectedInstance.rect,
+                                pinned: !selectedInstance.rect.pinned,
+                              },
+                            },
+                          ],
+                        });
+                    }}
+                  >
+                    {selectedInstance?.rect.pinned ? "取消固定" : "固定位置"}
+                  </button>
+                  <h3>关联对象</h3>
+                  {board.relations
+                    .filter(
+                      (r) =>
+                        r.source === selected.id || r.target === selected.id,
+                    )
+                    .map((r, i) => {
+                      const target =
+                          r.source === selected.id ? r.target : r.source,
+                        o = board.objects.find((o) => o.id === target);
+                      return (
+                        <button
+                          className="relation"
+                          key={i}
+                          onClick={() => choose(target)}
+                        >
+                          {relationLabels[r.kind]} → {o?.title}
+                        </button>
+                      );
+                    })}
+                  <small>“可能调用”来自语法匹配，不保证运行时实际发生。</small>
+                </>
+              ) : (
+                <p>
+                  点击卡片查看真实源码，按需打开关系箭头。按住 Shift
+                  选择多个对象，再向你的 AI 提问。
+                </p>
+              )}
+              {mode === "arrange" && (
+                <section>
+                  <h3>阅读分组</h3>
+                  <input
+                    aria-label="分组名称"
+                    placeholder="这组对象表达什么？"
+                    value={groupTitle}
+                    onChange={(e) => setGroupTitle(e.target.value)}
+                  />
+                  <button
+                    disabled={board.selection.length < 2 || !groupTitle.trim()}
+                    onClick={async () => {
+                      if (
+                        await edit({
+                          group: {
+                            title: groupTitle,
+                            objectIds: board.selection,
+                          },
+                        })
+                      )
+                        setGroupTitle("");
+                    }}
+                  >
+                    将选区分组
+                  </button>
+                  {board.groups.map((g) => (
+                    <p key={g.id}>
+                      {g.title}{" "}
+                      <button onClick={() => void edit({ removeGroup: g.id })}>
+                        解散
+                      </button>
+                    </p>
+                  ))}
+                </section>
+              )}
+              <section>
+                <h3>Agent 在哪里</h3>
+                {board.activities.length ? (
+                  board.activities.map((a) => (
+                    <div className="report" key={a.agentId}>
+                      <b>{a.agentId}</b>
+                      <p>{a.task}</p>
+                      <p>
+                        {workLabel(a.workspaceId)} ·{" "}
+                        {a.stale ? "最后已知 / 已过期" : a.state}
+                      </p>
+                      <small>
+                        {a.action} ·{" "}
+                        {new Date(a.reportedAt).toLocaleTimeString()}
+                        <br />
+                        来源：Agent 自报
+                      </small>
+                    </div>
+                  ))
+                ) : (
+                  <p className="muted">
+                    尚无活动报告。没有报告不代表 Agent 空闲。
+                  </p>
+                )}
+              </section>
+              <section>
+                <h3>AI 解读</h3>
+                {board.explanations
+                  .filter(
+                    (e) =>
+                      !selected ||
+                      e.evidence.some(
+                        (ref) =>
+                          ref.path === selected.source?.path &&
+                          ref.workspaceId === selected.workspaceId,
+                      ),
+                  )
+                  .map((e) => (
+                    <div className="report" key={e.id}>
+                      <small>
+                        {e.stale ? "依据已过期" : "Agent 推断 · 非已证实结论"}
+                      </small>
+                      <p>{e.text}</p>
+                      <small>
+                        {e.evidence
+                          .map((r) => `${r.path}:${r.startLine}`)
+                          .join(" · ")}
+                      </small>
+                    </div>
+                  ))}
+              </section>
+            </>
+          )}
         </aside>
       </div>
       <footer>

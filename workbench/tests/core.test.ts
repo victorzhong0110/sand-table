@@ -158,3 +158,17 @@ test("guide focus shares intent without changing layout; wrong evidence and stal
     /matching source/,
   );
 });
+
+test("context reports changes since the previous read without retaining history", () => {
+  const s = new BoardStore();
+  let b = s.open(p, "intent delta");
+  b = s.edit(b.id, b.revision, { selection: ["a"] });
+  assert.equal(s.context(b.id).intentDiff.firstRead, true);
+  assert.equal(s.context(b.id).intentDiff.changedCount, 0);
+  b = s.edit(b.id, b.revision, { note: { objectId: "a", text: "Why?" } });
+  const delta = s.context(b.id).intentDiff;
+  assert.ok(delta.changed.includes("note:a"));
+  assert.equal(delta.firstRead, false);
+  s.end(b.id);
+  assert.equal(s.contextSnapshots.size, 0);
+});

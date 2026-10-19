@@ -65,7 +65,7 @@ const server = createServer(async (req, res) => {
     let body = "";
     for await (const chunk of req) {
       body += chunk;
-      if (body.length > 100000) {
+      if (body.length > 4_000_000) {
         res.writeHead(413).end();
         return;
       }
@@ -81,13 +81,11 @@ const server = createServer(async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify(result));
   } catch (e) {
-    res
-      .writeHead(400, { "Content-Type": "application/json" })
-      .end(
-        JSON.stringify({
-          error: e instanceof Error ? e.message : "Request failed",
-        }),
-      );
+    res.writeHead(400, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        error: e instanceof Error ? e.message : "Request failed",
+      }),
+    );
   }
 });
 server.listen(port, "127.0.0.1", () => console.log(`READY ${origin}`));

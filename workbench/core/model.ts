@@ -1,3 +1,12 @@
+import type {
+  Space,
+  ComponentInstance,
+  View,
+  SpaceLink,
+  Asset,
+  ThemeConfig,
+} from "./spaces.ts";
+import type { ChangeIntent, Proposal, ValidationReport } from "./changes.ts";
 export type Evidence = {
   workspaceId: string;
   path: string;
@@ -73,7 +82,12 @@ export type Guide = GuideDraft & {
   createdAt: number;
 };
 export type GuideFocus = { guideId: string; step: number };
-export type Group = { id: string; title: string; objectIds: string[] };
+export type Group = {
+  id: string;
+  title: string;
+  objectIds: string[];
+  instanceIds?: string[];
+};
 export type Board = Projection & {
   id: string;
   revision: number;
@@ -86,6 +100,16 @@ export type Board = Projection & {
   activities: Activity[];
   explanations: Explanation[];
   guides: Guide[];
+  spaces: Space[];
+  instances: ComponentInstance[];
+  views: Record<string, View>;
+  focusedViewId?: string;
+  spaceLinks: SpaceLink[];
+  assets: Asset[];
+  theme?: ThemeConfig | null;
+  intents: ChangeIntent[];
+  proposals: Proposal[];
+  validations: ValidationReport[];
   guideFocus?: GuideFocus;
   lastContextRead?: { at: number; revision: number; objectIds: string[] };
 };
