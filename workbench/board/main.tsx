@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
 import type { Board, Placement, Item, GuideFocus } from "../core/model.ts";
 import "./style.css";
+import { resultData } from "../core/results.ts";
 import { GuidePanel } from "./GuidePanel.tsx";
 const relationLabels = {
   contains: "包含",
@@ -11,7 +12,7 @@ const relationLabels = {
 };
 function unpack(r: any) {
   if (r.isError) throw Error(r.content?.[0]?.text || "Request failed");
-  return r.structuredContent?.data ?? JSON.parse(r.content[0].text);
+  return resultData(r) ?? JSON.parse(r.content[0].text);
 }
 function Workbench() {
   const [board, setBoard] = useState<Board>(),

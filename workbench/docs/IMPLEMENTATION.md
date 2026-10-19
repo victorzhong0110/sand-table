@@ -82,3 +82,10 @@
 外部验证：huggingface/huggingface_hub@`bb2ef7579c3d2dc2eb49b16ccf15a070fe5b7023`，只读扫描，不安装也不执行其代码。按 120 文件／2 MB 范围索引并报告遗漏，核对根 README 和 `snapshot_download` 实际实现的行范围／摘要。此仓库也不是封存 Bug 基准。
 
 为大型仓库优先读取根 README 与 src/lib/packages 源码；分析器变更使对象顺序可能改变，稳定身份仍由路径与符号名决定。首次功能理解、真实模型解释与初学者收益仍需独立验收。
+
+
+## 大图的模型上下文与干净安装验证
+
+整板工具结果的 text / structuredContent 只返回摘要；完整对象与关系置于 App 元数据 `_meta.data`。界面通过该元数据渲染，模型通过 `sand_find_objects` 按名字、路径、类型或已知对象 ID 查询，每页最多 30 个对象。选区工具返回当前关注范围，工作区覆盖列表返回遗漏数量，避免每次报告活动都把千节点地图重新送进模型上下文。
+
+另从远端分支全新克隆到空目录，未预装 node_modules、未保留 dist，实际执行根启动器，完成自动安装／构建，再用生成配置连接独立 MCP 客户端，核对真实 Hugging Face `snapshot_download` 源码并正常停机清理。此验证没有执行目标仓库或调用模型。

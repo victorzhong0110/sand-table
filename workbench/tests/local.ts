@@ -1,3 +1,4 @@
+import { resultData } from "../core/results.ts";
 import { mkdtempSync, existsSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -97,7 +98,7 @@ try {
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const result = await client!.callTool({ name, arguments: args });
     assert.ok(!result.isError, JSON.stringify(result));
-    return (result.structuredContent as any).data;
+    return resultData(result);
   };
   const listed = await call("sand_list_boards");
   assert.equal(listed.boards.length, 1);

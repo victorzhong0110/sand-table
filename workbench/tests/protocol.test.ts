@@ -1,3 +1,4 @@
+import { resultData } from "../core/results.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Client } from "@modelcontextprotocol/client";
@@ -26,12 +27,38 @@ test(
       const call = async (name: string, args: Record<string, unknown>) => {
         const r = await raw(name, args);
         assert.ok(!r.isError, JSON.stringify(r));
-        return (r.structuredContent as any).data;
+        return resultData(r);
       };
       const tools = await client.listTools();
       assert.ok(tools.tools.some((t) => t.name === "sand_read_context"));
-      const b = await call("sand_open_board", {}),
+      const opened = await raw("sand_open_board", {});
+      assert.ok(
+        !(opened.structuredContent as any).data.objects,
+        "Model result must be a compact summary",
+      );
+      const b = resultData(opened),
         boardId = b.id;
+      const found = await call("sand_find_objects", {
+        boardId,
+        query: "src/index.js",
+        kind: "symbol",
+        limit: 1,
+      });
+      assert.equal(found.objects.length, 1);
+      assert.ok(found.nextOffset !== null);
+      const next = await call("sand_find_objects", {
+        boardId,
+        query: "src/index.js",
+        kind: "symbol",
+        limit: 1,
+        offset: found.nextOffset,
+      });
+      assert.notEqual(next.objects[0].id, found.objects[0].id);
+      const exact = await call("sand_find_objects", {
+        boardId,
+        objectIds: [found.objects[0].id],
+      });
+      assert.equal(exact.total, 1);
       const o = b.objects.find(
         (o: any) => o.source?.path === "src/index.js" && o.title === "clsx",
       );

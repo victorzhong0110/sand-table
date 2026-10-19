@@ -10,6 +10,7 @@ import {
   RESOURCE_MIME_TYPE,
 } from "@modelcontextprotocol/ext-apps/server";
 import { z } from "zod";
+import { boardSummary } from "../core/results.ts";
 import { BoardStore } from "../core/store.ts";
 import { scan, sourceFor, verifyEvidence, type Binding } from "./repository.ts";
 const uri = "ui://sand-table/overview.html";
@@ -68,9 +69,22 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
         try {
           if (forward) return await forward.tool(name, args);
           const data = fn(args);
+          const isBoard = Boolean(
+            data &&
+            typeof data === "object" &&
+            "objects" in data &&
+            "revision" in data &&
+            "guides" in data &&
+            "placements" in data &&
+            "id" in data,
+          );
+          const visible = isBoard
+            ? boardSummary(data as ReturnType<typeof store.read>)
+            : data;
           return {
-            content: [{ type: "text", text: JSON.stringify(data) }],
-            structuredContent: { data },
+            content: [{ type: "text", text: JSON.stringify(visible) }],
+            structuredContent: { data: visible },
+            ...(isBoard ? { _meta: { data } } : {}),
           };
         } catch (e) {
           return {
@@ -122,6 +136,40 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
     "Rescan actual tracked working-tree contents. Changes invalidate evidence.",
     board,
     (a) => store.refresh(a.boardId, scan(bindings)),
+  );
+  tool(
+    "sand_find_objects",
+    "Search a bounded page of indexed objects and source references without loading the entire map. Use query for names/paths or objectIds for known relation endpoints. Includes current revision for guide publishing.",
+    {
+      ...board,
+      query: z.string().max(300).default(""),
+      objectIds: z.array(id).max(30).optional(),
+      kind: z.enum(["workspace", "file", "symbol"]).optional(),
+      workspaceId: id.optional(),
+      offset: z.number().int().nonnegative().default(0),
+      limit: z.number().int().min(1).max(30).default(20),
+    },
+    (a) => {
+      const b = store.get(a.boardId);
+      if (a.workspaceId && !b.workspaces.some((w) => w.id === a.workspaceId))
+        throw Error("Unknown workspace.");
+      const q = a.query.toLowerCase();
+      const matches = b.objects.filter(
+        (o) =>
+          (!a.objectIds || a.objectIds.includes(o.id)) &&
+          (!a.kind || o.kind === a.kind) &&
+          (!a.workspaceId || o.workspaceId === a.workspaceId) &&
+          `${o.title} ${o.source?.path || ""}`.toLowerCase().includes(q),
+      );
+      return {
+        boardId: b.id,
+        revision: b.revision,
+        total: matches.length,
+        objects: matches.slice(a.offset, a.offset + a.limit),
+        nextOffset:
+          a.offset + a.limit < matches.length ? a.offset + a.limit : null,
+      };
+    },
   );
   tool(
     "sand_read_context",

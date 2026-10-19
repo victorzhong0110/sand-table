@@ -1,3 +1,4 @@
+import { resultData } from "../core/results.ts";
 import {
   AppBridge,
   PostMessageTransport,
@@ -52,7 +53,7 @@ function showSetup(show: boolean) {
   document.querySelector("iframe")!.hidden = show;
 }
 function makePrompt(id: string, names: string[] = []) {
-  return `使用 Sand Table 的 sand_open_board(boardId="${id}") 连接我浏览器里已有的白板，不要另建一块。然后用 sand_read_context 读取最新选区和备注。${names.length ? `当前选中的对象：${names.join("、")}。` : "如果还没有选区，先读项目说明，向我说明项目用途。"}请用我能理解的方式解释这些部分如何配合，读取真实源码，说明输入、输出和仍不确定的地方，并用 sand_publish_guide 把带引用的功能讲解放到这张板子。实际工作时用 sand_report_activity 报告正确的 workspaceId 与对象。不要因为我整理了白板就修改代码；改代码前先讨论具体改法。`;
+  return `这次使用浏览器中已有的 Sand Table boardId="${id}"，不要另建白板。先用 sand_read_context 读取最新选区和备注，额外查找用 sand_find_objects 分页搜索。${names.length ? `当前选中的对象：${names.join("、")}。` : "如果没有选区，用 sand_find_objects 查找 README 文件并读取项目说明，向我说明用途。"}请用我能理解的方式解释这些部分如何配合，读取真实源码，说明输入、输出和仍不确定的地方，并用 sand_publish_guide 把带引用的功能讲解放到这张板子。实际工作时用 sand_report_activity 报告正确的 workspaceId 与对象。不要因为我整理了白板就修改代码；改代码前先讨论具体改法。`;
 }
 function renderStatus(data: any) {
   const entries = data.connections || [];
@@ -66,7 +67,7 @@ function renderStatus(data: any) {
 async function mount() {
   element("error").hidden = true;
   const boot = await request("/bootstrap");
-  boardId = boot.boardResult.structuredContent.data.id;
+  boardId = resultData(boot.boardResult).id;
   window.__sandBoardId = boardId;
   for (const key of ["codex", "json", "toml"])
     element<HTMLTextAreaElement>(key).value = boot.config[key];
@@ -133,7 +134,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>(
 element("ask").onclick = async () => {
   try {
     const r = await rpc("sand_read_board");
-    const b = r.structuredContent.data;
+    const b = resultData(r);
     element<HTMLTextAreaElement>("prompt").value = makePrompt(
       boardId,
       b.objects

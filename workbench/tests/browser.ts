@@ -1,3 +1,4 @@
+import { resultData } from "../core/results.ts";
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import assert from "node:assert/strict";
@@ -91,7 +92,7 @@ try {
       { name, args },
     );
   }
-  let state = (await rpc("sand_read_board")).structuredContent.data;
+  let state = resultData(await rpc("sand_read_board"));
   const selected = state.objects.find((o: any) => o.id === state.selection[0]);
   await rpc("sand_report_activity", {
     agentId: "Protocol test client",
@@ -125,7 +126,7 @@ try {
   await card.click();
   await frame.getByRole("button", { name: "固定位置", exact: true }).click();
   await frame.getByRole("button", { name: "取消固定", exact: true }).waitFor();
-  state = (await rpc("sand_read_board")).structuredContent.data;
+  state = resultData(await rpc("sand_read_board"));
   assert.equal(state.groups.length, 1);
   assert.equal(state.placements[selected.id].pinned, true);
   assert.ok(state.placements[selected.id].y > 100);
@@ -141,7 +142,7 @@ try {
   await page.screenshot({ path: "artifacts/overview-mono.png" });
   await frame.getByRole("button", { name: "AI 上下文" }).click();
   await frame.getByRole("heading", { name: "AI 看到了什么" }).waitFor();
-  state = (await rpc("sand_read_board")).structuredContent.data;
+  state = resultData(await rpc("sand_read_board"));
   const published = await rpc("sand_publish_guide", {
     revision: state.revision,
     ...fixtureGuide(state),
@@ -157,7 +158,7 @@ try {
     await frame.getByRole("textbox", { name: "搜索对象" }).inputValue(),
     "",
   );
-  const focused = (await rpc("sand_read_context")).structuredContent.data;
+  const focused = resultData(await rpc("sand_read_context"));
   assert.equal(focused.guideFocus.step, 1);
   assert.equal(focused.objects[0].title, "toVal");
   const targetBox = await frame.locator(".card.selected").boundingBox();

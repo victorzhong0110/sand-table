@@ -23,7 +23,10 @@ export class BoardStore {
   get(id: string) {
     this.sweep();
     const b = this.boards.get(id);
-    if (!b) throw Error("Board expired or ended; open a new board.");
+    if (!b)
+      throw Error(
+        "Board expired or ended; use sand_list_boards to find the current shared board, or open a new one if none exists.",
+      );
     b.expiresAt = this.now() + this.ttl;
     return b;
   }
@@ -158,7 +161,17 @@ export class BoardStore {
       revision: b.revision,
       selection: b.selection,
       objects: b.objects.filter((o) => b.selection.includes(o.id)),
-      workspaces: b.workspaces,
+      workspaces: b.workspaces.map(
+        ({ id, label, head, branch, snapshot, files, omitted }) => ({
+          id,
+          label,
+          head,
+          branch,
+          snapshot,
+          files,
+          omittedCount: omitted.length,
+        }),
+      ),
       relations: b.relations.filter(
         (r) => b.selection.includes(r.source) || b.selection.includes(r.target),
       ),

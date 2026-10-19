@@ -1,3 +1,4 @@
+import { resultData } from "../core/results.ts";
 import {
   AppBridge,
   PostMessageTransport,
@@ -26,7 +27,7 @@ async function main() {
     name: "sand_open_board",
     arguments: { title: "代码如何协作" },
   });
-  window.__boardId = result.structuredContent.data.id;
+  window.__boardId = resultData(result).id;
   const resource = await rpc("resources/read", {
     uri: "ui://sand-table/overview.html",
   });
