@@ -314,6 +314,7 @@ function ComponentEditor({
                   base64: encoded,
                 });
                 if (asset) {
+                  await action("sand_read_board");
                   setData({ ...data, assetId: asset.id });
                   await operate({
                     kind: "update",

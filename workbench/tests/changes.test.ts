@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  rmSync,
+  chmodSync,
+  unlinkSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -148,6 +155,86 @@ test("dirty contents, revised intentions and replacement proposals invalidate ea
       allowedFiles: [ref],
     });
     assert.throws(() => f.changes.publish(b.id, draft), /Intent changed/);
+  } finally {
+    f.clean();
+  }
+});
+
+test("create/delete targets and file modes retain actual baselines", () => {
+  const f = fixture();
+  try {
+    const refs = ["new.ts", "a.ts"].map((path) => ({
+      workspaceId: f.workspaceId,
+      path,
+    }));
+    let b = f.changes.createIntent(f.b.id, 0, {
+      request: "Create new and delete old",
+      objectIds: [],
+      allowedFiles: refs,
+    });
+    const draft = {
+      intentId: b.intents[0].id,
+      intentVersion: 1,
+      agentId: "unit",
+      title: "Create/delete",
+      explanation: "Unit",
+      testPlan: "Unit",
+      files: [
+        { ...refs[0], beforeHash: null, after: "export const n=1;" },
+        {
+          ...refs[1],
+          beforeHash: currentFile(f.bindings, refs[1]).hash,
+          after: null,
+        },
+      ],
+    };
+    const p = f.changes.publish(b.id, draft);
+    f.changes.decide(b.id, p.id, 1, p.digest, "accepted");
+    writeFileSync(join(f.root, "new.ts"), draft.files[0].after!);
+    unlinkSync(join(f.root, "a.ts"));
+    assert.equal(
+      f.changes.observe(b.id, f.changes.proposal(b.id, p.id).p).state,
+      "matches",
+    );
+    b = f.store.read(b.id);
+    b = f.changes.createIntent(b.id, b.revision, {
+      request: "Different intent",
+      objectIds: [],
+      allowedFiles: [refs[0]],
+    });
+    assert.throws(
+      () =>
+        f.changes.publish(b.id, {
+          ...draft,
+          intentId: b.intents[1].id,
+          proposalId: p.id,
+          previousVersion: 1,
+          files: [
+            {
+              ...refs[0],
+              beforeHash: currentFile(f.bindings, refs[0]).hash,
+              after: "different",
+            },
+          ],
+        }),
+      /another intent/,
+    );
+    const q = f.changes.publish(b.id, {
+      ...draft,
+      intentId: b.intents[1].id,
+      files: [
+        {
+          ...refs[0],
+          beforeHash: currentFile(f.bindings, refs[0]).hash,
+          after: "export const n=2;",
+        },
+      ],
+    });
+    chmodSync(join(f.root, "new.ts"), 0o755);
+    assert.equal(
+      f.changes.observe(b.id, f.changes.proposal(b.id, q.id).p).state,
+      "diverged",
+    );
   } finally {
     f.clean();
   }

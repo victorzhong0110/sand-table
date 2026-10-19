@@ -111,6 +111,33 @@ export function SpaceCanvas({
       ),
     );
   }, [guideKey, view?.spaceId]);
+  useEffect(() => {
+    if (!view || !query.trim() || !filtered.length) return;
+    const timer = setTimeout(() => fit(filtered.slice(0, 30)), 160);
+    return () => clearTimeout(timer);
+  }, [query, kind, scope, view?.spaceId]);
+  useEffect(() => {
+    if (!view?.selection.length || !canvas.current) return;
+    const selected = b.instances.filter(
+      (c) => view.selection.includes(c.id) && c.spaceId === view.spaceId,
+    );
+    if (!selected.length) return;
+    const c = selected.at(-1)!,
+      r = c.rect,
+      w = canvas.current.clientWidth,
+      h = canvas.current.clientHeight;
+    if (
+      r.x * camera.zoom + camera.x < 0 ||
+      (r.x + r.width) * camera.zoom + camera.x > w ||
+      r.y * camera.zoom + camera.y < 0 ||
+      (r.y + r.height) * camera.zoom + camera.y > h
+    )
+      fit(selected);
+  }, [view?.selection.join("|")]);
+  const navigate = (spaceId: unknown) => {
+    clearFilters();
+    return operate({ kind: "navigate", spaceId });
+  };
   if (!view)
     return (
       <section className="canvas">
@@ -182,10 +209,7 @@ export function SpaceCanvas({
     <div className="space-shell">
       <nav className="breadcrumbs" aria-label="白板路径">
         {parents.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => void operate({ kind: "navigate", spaceId: s.id })}
-          >
+          <button key={s.id} onClick={() => void navigate(s.id)}>
             {s.title}
           </button>
         ))}
@@ -406,7 +430,7 @@ export function SpaceCanvas({
                 }}
                 onDoubleClick={() => {
                   if (c.type === "board" || c.type === "space-link")
-                    void operate({ kind: "navigate", spaceId: c.data.spaceId });
+                    void navigate(c.data.spaceId);
                   else if (mode === "arrange") void select(c.id);
                 }}
                 onKeyDown={(e) => {
@@ -519,9 +543,7 @@ export function SpaceCanvas({
                   instance={c}
                   board={b}
                   call={call}
-                  onNavigate={(spaceId) =>
-                    void operate({ kind: "navigate", spaceId })
-                  }
+                  onNavigate={(spaceId) => void navigate(spaceId)}
                   onOpenLink={onOpenLink}
                 />
                 {mode === "arrange" && (

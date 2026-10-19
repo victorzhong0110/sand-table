@@ -68,3 +68,17 @@ context.intentDiff 说明自上次读取后变化的组件、备注和明确意�
 - [实际客户端与真人路径](docs/HOST_ACCEPTANCE.md)
 - [封存、匿名评分与对话对照](acceptance/README.md)
 - [开发规划和范围](../docs/DEVELOPMENT_PLAN.zh-CN.md)
+
+## MCPB 安装包
+
+~~~bash
+npm run package:mcpb
+~~~
+
+生成 artifacts/sand-table.mcpb。构建包需要本项目开发依赖和 Python3 zipfile；包运行只需 Node.js 22.18+，不依赖源码目录或 node_modules。按 [MCPB 官方格式](https://github.com/modelcontextprotocol/mcpb/blob/main/MANIFEST.md) v0.3 打包，包含依赖许可。
+
+先启动本地工作台，再从页面通用 JSON 复制 --session-file 后的绝对路径，填入安装包的 Local connection file 设置。不要复制 token。MCPB 不另开白板、不包含 Agent，也不修改目标源码。不支持 MCPB 的客户端继续使用通用 JSON。
+
+完整测试会把安装包解压到新目录，以其 manifest 配置创建独立 SDK 客户端完成同板改动链路。此检查证明包可独立运行，不能替代用户实际客户端的安装和界面验收。
+
+npm run test:performance 使用固定 Hugging Face Hub 场景：1440×1000、120 个索引文件、1,153 实例、1,781 源码边、默认层级，无模型调用。预算为服务就绪 30 秒、首卡显示 15 秒、搜索可见 10 秒，首屏少于 100 实例；输出 artifacts/performance.json。帧间隔为交互后的样本，hostHeapBytes 只测测试进程 JS，不当作全系统内存。

@@ -49,3 +49,15 @@ jobs:
       - run: npm run test:full
         env:
           SAND_EXTERNAL_REPO: /tmp/sand-clsx
+
+      - run: npm run test:performance
+        env:
+          SAND_PYTHON_REPO: /tmp/sand-hf-hub
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sand-table-mcpb
+          path: |
+            workbench/artifacts/sand-table.mcpb
+            workbench/artifacts/performance.json
+            workbench/artifacts/confirmed-change.png
+            workbench/artifacts/nested-custom-workbench.png

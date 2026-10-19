@@ -22,6 +22,7 @@ function Workbench() {
   const [viewId] = useState(() => crypto.randomUUID());
   const [tab, setTab] = useState("inspect");
   const opening = useRef(false);
+  const operations = useRef<Promise<unknown>>(Promise.resolve());
   const [board, setBoard] = useState<Board>(),
     [error, setError] = useState(""),
     [ended, setEnded] = useState(false),
@@ -49,13 +50,22 @@ function Workbench() {
     error: connectionError,
     isConnected,
   } = useApp({
-    appInfo: { name: "Sand Table", version: "0.1.0" },
+    appInfo: { name: "Sand Table", version: "0.3.0" },
     capabilities: {},
     onAppCreated: (a) => {
       a.ontoolresult = (r) => {
         try {
           const data = unpack(r);
-          if (data.objects && data.spaces) setBoard(data);
+          if (
+            data.objects &&
+            data.spaces &&
+            (!boardRef.current ||
+              data.id !== boardRef.current.id ||
+              data.revision >= boardRef.current.revision)
+          ) {
+            boardRef.current = data;
+            setBoard(data);
+          }
         } catch (e) {
           setError(String(e));
         }
@@ -76,7 +86,16 @@ function Workbench() {
     setError("");
     try {
       const data = await call(name, args);
-      if (data.objects && data.spaces) setBoard(data);
+      if (
+        data.objects &&
+        data.spaces &&
+        (!boardRef.current ||
+          data.id !== boardRef.current.id ||
+          data.revision >= boardRef.current.revision)
+      ) {
+        boardRef.current = data;
+        setBoard(data);
+      }
       return data;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -96,13 +115,18 @@ function Workbench() {
       ...data,
     });
   }
-  const operate = (operation: any) =>
-    action("sand_edit_space", {
-      revision: boardRef.current?.revision,
-      viewId,
-      author: "human",
-      operation,
-    });
+  const operate = (operation: any) => {
+    const next = operations.current.then(() =>
+      action("sand_edit_space", {
+        revision: boardRef.current?.revision,
+        viewId,
+        author: "human",
+        operation,
+      }),
+    );
+    operations.current = next.catch(() => undefined);
+    return next;
+  };
   const clearFilters = () => {
     setQuery("");
     setKind("all");

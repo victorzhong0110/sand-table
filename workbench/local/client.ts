@@ -84,7 +84,7 @@ async function mount() {
   old.replaceWith(frame);
   bridge = new AppBridge(
     null,
-    { name: "Sand Table local workbench", version: "0.2.0" },
+    { name: "Sand Table local workbench", version: "0.3.0" },
     { serverTools: {}, openLinks: {} },
     {
       hostContext: {

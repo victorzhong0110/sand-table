@@ -182,6 +182,31 @@ export class Spaces {
         validSpace(String(data.spaceId));
       }
       const config = componentTypes.find((c) => c.type === type);
+      const width = config?.width || 280,
+        height = config?.height || 180;
+      let spawnX = -v.camera.x / v.camera.zoom + 30,
+        spawnY = -v.camera.y / v.camera.zoom + 40;
+      if (!op.rect) {
+        for (let slot = 0; slot < 2300; slot++) {
+          const x = -v.camera.x / v.camera.zoom + 30 + (slot % 3) * 380;
+          const y =
+            -v.camera.y / v.camera.zoom + 40 + Math.floor(slot / 3) * 270;
+          if (
+            !b.instances.some(
+              (c) =>
+                c.spaceId === v.spaceId &&
+                x < c.rect.x + c.rect.width + 16 &&
+                x + width + 16 > c.rect.x &&
+                y < c.rect.y + c.rect.height + 16 &&
+                y + height + 16 > c.rect.y,
+            )
+          ) {
+            spawnX = x;
+            spawnY = y;
+            break;
+          }
+        }
+      }
       b.instances.push({
         id: randomUUID(),
         spaceId: v.spaceId,
@@ -190,8 +215,8 @@ export class Spaces {
         title: op.title,
         data: structuredClone(data),
         rect: op.rect || {
-          x: -v.camera.x / v.camera.zoom + 30,
-          y: -v.camera.y / v.camera.zoom + 40,
+          x: spawnX,
+          y: spawnY,
           width: config?.width || 280,
           height: config?.height || 180,
           pinned: false,
@@ -475,18 +500,16 @@ export function registerSpaceTools(tool: RegisterTool, spaces: Spaces) {
         spaces: b.spaces,
         focusedViewId: b.focusedViewId,
         views: b.views,
-        instances: items
-          .slice(a.offset, a.offset + a.limit)
-          .map((i) => ({
-            ...i,
-            data:
-              JSON.stringify(i.data).length > 4000
-                ? {
-                    omitted: true,
-                    instruction: "Use sand_read_component for complete data.",
-                  }
-                : i.data,
-          })),
+        instances: items.slice(a.offset, a.offset + a.limit).map((i) => ({
+          ...i,
+          data:
+            JSON.stringify(i.data).length > 4000
+              ? {
+                  omitted: true,
+                  instruction: "Use sand_read_component for complete data.",
+                }
+              : i.data,
+        })),
         total: items.length,
         nextOffset:
           a.offset + a.limit < items.length ? a.offset + a.limit : null,

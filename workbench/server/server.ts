@@ -36,7 +36,7 @@ export type Forwarder = {
 export function createServer(bindings: Binding[], forward?: Forwarder) {
   const store = new BoardStore();
   const changes = new Changes(store, bindings);
-  const server = new McpServer({ name: "sand-table", version: "0.1.0" });
+  const server = new McpServer({ name: "sand-table", version: "0.3.0" });
   const timer = setInterval(() => store.sweep(), 60_000);
   timer.unref();
   function tool<T extends z.ZodRawShape>(

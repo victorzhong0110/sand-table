@@ -80,7 +80,40 @@ try {
     name: "Scripted host workflow acceptance",
     version: "1",
   });
-  await client.connect(new StdioClientTransport(config));
+  const unpacked = join(root, "standalone-bundle");
+  mkdirSync(unpacked);
+  execFileSync("python3", [
+    "-m",
+    "zipfile",
+    "-e",
+    "artifacts/sand-table.mcpb",
+    unpacked,
+  ]);
+  const manifest = JSON.parse(
+    readFileSync(join(unpacked, "manifest.json"), "utf8"),
+  );
+  assert.equal(manifest.manifest_version, "0.3");
+  assert.ok(
+    !readFileSync(join(unpacked, "manifest.json"), "utf8").includes(
+      connection.token,
+    ),
+  );
+  const bundleArgs = manifest.server.mcp_config.args.map((arg: string) =>
+    arg
+      .replace("$" + "{__dirname}", unpacked)
+      .replace("$" + "{user_config.connection_file}", sessionFile),
+  );
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: bundleArgs,
+      cwd: unpacked,
+    }),
+  );
+  assert.ok(
+    config.args.includes(sessionFile),
+    "Generated JSON and portable bundle point to the same connection file.",
+  );
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const r = await client!.callTool({ name, arguments: args });
     assert.ok(!r.isError, JSON.stringify(r));
@@ -112,7 +145,10 @@ try {
     intentId: intent.id,
     ...file,
   });
-  const after = before.replace("return str;", "return 'label:' + str;");
+  const after = before.replace(
+    "return str;\n}\n\nexport default",
+    "return 'label:' + str;\n}\n\nexport default",
+  );
   assert.notEqual(after, before);
   const proposal = await call("sand_publish_proposal", {
     boardId,
@@ -181,6 +217,7 @@ try {
     output,
   });
   await frame.getByRole("button", { name: "核对实际结果" }).click();
+  await frame.getByText("查看报告输出", { exact: true }).click();
   await frame
     .getByText("mixed-input assertion passed", { exact: false })
     .waitFor();
@@ -205,7 +242,10 @@ try {
     ) as any;
   const entry = b.instances.find((c: any) => c.id === view.selection[0]);
   await frame.locator('[data-instance-id="' + entry.id + '"]').dblclick();
-  await frame.getByRole("button", { name: "总览", exact: true }).waitFor();
+  await frame
+    .locator(".breadcrumbs")
+    .getByRole("button", { name: "研究比较白板", exact: true })
+    .waitFor();
   b = await readBoard();
   const chart = b.instances.find(
     (c: any) => c.spaceId === entry.data.spaceId && c.type === "chart",
@@ -246,11 +286,45 @@ try {
     },
   });
   assert.equal(unknown.instances.at(-1).data.preserved, "yes");
+  await frame
+    .locator('[data-instance-id="' + unknown.instances.at(-1).id + '"]')
+    .waitFor();
+  await frame
+    .getByRole("combobox", { name: "组件类型", exact: true })
+    .selectOption("resource");
+  await frame
+    .getByRole("textbox", { name: "组件名称", exact: true })
+    .fill("本次会话附件");
+  await frame.getByRole("button", { name: "添加组件", exact: true }).click();
+  await frame.locator('input[type="file"]').setInputFiles({
+    name: "one-pixel.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3h8AAAAASUVORK5CYII=",
+      "base64",
+    ),
+  });
+  await frame.locator(".component-card img").waitFor();
+  assert.equal(
+    await frame
+      .locator(".component-card img")
+      .evaluate((img) => (img as HTMLImageElement).naturalWidth),
+    1,
+  );
   await frame.getByRole("tab", { name: "外观", exact: true }).click();
   await frame.locator('input[type="color"]').first().fill("#e8f0ff");
   await frame
     .getByRole("button", { name: "应用自定义外观", exact: true })
     .click();
+  b = await readBoard();
+  assert.equal(b.theme.background, "#e8f0ff");
+  assert.equal(
+    await frame
+      .locator("main")
+      .evaluate((el) => getComputedStyle(el).getPropertyValue("--bg").trim()),
+    "#e8f0ff",
+  );
+  assert.equal(await frame.locator('[role="alert"]').count(), 0);
   await page.screenshot({
     path: "artifacts/nested-custom-workbench.png",
     fullPage: true,
