@@ -16,6 +16,7 @@
     "server",
     "board",
     "dev",
+    "local",
     "tests",
     "scripts",
     "vite.config.ts"

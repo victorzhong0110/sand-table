@@ -1,57 +1,67 @@
 # Sand Table
 
-人和 AI 共享的交互沙盘：从总览进入真实代码，圈定关注范围，并看到 Agent 在哪个工作区做什么。
+人和自己的 AI 共用的一张交互沙盘。用总览理解一个代码仓库，点击源码和功能路径追溯依据，用拖动、分组和备注表达关注，并看到 Agent 在哪个工作区做什么。
 
-**开发状态：** 新实现位于 [`workbench/`](workbench/README.md)，提供只读 MCP 服务器与 MCP App 的 P0/P1 开发切片。已验证本地协议链路，真实 AI 客户端和真人验收尚未完成。完整方向见 [v0.3 开发规划](docs/DEVELOPMENT_PLAN.zh-CN.md)。
+**当前版本：可本地运行的只读工作台。** AI 使用你已有的本机 MCP 客户端；项目不提供模型服务，也不需要新的 API Key。修改代码仍由你的 AI 客户端执行，目前没有内置补丁确认与应用流程。
 
-## 旧 Research OS 界面
+## 直接开始
 
-以下为保留的旧实现；与新的 MCP 工作台独立。
-
-沙盘。[LLM Research OS](https://github.com/victorzhong0110/llm-research-os) 的图形交互界面。源码取自上游 `web/`，对应 `main` 的 `c6b21b9`。
-
-浏览器里可以查看同一份已记录研究事实：项目、规范修订、执行图、Run、事件与日志、决策与授权、指标、制品、环境，以及研究流程和操作。界面不另存配置。执行图只展示已验证的规范或计划节点和依赖边，不能把布局写回语义身份。
-
-本地 API、事件库和 `researchos web serve` 仍在上游仓库。本仓库负责界面源码和构建产物。页面必须由那个本地服务打开：API 只接受启动它的 loopback 来源，Vite 开发服务器过不了这道检查。
-
-## 开发
-
-需要 Node.js 22。
+需要 **Node.js 22.18+** 和 **Git**。Python 符号索引还需系统 `python3`；缺少时仍可读文件，界面会说明符号未索引。先把你想理解的项目克隆到本机，然后执行：
 
 ```bash
+git clone https://github.com/victorzhong0110/sand-table.git
+cd sand-table
+npm start -- /absolute/path/to/your-repository
+```
+
+把最后一行的路径换成目标仓库目录。首次启动自动安装本项目的固定版本依赖并构建界面，然后打开浏览器；之后启动会复用构建。它不会安装或执行目标仓库的代码。
+
+1. 在白板中点“项目说明”或代码卡片，查看真实源码；Shift 可多选，编排模式可拖动、固定、分组。
+2. 点顶部 **“连接我的 AI”**，复制页面生成的 Codex CLI 命令，或通用 MCP JSON／Codex TOML，安装到你的本机客户端。
+3. 回到该客户端的新会话，粘贴页面的 **“复制当前选区提问”**。Agent 读取的正是浏览器里的板子、选区和备注；它提交的功能讲解和活动也会出现在这里。
+
+MCP 配置只需安装一次。保持启动终端运行；Ctrl+C 结束服务并清除白板。重新启动后，已有配置会连接新会话，不恢复旧整理。若浏览器没自动打开，使用终端打印的完整启动链接。
+
+浏览器中的普通 ChatGPT 对话不能直接使用本机 stdio 配置。需要在同一台电脑上的 MCP 客户端中完成第二步；当前聊天网页不会因为你在本机安装配置而自动获得连接。
+
+## 现在可以做什么
+
+- 同一总览包含最多四个仓库或 worktree；对象与 Agent 活动对应各自实际工作区。
+- 阅读 JS / TS / JSX / TSX / Python / Markdown，按需显示包含、导入和可能调用关系，明确报告未索引范围。
+- 让 AI 提供用途、输入输出、功能步骤、源码依据和未知项；点击步骤定位图上对象。
+- 源码变化时拒绝旧引用，刷新后标记失效讲解；未提交变化也会被识别。
+- 黑白与温暖纸张主题；浏览、编排和 AI 上下文模式。
+- 支持在兼容客户端内呈现 MCP App；本地浏览器也是同一 App 的呈现入口。
+
+功能讲解需要你的 AI 读取源码后提交；界面不会按文件名编造架构。活动来自 Agent 自报，连接状态不代表模型正在思考。当前语法索引不等于整个仓库已被理解。
+
+## 多工作区与启动选项
+
+```bash
+npm start -- --workspace frontend=/absolute/frontend --workspace backend=/absolute/backend
+# 不自动打开浏览器
+npm start -- /absolute/repository --no-open
+```
+
+仅监听 `127.0.0.1`，自动选择空闲端口。临时目录中的私有连接文件仅用于本机 MCP 接入；启动链接含会话凭据，打开后会从地址栏移除。不要分享完整链接。不会建立白板数据库或历史记录。
+
+详见 [使用与开发说明](workbench/README.md)、[接入与故障排查](workbench/docs/QUICKSTART.md)、[已验证范围](workbench/docs/IMPLEMENTATION.md)、[v0.3 开发规划](docs/DEVELOPMENT_PLAN.zh-CN.md)。
+
+## 开发与验证
+
+```bash
+cd workbench
 npm ci
-npm run typecheck
 npm run build
+npm test
 ```
 
-默认产物在 `dist/`。要让上游服务器使用这份界面，把产物写进它的静态目录后再启动：
+外部集成和浏览器验证使用固定版本的 `lukeed/clsx`，不执行或向它提交代码。设置 `SAND_EXTERNAL_REPO` 后运行 `npm test`、`npm run test:browser` 和 `npm run test:local`；浏览器需要 Playwright Chromium，详见工作台说明。
 
-```bash
-RESEARCHOS_STATIC_DIR=../llm-research-os/src/llm_research_os/web/static npm run build
-```
+Linux 环境的完整启动／共享会话链路已有自动验证。macOS 使用系统 `open` 打开浏览器，尚待真人实机确认。Windows 未验收。真实模型讲解质量、初学者理解、补丁流程和对话对照仍在后续计划中。
 
-在上游仓库中：
+## 旧界面与许可
 
-```bash
-uv run researchos web serve --root ./ws --port 8787
-```
+根目录原有的 Research OS 界面仍保留，使用方式见 [旧界面说明](docs/LEGACY_RESEARCH_OS.md)。它与 `workbench/` 的 MCP 实现独立。
 
-打开命令打印的一次性引导链接。链接片段里的密钥不会发给服务器；会话建立后地址栏里的片段会被清掉。
-
-## 浏览器冒烟
-
-冒烟测试启动上游仓库里的合成夹具服务器，打开的是该仓库静态目录里的已构建包。先按上一节把本仓库构建进那个目录，再跑：
-
-```bash
-RESEARCHOS_ROOT=../llm-research-os npm run test:browser
-```
-
-未设置 `RESEARCHOS_ROOT` 时，默认使用同级目录 `../llm-research-os`。
-
-## 类型
-
-`src/generated/local-api.ts` 由上游 `scripts/generate_web_types.py` 从 Python 契约生成。契约变更后在上游仓库重新生成，再把文件同步回来。不要手改。
-
-## 许可
-
-Apache-2.0。Copyright 2026 victorzhong0110。
+Apache-2.0。Copyright 2026 victorzhong0110。保留原始历史与来源声明。

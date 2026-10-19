@@ -22,8 +22,8 @@
 
 本次重建后运行：
 
-- `npm run build`：类型检查与单文件构建通过。
-- `SAND_EXTERNAL_REPO=… npm test`：5 项通过，0 跳过。覆盖修订冲突、固定位置、分组上下文、过期清理、工作区活动映射、真实 stdio、坏引用、会话结束、未提交变更与 worktree 身份；讲解的对象／引用映射、步骤共享上下文和过期拒绝。
+- `npm run build`：类型检查与单文件 App 与本地主界面脚本构建通过。
+- `SAND_EXTERNAL_REPO=… npm test`：8 项通过，0 跳过。覆盖修订冲突、固定位置、分组上下文、过期清理、工作区活动映射、真实 stdio、坏引用、会话结束、未提交变更与 worktree 身份；讲解的对象／引用映射、步骤共享上下文和过期拒绝。
 - `SAND_EXTERNAL_REPO=… CHROMIUM_PATH=… npm run test:browser`：真实 stdio → AppBridge → iframe → 选区与备注 → 测试客户端读取；分组、拖动、固定、活动报告、双主题、移动窄屏渲染、拒绝错误来源通过；新增 README 入口、从不匹配筛选跳转步骤、画布定位及讲解上下文验证。
 - 浏览器中的活动明确标为 Protocol test client；没有真实模型参与。
 
@@ -62,4 +62,23 @@
 
 新增 `sand_focus` 供不显示界面的宿主按用户请求选择对象／讲解步骤，再读取同一份上下文。工作约定是不默默覆盖人的选区；该约定不构成宿主强制授权。
 
-真实宿主的具体操作与证据记录模板见 [HOST_ACCEPTANCE.md](HOST_ACCEPTANCE.md)。本轮环境只能运行本地 stdio 客户端与浏览器，未连接用户已订阅 AI 客户端，因此真实宿主项继续标记为待验。
+真实宿主的具体操作与证据记录模板见 [HOST_ACCEPTANCE.md](HOST_ACCEPTANCE.md)。本轮环境能运行实际本地启动器、独立 stdio 接入进程与浏览器，未连接用户已订阅 AI 客户端，因此真实宿主项继续标记为待验。
+
+
+## 可直接启动的本地工作台
+
+新增根目录 `npm start -- /absolute/repository`。入口只依赖 Node 与 Git，检测固定依赖与构建，首次自动安装，启动后打开浏览器。新代码在 `local/`，原 `dev/` 仅保留开发探针。
+
+服务只启动一份只读 MCP 服务器，浏览器 AppBridge 和独立 MCP bridge 共享该实例；`sand_list_boards` 能发现现有白板，`sand_open_board(boardId)` 重新连接而不另建会话。配置入口、当前选区提问、MCP 进程数量与最近工具通信均在页面可见。它没有模型运行时，也不读取模型凭据。
+
+浏览器加载凭据来自启动链接片段，加载后移除并暂存在标签页 sessionStorage。公开 HTML 不含凭据；请求检查随机令牌与 Origin，服务仅绑定 127.0.0.1。原生 bridge 从 0700 临时目录中的 0600 描述文件读取连接信息；重启读取新令牌，退出删除描述。该文件不存白板内容。当前实现只承载本项目自有 App，不是第三方 App 通用宿主。
+
+`npm run test:local` 实际运行根启动器并采用页面生成的 JSON 创建另一个 stdio MCP 客户端，验证同板身份、界面选区／备注 → 独立客户端、客户端讲解 → 界面、刷新、未授权访问拒绝、公开 HTML 不泄露令牌、停机清理、令牌轮换与旧 bridge 重连。测试不调用模型。现有自动验收平台为 Linux；macOS/Windows 尚未真机验收。
+
+## Python 与第二个外部仓库
+
+新增系统 python3 AST 解析器，使用 `-I -S` 与固定脚本，源码通过 JSON 标准输入传入；不 import 或执行仓库模块。提取顶层同步／异步函数及类、同文件名称匹配的可能调用；不声称完成作用域、方法或跨文件调用分析。缺少 Python 或语法解析失败时保留文件阅读入口并显示缺口。重复名字取最后定义，避免把 overload 声明冒充真实实现。
+
+外部验证：huggingface/huggingface_hub@`bb2ef7579c3d2dc2eb49b16ccf15a070fe5b7023`，只读扫描，不安装也不执行其代码。按 120 文件／2 MB 范围索引并报告遗漏，核对根 README 和 `snapshot_download` 实际实现的行范围／摘要。此仓库也不是封存 Bug 基准。
+
+为大型仓库优先读取根 README 与 src/lib/packages 源码；分析器变更使对象顺序可能改变，稳定身份仍由路径与符号名决定。首次功能理解、真实模型解释与初学者收益仍需独立验收。

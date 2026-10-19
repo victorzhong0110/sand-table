@@ -786,7 +786,7 @@ function Workbench() {
               快照 {w.snapshot.slice(0, 10)}
             </summary>
             <p>
-              当前支持已跟踪的 JS / TS /
+              当前支持已跟踪的 JS / TS / Python /
               Markdown；不执行仓库代码。索引快照不代表整个工作区。
             </p>
             <pre>{w.omitted.join("\n")}</pre>

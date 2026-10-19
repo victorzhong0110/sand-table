@@ -1,10 +1,16 @@
-# Sand Table 工作台（开发切片）
+# Sand Table 工作台
 
 把真实代码、人的选区和 Agent 的活动放在一张总览中。白板可同时包含多个工作区；工作区只是总览的一部分。
 
 本目录实现 v0.3 的 P0/P1 部分能力：只读 MCP 服务器 + MCP App。它不启动自己的 AI，不写源码，不保存白板历史。已提供源码讲解容器；真实商业宿主接入、Agent 讲解质量、修改提案与真人验收尚未完成。
 
-## 启动本地协议演示
+## 直接使用
+
+在仓库根目录运行 `npm start -- /absolute/path/to/your-repository`。首次自动安装本项目依赖与构建，然后打开本地白板。点“连接我的 AI”，安装页面生成的 MCP 配置，再把当前选区提问粘贴到自己的客户端。浏览器和客户端共用同一份内存会话，不需要宿主先支持内嵌 App。
+
+这一路径使用 `local/bridge.ts`。`server/main.ts` 仍是供原生 MCP App 宿主直接启动的独立服务器；它不连接浏览器已有会话。不要把两个入口混用。完整步骤见 [QUICKSTART.md](docs/QUICKSTART.md)。
+
+## 开发用协议演示
 
 需要 Node.js 22.18+、Git，以及已经克隆的仓库。以下命令在 `workbench/` 中执行：
 
@@ -27,9 +33,9 @@ npm run dev -- --workspace project=/absolute/path/to/repository
 
 可以重复 `--workspace name=/absolute/git/root`，最多四个。不同 worktree 必须各自绑定，身份独立。只接受明确配置的 Git 根目录，工具不能动态增加读取根目录。
 
-## MCP 客户端配置
+## 原生 MCP App 独立模式配置
 
-先构建，然后生成包含本机绝对路径的通用 stdio 配置：
+日常和浏览器共用白板时，请使用页面生成的配置；本节会另外启动服务器。先构建，然后生成包含本机绝对路径的通用 stdio 配置：
 
 ```bash
 node --experimental-strip-types scripts/mcp-config.ts project=/absolute/path/to/repository
@@ -45,7 +51,7 @@ node --experimental-strip-types scripts/mcp-config.ts project=/absolute/path/to/
 
 | 部分 | 当前实现 |
 |---|---|
-| 源码 | Git 已跟踪的 JS/TS/JSX/TSX/MD；每工作区最多 120 文件、2 MB、单文件 200 KB |
+| 源码 | Git 已跟踪的 JS/TS/JSX/TSX/Python/MD；每工作区最多 120 文件、2 MB、单文件 200 KB |
 | 结构 | 文件、顶层函数／类／函数变量、包含、可解析的相对导入、同文件语法调用匹配 |
 | 证据 | 工作区 ID、路径、行范围、SHA-256；实际文件变动会拒绝旧引用 |
 | 人与 AI | 共享选区、备注、分组、布局；修订冲突检测；Agent 自报活动及解释 |
@@ -63,9 +69,13 @@ npm test
 # 实际集成夹具为 lukeed/clsx，固定版本见 docs/IMPLEMENTATION.md
 SAND_EXTERNAL_REPO=/absolute/path/to/clsx npm test
 SAND_EXTERNAL_REPO=/absolute/path/to/clsx npm run test:browser
+SAND_EXTERNAL_REPO=/absolute/path/to/clsx npm run test:local
+SAND_EXTERNAL_REPO=/absolute/path/to/clsx SAND_PYTHON_REPO=/absolute/path/to/huggingface_hub npm test
 ```
 
 浏览器测试使用 Playwright Chromium；先运行 `npx playwright install chromium`，或设置 `CHROMIUM_PATH` 指向已有 Chromium。无外部仓库时 stdio 集成测试明确跳过。测试不安装或执行 clsx 的代码，不向上游提交任何内容。截图输出在忽略的 `artifacts/`。
+
+Python 顶层函数／类使用系统 python3 的 AST 分析，不导入或执行目标项目。索引优先读取根 README 与源码，仍会如实报告大小、数量和解析限制。Python 方法、跨文件 Python 导入／调用解析尚未实现。
 
 实际宿主接入与验收流程见 [HOST_ACCEPTANCE.md](docs/HOST_ACCEPTANCE.md)。
 

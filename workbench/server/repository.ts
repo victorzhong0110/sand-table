@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { realpathSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+import { pythonSymbols } from "./python.ts";
 import type { Evidence, Projection, Item } from "../core/model.ts";
 export type Binding = { id: string; label: string; root: string };
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -66,8 +67,21 @@ export function scan(bindings: Binding[]): Projection {
       .sort();
     const eligible = tracked.filter(
       (f) =>
-        /\.(?:[cm]?[jt]sx?|md)$/.test(f) &&
+        /\.(?:[cm]?[jt]sx?|py|md)$/.test(f) &&
         !/(^|\/)(node_modules|dist|vendor|build)\//.test(f),
+    );
+    const priority = (f: string) =>
+      /^readme(?:\.[^/]*)?\.md$/i.test(f)
+        ? 0
+        : /^(src|lib|packages)\//.test(f) && !f.endsWith(".md")
+          ? 1
+          : !f.includes("/") && !f.endsWith(".md")
+            ? 2
+            : f.endsWith(".md")
+              ? 4
+              : 3;
+    eligible.sort(
+      (a, b) => priority(a) - priority(b) || a.localeCompare(b, "en"),
     );
     const omitted = tracked
       .filter((f) => !eligible.includes(f))
@@ -123,11 +137,61 @@ export function scan(bindings: Binding[]): Projection {
       });
       p.relations.push({ source: b.id, target: id, kind: "contains" });
       if (f.endsWith(".md")) continue;
+      if (f.endsWith(".py")) {
+        const result = pythonSymbols(f, text);
+        if (result.error) omitted.push(`${f}: ${result.error}`);
+        const added = new Map<string, string>();
+        for (const symbol of result.symbols) {
+          if (added.has(symbol.name)) continue;
+          if (p.objects.length >= 1200) {
+            if (!omitted.includes("symbols: 1200-object soft limit reached"))
+              omitted.push("symbols: 1200-object soft limit reached");
+            break;
+          }
+          const sid = `${id}#${symbol.name}`;
+          added.set(symbol.name, sid);
+          p.objects.push({
+            id: sid,
+            workspaceId: b.id,
+            kind: "symbol",
+            title: symbol.name,
+            parentId: id,
+            source: {
+              ...base,
+              startLine: symbol.startLine,
+              endLine: symbol.endLine,
+            },
+          });
+          p.relations.push({ source: id, target: sid, kind: "contains" });
+        }
+        for (const symbol of result.symbols)
+          for (const call of symbol.calls) {
+            const source = added.get(symbol.name),
+              target = added.get(call);
+            if (source && target)
+              p.relations.push({ source, target, kind: "syntactic-call" });
+          }
+        continue;
+      }
       const sf = ts.createSourceFile(f, text, ts.ScriptTarget.Latest, true);
       parsed.set(f, sf);
       const symbols = new Map<string, { id: string; node: ts.Node }>();
       function add(name: string, node: ts.Node) {
-        if (symbols.has(name)) return;
+        if (symbols.has(name)) {
+          // Prefer a TypeScript overload implementation to its earlier signature.
+          if (ts.isFunctionDeclaration(node) && node.body) {
+            const old = symbols.get(name)!;
+            symbols.set(name, { id: old.id, node });
+            const object = p.objects.find((o) => o.id === old.id)!;
+            object.source = {
+              ...base,
+              startLine:
+                sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+              endLine: sf.getLineAndCharacterOfPosition(node.getEnd()).line + 1,
+            };
+          }
+          return;
+        }
         if (p.objects.length >= 1200) {
           if (!omitted.includes("symbols: 1200-object soft limit reached"))
             omitted.push("symbols: 1200-object soft limit reached");
