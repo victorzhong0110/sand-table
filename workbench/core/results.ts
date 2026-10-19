@@ -1,3 +1,4 @@
+import { proposalSummary } from "./changes.ts";
 import type { Board } from "./model.ts";
 export function boardSummary(b: Board) {
   return {
@@ -27,6 +28,13 @@ export function boardSummary(b: Board) {
       stepCount: g.steps.length,
     })),
     activities: b.activities,
+    intents: b.intents.map((i) => ({
+      id: i.id,
+      version: i.version,
+      request: i.request,
+      allowedFiles: i.allowedFiles,
+    })),
+    proposals: b.proposals.map(proposalSummary),
     hint: "Use sand_find_objects for bounded object/source lookup; sand_read_context for the current human focus. Full map data is UI metadata.",
   };
 }
@@ -34,3 +42,9 @@ export function boardSummary(b: Board) {
 export function resultData(result: any) {
   return result._meta?.data ?? result.structuredContent?.data;
 }
+
+export const viewResult = (summary: unknown, value: unknown) => ({
+  __sandView: true,
+  summary,
+  value,
+});

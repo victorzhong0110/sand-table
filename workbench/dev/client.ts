@@ -1,3 +1,4 @@
+import { safeUrl } from "../core/spaces.ts";
 import { resultData } from "../core/results.ts";
 import {
   AppBridge,
@@ -35,7 +36,7 @@ async function main() {
   const bridge = new AppBridge(
     null,
     { name: "Local protocol harness (no AI)", version: "0.1.0" },
-    { serverTools: {} },
+    { serverTools: {}, openLinks: {} },
     {
       hostContext: {
         theme: "light",
@@ -45,6 +46,12 @@ async function main() {
       },
     },
   );
+  bridge.onopenlink = async ({ url }) => {
+    const safe = safeUrl(url);
+    if (!safe) return { isError: true };
+    window.open(safe, "_blank", "noopener,noreferrer");
+    return {};
+  };
   bridge.oncalltool = (params) => rpc("tools/call", params);
   bridge.oninitialized = async () => {
     await bridge.sendToolInput({ arguments: {} });
@@ -55,7 +62,7 @@ async function main() {
   );
   frame.srcdoc = resource.contents[0].text.replace(
     "<head>",
-    `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'">`,
+    `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; connect-src 'none'">`,
   );
   document.getElementById("read")!.onclick = async () => {
     const output = document.getElementById("context")!;

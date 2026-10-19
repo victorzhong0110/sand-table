@@ -1,3 +1,8 @@
+import {
+  initializeSpaces,
+  syncSourceInstances,
+  syncSelection,
+} from "./space-state.ts";
 import { randomUUID } from "node:crypto";
 import type {
   Board,
@@ -32,6 +37,8 @@ export class BoardStore {
   }
   read(id: string) {
     const b = structuredClone(this.get(id));
+    b.assets.forEach((a) => delete a.dataUrl);
+    b.proposals.forEach((p) => p.baseline.forEach((s) => (s.files = {})));
     b.activities.forEach((a) => (a.stale = this.now() - a.reportedAt > 60_000));
     return b;
   }
@@ -51,8 +58,17 @@ export class BoardStore {
       groups: [],
       activities: [],
       explanations: [],
+      spaces: [],
+      instances: [],
+      views: {},
+      spaceLinks: [],
+      assets: [],
       guides: [],
+      intents: [],
+      proposals: [],
+      validations: [],
     };
+    initializeSpaces(b);
     this.boards.set(b.id, b);
     return this.read(b.id);
   }
@@ -67,6 +83,7 @@ export class BoardStore {
     id: string,
     revision: number,
     edit: {
+      viewId?: string;
       selection?: string[];
       placements?: Record<string, Placement>;
       note?: { objectId: string; text: string };
@@ -145,12 +162,21 @@ export class BoardStore {
       b.groups.push({ id: randomUUID(), ...structuredClone(edit.group) });
     if (edit.removeGroup)
       b.groups = b.groups.filter((g) => g.id !== edit.removeGroup);
+    if (edit.viewId && (edit.selection || edit.guideFocus))
+      syncSelection(b, edit.viewId, b.selection);
+    if (edit.placements)
+      for (const [objectId, p] of Object.entries(edit.placements)) {
+        const instance = b.instances.find((i) => i.id === `ref:${objectId}`);
+        if (instance) instance.rect = { ...instance.rect, ...p };
+      }
     b.revision++;
     return this.read(id);
   }
   context(id: string) {
     const b = this.get(id);
-    if (!b.selection.length) throw Error("Select objects on the board first.");
+    const active = b.focusedViewId ? b.views[b.focusedViewId] : undefined;
+    if (!b.selection.length && !active?.selection.length)
+      throw Error("Select objects or components on the board first.");
     b.lastContextRead = {
       at: this.now(),
       revision: b.revision,
@@ -160,6 +186,11 @@ export class BoardStore {
       boardId: id,
       revision: b.revision,
       selection: b.selection,
+      focusedView: active,
+      instances: active
+        ? b.instances.filter((i) => active.selection.includes(i.id))
+        : [],
+      spaces: b.spaces,
       objects: b.objects.filter((o) => b.selection.includes(o.id)),
       workspaces: b.workspaces.map(
         ({ id, label, head, branch, snapshot, files, omitted }) => ({
@@ -178,6 +209,14 @@ export class BoardStore {
       placements: b.placements,
       groups: b.groups,
       notes: b.notes,
+      intents: b.intents,
+      proposals: b.proposals.map((p) => ({
+        id: p.id,
+        version: p.version,
+        digest: p.digest,
+        decision: p.decision,
+        verification: p.verification,
+      })),
       guideFocus: b.guideFocus,
       guide: b.guideFocus
         ? b.guides.find((g) => g.id === b.guideFocus!.guideId)
@@ -312,6 +351,7 @@ export class BoardStore {
       );
     }
     Object.assign(b, p);
+    syncSourceInstances(b);
     b.revision++;
     return this.read(id);
   }

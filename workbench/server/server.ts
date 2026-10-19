@@ -10,6 +10,8 @@ import {
   RESOURCE_MIME_TYPE,
 } from "@modelcontextprotocol/ext-apps/server";
 import { z } from "zod";
+import { Spaces, registerSpaceTools } from "./spaces.ts";
+import { Changes, registerChangeTools } from "./changes.ts";
 import { boardSummary } from "../core/results.ts";
 import { BoardStore } from "../core/store.ts";
 import { scan, sourceFor, verifyEvidence, type Binding } from "./repository.ts";
@@ -78,13 +80,27 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
             "placements" in data &&
             "id" in data,
           );
-          const visible = isBoard
-            ? boardSummary(data as ReturnType<typeof store.read>)
-            : data;
+          const envelope =
+            data &&
+            typeof data === "object" &&
+            "__sandView" in data &&
+            "summary" in data &&
+            "value" in data
+              ? (data as { summary: unknown; value: unknown })
+              : undefined;
+          const visible = envelope
+            ? envelope.summary
+            : isBoard
+              ? boardSummary(data as ReturnType<typeof store.read>)
+              : data;
           return {
             content: [{ type: "text", text: JSON.stringify(visible) }],
             structuredContent: { data: visible },
-            ...(isBoard ? { _meta: { data } } : {}),
+            ...(envelope
+              ? { _meta: { data: envelope.value } }
+              : isBoard
+                ? { _meta: { data } }
+                : {}),
           };
         } catch (e) {
           return {
@@ -294,6 +310,7 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
     {
       ...board,
       revision: z.number().int().nonnegative(),
+      viewId: id.optional(),
       selection: ids.optional(),
       placements: z
         .record(
@@ -322,6 +339,8 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
     (a) => store.end(a.boardId),
     true,
   );
+  registerChangeTools(tool, new Changes(store, bindings));
+  registerSpaceTools(tool, new Spaces(store));
   registerAppResource(server, "Sand Table overview", uri, {}, async () =>
     forward
       ? forward.resource()

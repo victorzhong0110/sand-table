@@ -1,3 +1,4 @@
+import { safeUrl } from "../core/spaces.ts";
 import { resultData } from "../core/results.ts";
 import {
   AppBridge,
@@ -84,7 +85,7 @@ async function mount() {
   bridge = new AppBridge(
     null,
     { name: "Sand Table local workbench", version: "0.2.0" },
-    { serverTools: {} },
+    { serverTools: {}, openLinks: {} },
     {
       hostContext: {
         theme: "light",
@@ -94,6 +95,12 @@ async function mount() {
       },
     },
   );
+  bridge.onopenlink = async ({ url }) => {
+    const safe = safeUrl(url);
+    if (!safe) return { isError: true };
+    window.open(safe, "_blank", "noopener,noreferrer");
+    return {};
+  };
   bridge.oncalltool = (params) =>
     request("/rpc", { method: "tools/call", params });
   bridge.oninitialized = async () => {
@@ -105,7 +112,7 @@ async function mount() {
   );
   frame.srcdoc = resource.contents[0].text.replace(
     "<head>",
-    `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'">`,
+    `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; connect-src 'none'">`,
   );
   showSetup(false);
 }
