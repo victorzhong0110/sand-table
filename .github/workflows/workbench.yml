@@ -1,0 +1,47 @@
+name: Workbench
+on:
+  push:
+    paths: ['workbench/**', 'package.json', 'scripts/start-workbench.mjs', '.github/workflows/workbench.yml']
+  pull_request:
+    paths: ['workbench/**', 'package.json', 'scripts/start-workbench.mjs', '.github/workflows/workbench.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workbench
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: workbench/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Clone external read-only fixture
+        run: |
+          git init /tmp/sand-clsx
+          git -C /tmp/sand-clsx remote add origin https://github.com/lukeed/clsx.git
+          git -C /tmp/sand-clsx fetch --depth 1 origin 925494cf31bcd97d3337aacd34e659e80cae7fe2
+          git -C /tmp/sand-clsx checkout --detach FETCH_HEAD
+      - name: Clone external Python fixture
+        run: |
+          git init /tmp/sand-hf-hub
+          git -C /tmp/sand-hf-hub remote add origin https://github.com/huggingface/huggingface_hub.git
+          git -C /tmp/sand-hf-hub fetch --depth 1 origin bb2ef7579c3d2dc2eb49b16ccf15a070fe5b7023
+          git -C /tmp/sand-hf-hub checkout --detach FETCH_HEAD
+      - run: npm test
+        env:
+          SAND_EXTERNAL_REPO: /tmp/sand-clsx
+          SAND_PYTHON_REPO: /tmp/sand-hf-hub
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+        env:
+          SAND_EXTERNAL_REPO: /tmp/sand-clsx
+
+      - run: npm run test:local
+        env:
+          SAND_EXTERNAL_REPO: /tmp/sand-clsx

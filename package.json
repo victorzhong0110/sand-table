@@ -2,12 +2,13 @@
   "name": "sand-table",
   "private": true,
   "version": "0.0.0",
-  "description": "Browser workbench for LLM Research OS. Graphical inspection of recorded research evidence.",
+  "description": "A shared spatial workbench for people and their AI, with local MCP and source-backed repository understanding.",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "vite build",
-    "test:browser": "node scripts/smoke.mjs"
+    "test:browser": "node scripts/smoke.mjs",
+    "start": "node scripts/start-workbench.mjs"
   },
   "dependencies": {
     "react": "19.3.0",
