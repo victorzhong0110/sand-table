@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { fixtureGuide } from "./fixture-guide.ts";
 const external = process.env.SAND_EXTERNAL_REPO;
 if (!external)
   throw Error("Set SAND_EXTERNAL_REPO to a checkout of lukeed/clsx.");
@@ -48,6 +49,14 @@ try {
   await page.goto("http://127.0.0.1:4317");
   const frame = page.frameLocator("iframe");
   await frame.getByRole("heading", { name: "代码如何协作" }).waitFor();
+  await frame
+    .getByRole("button", { name: /项目说明/ })
+    .first()
+    .click();
+  await frame.locator(".source").filter({ hasText: "clsx" }).waitFor();
+  await frame
+    .getByRole("combobox", { name: "对象类型" })
+    .selectOption("symbol");
   await frame.getByRole("textbox", { name: "搜索对象" }).fill("src/index.js");
   const card = frame
     .locator(".card")
@@ -132,6 +141,37 @@ try {
   await page.screenshot({ path: "artifacts/overview-mono.png" });
   await frame.getByRole("button", { name: "AI 上下文" }).click();
   await frame.getByRole("heading", { name: "AI 看到了什么" }).waitFor();
+  state = (await rpc("sand_read_board")).structuredContent.data;
+  const published = await rpc("sand_publish_guide", {
+    revision: state.revision,
+    ...fixtureGuide(state),
+  });
+  assert.ok(!published.isError, JSON.stringify(published));
+  await frame
+    .getByRole("combobox", { name: "功能路径" })
+    .waitFor({ timeout: 12000 });
+  await frame.getByRole("textbox", { name: "搜索对象" }).fill("no match");
+  await frame.getByRole("button", { name: /转换每个值/ }).click();
+  await frame.locator(".card.selected").filter({ hasText: "toVal" }).waitFor();
+  assert.equal(
+    await frame.getByRole("textbox", { name: "搜索对象" }).inputValue(),
+    "",
+  );
+  const focused = (await rpc("sand_read_context")).structuredContent.data;
+  assert.equal(focused.guideFocus.step, 1);
+  assert.equal(focused.objects[0].title, "toVal");
+  const targetBox = await frame.locator(".card.selected").boundingBox();
+  const canvasBox = await frame.locator(".canvas").boundingBox();
+  assert.ok(
+    targetBox &&
+      canvasBox &&
+      targetBox.x >= canvasBox.x &&
+      targetBox.x + targetBox.width <= canvasBox.x + canvasBox.width,
+  );
+  await frame.getByRole("button", { name: "切换纸张" }).click();
+  await frame.locator("aside").evaluate((e) => (e.scrollTop = 0));
+  await frame.locator("main").evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: "artifacts/feature-guide.png" });
   const rejected = await page.request.post("http://127.0.0.1:4317/rpc", {
     headers: { Origin: "https://untrusted.invalid" },
     data: { method: "tools/call" },
@@ -142,7 +182,7 @@ try {
   await page.screenshot({ path: "artifacts/overview-mobile.png" });
   assert.deepEqual(errors, []);
   console.log(
-    "Browser passed: source, shared context, group, drag, pin, activity report, themes, mobile render, origin rejection.",
+    "Browser passed: source, shared context, group, drag, pin, activity report, themes, mobile render, origin rejection, README entry, guide focus and context.",
   );
 } finally {
   await browser?.close();

@@ -203,7 +203,11 @@ export function scan(bindings: Binding[]): Projection {
   }
   return p;
 }
-export function sourceFor(bindings: Binding[], object: Item) {
+export function sourceFor(
+  bindings: Binding[],
+  object: Item,
+  options: { startLine?: number; maxLines?: number } = {},
+) {
   const ref = object.source;
   if (!ref) throw Error("Object has no source.");
   const b = bindings.find((b) => b.id === ref.workspaceId);
@@ -213,21 +217,30 @@ export function sourceFor(bindings: Binding[], object: Item) {
   const text = readFile(b, ref.path);
   if (hash(text) !== ref.hash)
     throw Error("Source changed. Refresh the board first.");
+  const startLine = options.startLine ?? ref.startLine,
+    maxLines = options.maxLines ?? 120;
+  if (
+    !Number.isInteger(startLine) ||
+    startLine < ref.startLine ||
+    startLine > ref.endLine ||
+    !Number.isInteger(maxLines) ||
+    maxLines < 1 ||
+    maxLines > 120
+  )
+    throw Error("Excerpt must stay within the object (1–120 lines).");
+  const endLine = Math.min(ref.endLine, startLine + maxLines - 1);
+  const excerpt = text
+    .split("\n")
+    .slice(startLine - 1, endLine)
+    .join("\n");
   return {
-    reference: ref,
-    text: text
-      .split("\n")
-      .slice(ref.startLine - 1, Math.min(ref.endLine, ref.startLine + 119))
-      .join("\n")
-      .slice(0, 12000),
+    reference: { ...ref, startLine, endLine },
+    text: excerpt.slice(0, 12000),
     verification:
       "Reference content matches. This does not prove an explanation.",
-    truncated:
-      ref.endLine - ref.startLine >= 120 ||
-      text
-        .split("\n")
-        .slice(ref.startLine - 1, ref.endLine)
-        .join("\n").length > 12000,
+    truncated: endLine < ref.endLine || excerpt.length > 12000,
+    characterTruncated: excerpt.length > 12000,
+    nextLine: endLine < ref.endLine ? endLine + 1 : null,
   };
 }
 export function verifyEvidence(
@@ -239,12 +252,14 @@ export function verifyEvidence(
     const o = objects.find(
       (o) =>
         o.source &&
-        Object.entries(ref).every(
-          ([key, value]) => o.source![key as keyof Evidence] === value,
-        ),
+        o.source.workspaceId === ref.workspaceId &&
+        o.source.path === ref.path &&
+        o.source.hash === ref.hash &&
+        ref.startLine >= o.source.startLine &&
+        ref.endLine <= o.source.endLine &&
+        ref.startLine <= ref.endLine,
     );
-    if (!o)
-      throw Error("Evidence must exactly match a current object reference.");
+    if (!o) throw Error("Evidence must be within a current object reference.");
     sourceFor(bindings, o);
   }
 }

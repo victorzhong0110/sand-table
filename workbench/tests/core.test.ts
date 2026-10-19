@@ -74,3 +74,87 @@ test("expiry, activity staleness and independent boards", () => {
   s.sweep();
   assert.equal(s.boards.size, 0);
 });
+test("guide focus shares intent without changing layout; wrong evidence and stale source are rejected", () => {
+  const source = {
+    workspaceId: "w",
+    path: "index.ts",
+    startLine: 1,
+    endLine: 10,
+    hash: "original",
+  };
+  const projection: Projection = {
+    ...p,
+    objects: [
+      { id: "a", workspaceId: "w", kind: "symbol", title: "a", source },
+      {
+        id: "b",
+        workspaceId: "w",
+        kind: "symbol",
+        title: "b",
+        source: { ...source, startLine: 11, endLine: 20 },
+      },
+    ],
+  };
+  const draft = {
+    agentId: "test",
+    title: "A path",
+    purpose: "Unit fixture",
+    inputs: "input",
+    outputs: "output",
+    steps: [
+      {
+        title: "first",
+        explanation: "test",
+        objectIds: ["a"],
+        evidence: [source],
+        uncertainty: "not executed",
+      },
+    ],
+  };
+  const s = new BoardStore();
+  let b = s.open(projection, "unit");
+  assert.throws(
+    () =>
+      s.publishGuide(b.id, 0, {
+        ...draft,
+        steps: [{ ...draft.steps[0], objectIds: ["b"] }],
+      }),
+    /matching source/,
+  );
+  assert.throws(() => s.publishGuide(b.id, 1, draft), /changed/);
+  b = s.publishGuide(b.id, 0, draft);
+  assert.deepEqual(b.selection, []);
+  b = s.edit(b.id, b.revision, {
+    guideFocus: { guideId: b.guides[0].id, step: 0 },
+  });
+  assert.deepEqual(b.selection, ["a"]);
+  assert.deepEqual(b.placements, {});
+  assert.equal(s.context(b.id).guide?.title, "A path");
+  assert.throws(() =>
+    s.edit(b.id, b.revision, {
+      guideFocus: { guideId: b.guides[0].id, step: 99 },
+    }),
+  );
+  b = s.refresh(b.id, {
+    ...projection,
+    objects: projection.objects.map((o) => ({
+      ...o,
+      source: { ...o.source!, hash: "dirty" },
+    })),
+  });
+  assert.equal(b.guides[0].stale, true);
+  assert.equal(s.context(b.id).guide?.stale, true);
+  assert.throws(
+    () =>
+      s.edit(b.id, b.revision, {
+        guideFocus: { guideId: b.guides[0].id, step: 0 },
+      }),
+    /stale/,
+  );
+  b = s.edit(b.id, b.revision, { selection: ["b"] });
+  assert.equal(s.context(b.id).guide, undefined);
+  assert.throws(
+    () => s.publishGuide(b.id, b.revision, draft),
+    /matching source/,
+  );
+});

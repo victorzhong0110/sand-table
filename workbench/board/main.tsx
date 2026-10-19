@@ -1,8 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
-import type { Board, Placement } from "../core/model.ts";
+import type { Board, Placement, Item, GuideFocus } from "../core/model.ts";
 import "./style.css";
+import { GuidePanel } from "./GuidePanel.tsx";
+const relationLabels = {
+  contains: "包含",
+  imports: "导入",
+  "syntactic-call": "可能调用（语法推断）",
+};
 function unpack(r: any) {
   if (r.isError) throw Error(r.content?.[0]?.text || "Request failed");
   return r.structuredContent?.data ?? JSON.parse(r.content[0].text);
@@ -22,12 +28,16 @@ function Workbench() {
       objectId: string;
       hash: string;
       text: string;
+      startLine: number;
+      endLine: number;
+      nextLine: number | null;
     }>(),
     [note, setNote] = useState(""),
     [groupTitle, setGroupTitle] = useState(""),
     [zoom, setZoom] = useState(1),
     [pan, setPan] = useState({ x: 24, y: 24 }),
     [draft, setDraft] = useState<Record<string, Placement>>({});
+  const canvasRef = useRef<HTMLElement>(null);
   const boardRef = useRef(board);
   boardRef.current = board;
   const drag = useRef<
@@ -81,6 +91,84 @@ function Workbench() {
       ...data,
     });
   }
+  async function readSource(object: Item, startLine?: number) {
+    const result = await action("sand_read_source", {
+      objectId: object.id,
+      startLine,
+    });
+    if (result)
+      setSource({
+        objectId: object.id,
+        hash: result.reference.hash,
+        text:
+          result.text +
+          (result.characterTruncated
+            ? "\n… 本段超出 12,000 字符，请缩小读取行数"
+            : ""),
+        startLine: result.reference.startLine,
+        endLine: result.reference.endLine,
+        nextLine: result.nextLine,
+      });
+  }
+  async function focusGuide(focus: GuideFocus | null) {
+    const updated: Board | undefined = await edit({ guideFocus: focus });
+    if (!updated || !focus) return;
+    setMode("browse");
+    setKind("all");
+    setScope("all");
+    setQuery("");
+    setArrows(true);
+    const objects = updated.objects.filter((o) => o.kind !== "workspace");
+    const routeIds = new Set(
+      updated.guides
+        .find((g) => g.id === focus.guideId)!
+        .steps.flatMap((s) => s.objectIds),
+    );
+    const points = objects.flatMap((o, i) =>
+      routeIds.has(o.id)
+        ? [
+            updated.placements[o.id] || {
+              x: (i % 3) * 280,
+              y: Math.floor(i / 3) * 150,
+              pinned: false,
+            },
+          ]
+        : [],
+    );
+    const left = Math.min(...points.map((p) => p.x)),
+      top = Math.min(...points.map((p) => p.y));
+    const right = Math.max(...points.map((p) => p.x)) + 252,
+      bottom = Math.max(...points.map((p) => p.y)) + 125;
+    const width = canvasRef.current?.clientWidth || 700,
+      height = canvasRef.current?.clientHeight || 660;
+    const scale = Math.min(
+      1,
+      Math.max(
+        0.1,
+        Math.min(
+          (width - 60) / (right - left),
+          (height - 100) / (bottom - top),
+        ),
+      ),
+    );
+    setZoom(scale);
+    setPan({
+      x: width / 2 - ((left + right) * scale) / 2,
+      y: (height - 36) / 2 - ((top + bottom) * scale) / 2,
+    });
+  }
+  async function openDocument(object: Item) {
+    const updated = await edit({ selection: [object.id] });
+    if (!updated) return;
+    setMode("browse");
+    setKind("file");
+    setScope(object.workspaceId);
+    setQuery(object.title);
+    setZoom(1);
+    const p = updated.placements[object.id] || { x: 0, y: 0 };
+    setPan({ x: 24 - p.x, y: 24 - p.y });
+    await readSource(object);
+  }
   useEffect(() => {
     if (!board?.id || ended) return;
     const timer = setInterval(() => {
@@ -108,6 +196,12 @@ function Workbench() {
         <p>{connectionError?.message || error || "等待宿主打开项目总览…"}</p>
       </main>
     );
+  const focusedGuide = board.guides.find(
+    (g) => g.id === board.guideFocus?.guideId,
+  );
+  const routeIds = new Set(
+    focusedGuide?.steps.flatMap((s) => s.objectIds) || [],
+  );
   const visible = board.objects.filter(
     (o) =>
       o.kind !== "workspace" &&
@@ -249,6 +343,7 @@ function Workbench() {
       )}
       <div className="layout">
         <section
+          ref={canvasRef}
           className="canvas"
           aria-label="项目白板"
           onPointerDown={(e) => {
@@ -289,9 +384,11 @@ function Workbench() {
           }}
         >
           <div className="canvas-hint">
-            {mode === "arrange"
-              ? "拖动卡片 · 双击选择 · 固定位置"
-              : "点击查看 · Shift 多选 · 拖动空白平移"}
+            {focusedGuide
+              ? "功能路径定位 · 其他对象淡化"
+              : mode === "arrange"
+                ? "拖动卡片 · 双击选择 · 固定位置"
+                : "点击查看 · Shift 多选 · 拖动空白平移"}
           </div>
           <div
             className="world"
@@ -337,7 +434,13 @@ function Workbench() {
                   </marker>
                 </defs>
                 {board.relations
-                  .filter((r) => positions[r.source] && positions[r.target])
+                  .filter(
+                    (r) =>
+                      positions[r.source] &&
+                      positions[r.target] &&
+                      (!focusedGuide ||
+                        (routeIds.has(r.source) && routeIds.has(r.target))),
+                  )
                   .map((r, i) => {
                     const a = positions[r.source],
                       b = positions[r.target];
@@ -359,7 +462,7 @@ function Workbench() {
                           x={(a.x + b.x) / 2 + 126}
                           y={(a.y + b.y) / 2 + 45}
                         >
-                          {r.kind}
+                          {relationLabels[r.kind]}
                         </text>
                       </g>
                     );
@@ -375,7 +478,7 @@ function Workbench() {
                 <button
                   key={o.id}
                   data-object-id={o.id}
-                  className={`card ${board.selection.includes(o.id) ? "selected" : ""}`}
+                  className={`card ${board.selection.includes(o.id) ? "selected" : ""} ${focusedGuide && !routeIds.has(o.id) ? "dimmed" : ""}`}
                   style={{ left: p.x, top: p.y }}
                   title={`${o.title}\n${o.source?.path}\n${workLabel(o.workspaceId)}`}
                   onClick={(e) => {
@@ -402,6 +505,16 @@ function Workbench() {
                     {o.kind === "symbol" ? "代码入口" : "源码文件"} ·{" "}
                     {workLabel(o.workspaceId)} {p.pinned ? "· 已固定" : ""}
                   </span>
+                  {focusedGuide && routeIds.has(o.id) && (
+                    <span className="step-badge">
+                      步骤{" "}
+                      {focusedGuide.steps
+                        .flatMap((s, i) =>
+                          s.objectIds.includes(o.id) ? [i + 1] : [],
+                        )
+                        .join("、")}
+                    </span>
+                  )}
                   <strong>{o.title}</strong>
                   <span className="path">
                     {o.source?.path}:{o.source?.startLine}
@@ -446,6 +559,12 @@ function Workbench() {
           </div>
         </section>
         <aside>
+          <GuidePanel
+            board={board}
+            busy={busy}
+            onFocus={(focus) => void focusGuide(focus)}
+            onDocument={(object) => void openDocument(object)}
+          />
           <span className="eyebrow">
             {mode === "ai" ? "SHARED CONTEXT" : "INSPECT"}
           </span>
@@ -486,25 +605,36 @@ function Workbench() {
               </p>
               <button
                 disabled={!selected.source || busy}
-                onClick={async () => {
-                  const result = await action("sand_read_source", {
-                    objectId: selected.id,
-                  });
-                  if (result)
-                    setSource({
-                      objectId: selected.id,
-                      hash: result.reference.hash,
-                      text:
-                        result.text +
-                        (result.truncated ? "\n… 摘录已截断" : ""),
-                    });
-                }}
+                onClick={() => void readSource(selected)}
               >
                 查看源码依据
               </button>
               {source?.objectId === selected.id &&
                 source.hash === selected.source?.hash && (
-                  <pre className="source">{source.text}</pre>
+                  <section className="source-reader">
+                    <small>
+                      源码 {source.startLine}–{source.endLine} 行
+                    </small>
+                    <pre className="source">{source.text}</pre>
+                    {source.nextLine && (
+                      <button
+                        disabled={busy}
+                        onClick={() =>
+                          void readSource(selected, source.nextLine!)
+                        }
+                      >
+                        继续读取下一段
+                      </button>
+                    )}
+                    {source.startLine !== selected.source?.startLine && (
+                      <button
+                        disabled={busy}
+                        onClick={() => void readSource(selected)}
+                      >
+                        回到开头
+                      </button>
+                    )}
+                  </section>
                 )}
               <label>
                 给 AI 的备注
@@ -554,11 +684,11 @@ function Workbench() {
                       key={i}
                       onClick={() => choose(target)}
                     >
-                      {r.kind} → {o?.title}
+                      {relationLabels[r.kind]} → {o?.title}
                     </button>
                   );
                 })}
-              <small>syntactic-call 是语法匹配，不保证实际运行时调用。</small>
+              <small>“可能调用”来自语法匹配，不保证运行时实际发生。</small>
             </>
           ) : (
             <p>

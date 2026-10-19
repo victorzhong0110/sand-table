@@ -18,12 +18,25 @@ test("actual dirty contents invalidate source while HEAD stays unchanged; worktr
       join(root, "index.ts"),
       "export function value(){return 1;}\n",
     );
+    writeFileSync(
+      join(root, "long.md"),
+      Array.from({ length: 150 }, (_, i) => `line ${i + 1}`).join("\n"),
+    );
     git("add", ".");
     git("commit", "-m", "fixture");
     git("worktree", "add", "-b", "other", other);
     const bindings = bind([`one=${root}`, `two=${other}`]);
     assert.notEqual(bindings[0].id, bindings[1].id);
     const before = scan(bindings);
+    const long = before.objects.find((o) => o.source?.path === "long.md")!;
+    const first = sourceFor(bindings, long);
+    assert.equal(first.nextLine, 121);
+    assert.equal(first.reference.endLine, 120);
+    const second = sourceFor(bindings, long, { startLine: first.nextLine! });
+    assert.equal(second.nextLine, null);
+    assert.match(second.text, /line 150$/);
+    assert.equal(second.reference.startLine, 121);
+    assert.throws(() => sourceFor(bindings, long, { startLine: 151 }));
     const item = before.objects.find((o) => o.kind === "symbol")!;
     assert.match(sourceFor(bindings, item).text, /return 1/);
     writeFileSync(

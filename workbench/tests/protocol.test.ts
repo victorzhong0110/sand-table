@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { fixtureGuide } from "./fixture-guide.ts";
 const external = process.env.SAND_EXTERNAL_REPO;
 test(
   "external clsx through actual stdio: source, selection, explanation, stale edits and session end",
@@ -71,6 +72,78 @@ test(
             agentId: "test",
             text: "bad reference",
             evidence: [{ ...o.source, hash: "bad" }],
+          })
+        ).isError,
+      );
+      const current = await call("sand_read_board", { boardId });
+      const guideDraft = fixtureGuide(current);
+      const guided = await call("sand_publish_guide", {
+        boardId,
+        revision: current.revision,
+        ...guideDraft,
+      });
+      assert.equal(guided.guides.length, 1);
+      assert.deepEqual(guided.selection, [o.id]);
+      const focus = { guideId: guided.guides[0].id, step: 1 };
+      await call("sand_focus", {
+        boardId,
+        revision: guided.revision,
+        guideFocus: focus,
+      });
+      const guideContext = await call("sand_read_context", { boardId });
+      assert.deepEqual(guideContext.guideFocus, focus);
+      assert.equal(guideContext.objects[0].title, "toVal");
+      const now = await call("sand_read_board", { boardId });
+      assert.ok(
+        (
+          await raw("sand_publish_guide", {
+            boardId,
+            revision: now.revision,
+            ...guideDraft,
+            steps: [
+              {
+                ...guideDraft.steps[0],
+                evidence: [{ ...o.source, hash: "stale" }],
+              },
+            ],
+          })
+        ).isError,
+      );
+      assert.ok(
+        (
+          await raw("sand_publish_guide", {
+            boardId,
+            revision: now.revision,
+            ...guideDraft,
+            steps: [
+              {
+                ...guideDraft.steps[0],
+                objectIds: [guideDraft.steps[1].objectIds[0]],
+              },
+            ],
+          })
+        ).isError,
+      );
+      const excerpt = await call("sand_read_source", {
+        boardId,
+        objectId: o.id,
+        startLine: o.source.startLine + 1,
+        maxLines: 2,
+      });
+      assert.equal(excerpt.reference.startLine, o.source.startLine + 1);
+      assert.equal(excerpt.reference.endLine, o.source.startLine + 2);
+      await call("sand_explain", {
+        boardId,
+        agentId: "test",
+        text: "Partial reference test",
+        evidence: [excerpt.reference],
+      });
+      assert.ok(
+        (
+          await raw("sand_read_source", {
+            boardId,
+            objectId: o.id,
+            startLine: o.source.endLine + 1,
           })
         ).isError,
       );

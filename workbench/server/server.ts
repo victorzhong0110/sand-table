@@ -92,11 +92,42 @@ export function createServer(bindings: Binding[]) {
   tool(
     "sand_read_source",
     "Read a verified source excerpt for an indexed object. Reject changed contents.",
-    { ...board, objectId: id },
+    {
+      ...board,
+      objectId: id,
+      startLine: z.number().int().positive().optional(),
+      maxLines: z.number().int().min(1).max(120).optional(),
+    },
     (a) => {
       const o = store.get(a.boardId).objects.find((o) => o.id === a.objectId);
       if (!o) throw Error("Unknown object.");
-      return sourceFor(bindings, o);
+      return sourceFor(bindings, o, {
+        startLine: a.startLine,
+        maxLines: a.maxLines,
+      });
+    },
+  );
+  tool(
+    "sand_focus",
+    "For a user-requested focus or text-only host: select objects OR one guide step, then read context. Do not silently replace the human selection while answering. This changes attention only, never edit permission.",
+    {
+      ...board,
+      revision: z.number().int().nonnegative(),
+      objectIds: z.array(id).min(1).max(1200).optional(),
+      guideFocus: z
+        .object({ guideId: id, step: z.number().int().nonnegative() })
+        .optional(),
+    },
+    (a) => {
+      if (Boolean(a.objectIds) === Boolean(a.guideFocus))
+        throw Error("Supply either objectIds or guideFocus.");
+      return store.edit(
+        a.boardId,
+        a.revision,
+        a.guideFocus
+          ? { guideFocus: a.guideFocus }
+          : { selection: a.objectIds },
+      );
     },
   );
   tool(
@@ -135,6 +166,41 @@ export function createServer(bindings: Binding[]) {
     },
   );
   tool(
+    "sand_publish_guide",
+    "Publish or replace a source-backed feature walkthrough: purpose, inputs, outputs and steps. Read real source first. Every step must cite its own objects. Remains agent inference; never claim verified semantics. Does not change the human selection.",
+    {
+      ...board,
+      revision: z.number().int().nonnegative(),
+      guideId: id.optional(),
+      title: z.string().min(1).max(120),
+      purpose: z.string().min(1).max(1500),
+      inputs: z.string().min(1).max(1000),
+      outputs: z.string().min(1).max(1000),
+      agentId: id,
+      steps: z
+        .array(
+          z.object({
+            title: z.string().min(1).max(120),
+            explanation: z.string().min(1).max(2000),
+            objectIds: z.array(id).min(1).max(12),
+            evidence: z.array(evidence).min(1).max(20),
+            uncertainty: z.string().min(1).max(1000),
+          }),
+        )
+        .min(1)
+        .max(12),
+    },
+    (a) => {
+      const { boardId, revision, guideId, ...draft } = a;
+      verifyEvidence(
+        bindings,
+        store.get(boardId).objects,
+        draft.steps.flatMap((s) => s.evidence),
+      );
+      return store.publishGuide(boardId, revision, draft, guideId);
+    },
+  );
+  tool(
     "sand_edit_view",
     "Change transient selection, notes, grouping and placement; never writes source.",
     {
@@ -150,6 +216,10 @@ export function createServer(bindings: Binding[]) {
       note: z.object({ objectId: id, text: z.string().max(2000) }).optional(),
       group: z.object({ title: z.string().max(80), objectIds: ids }).optional(),
       removeGroup: id.optional(),
+      guideFocus: z
+        .object({ guideId: id, step: z.number().int().nonnegative() })
+        .nullable()
+        .optional(),
     },
     (a) => {
       const { boardId, revision, ...edit } = a;

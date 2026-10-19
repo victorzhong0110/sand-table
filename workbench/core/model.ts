@@ -51,6 +51,28 @@ export type Explanation = {
   stale: boolean;
   status: "agent-inference";
 };
+export type GuideStep = {
+  title: string;
+  explanation: string;
+  objectIds: string[];
+  evidence: Evidence[];
+  uncertainty: string;
+};
+export type GuideDraft = {
+  title: string;
+  purpose: string;
+  inputs: string;
+  outputs: string;
+  agentId: string;
+  steps: GuideStep[];
+};
+export type Guide = GuideDraft & {
+  id: string;
+  stale: boolean;
+  status: "agent-inference";
+  createdAt: number;
+};
+export type GuideFocus = { guideId: string; step: number };
 export type Group = { id: string; title: string; objectIds: string[] };
 export type Board = Projection & {
   id: string;
@@ -63,5 +85,7 @@ export type Board = Projection & {
   groups: Group[];
   activities: Activity[];
   explanations: Explanation[];
+  guides: Guide[];
+  guideFocus?: GuideFocus;
   lastContextRead?: { at: number; revision: number; objectIds: string[] };
 };
