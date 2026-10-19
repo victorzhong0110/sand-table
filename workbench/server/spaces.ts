@@ -445,6 +445,17 @@ export function registerSpaceTools(tool: RegisterTool, spaces: Spaces) {
     true,
   );
   tool(
+    "sand_read_component",
+    "Read one component configuration by instance ID. Unknown types remain data; no component code is executed.",
+    { ...board, instanceId: id },
+    (a) => {
+      const b = spaces.store.get(a.boardId),
+        instance = b.instances.find((i) => i.id === a.instanceId);
+      if (!instance) throw Error("Unknown component instance.");
+      return { boardId: b.id, revision: b.revision, instance };
+    },
+  );
+  tool(
     "sand_read_spaces",
     "Read nested whiteboards, instance identities and current views. Source objects are shared; each instance has independent layout.",
     {
@@ -464,7 +475,18 @@ export function registerSpaceTools(tool: RegisterTool, spaces: Spaces) {
         spaces: b.spaces,
         focusedViewId: b.focusedViewId,
         views: b.views,
-        instances: items.slice(a.offset, a.offset + a.limit),
+        instances: items
+          .slice(a.offset, a.offset + a.limit)
+          .map((i) => ({
+            ...i,
+            data:
+              JSON.stringify(i.data).length > 4000
+                ? {
+                    omitted: true,
+                    instruction: "Use sand_read_component for complete data.",
+                  }
+                : i.data,
+          })),
         total: items.length,
         nextOffset:
           a.offset + a.limit < items.length ? a.offset + a.limit : null,

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
-import type { Board, Placement, Item, GuideFocus } from "../core/model.ts";
+import type { Board, Item, GuideFocus } from "../core/model.ts";
 import "./style.css";
 import { SpaceCanvas } from "./SpaceCanvas.tsx";
 import { ChangePanel } from "./ChangePanel.tsx";
@@ -41,18 +41,14 @@ function Workbench() {
       nextLine: number | null;
     }>(),
     [note, setNote] = useState(""),
-    [groupTitle, setGroupTitle] = useState(""),
-    [zoom, setZoom] = useState(1),
-    [pan, setPan] = useState({ x: 24, y: 24 }),
-    [draft, setDraft] = useState<Record<string, Placement>>({});
-  const canvasRef = useRef<HTMLElement>(null);
+    [groupTitle, setGroupTitle] = useState("");
   const boardRef = useRef(board);
   boardRef.current = board;
-  const drag = useRef<
-    | { id?: string; x: number; y: number; base: Placement; moving: boolean }
-    | undefined
-  >(undefined);
-  const { app, error: connectionError } = useApp({
+  const {
+    app,
+    error: connectionError,
+    isConnected,
+  } = useApp({
     appInfo: { name: "Sand Table", version: "0.1.0" },
     capabilities: {},
     onAppCreated: (a) => {
@@ -113,12 +109,13 @@ function Workbench() {
     setScope("all");
   };
   useEffect(() => {
-    if (!board?.id || !app || board.views[viewId] || opening.current) return;
+    if (!board?.id || !isConnected || board.views[viewId] || opening.current)
+      return;
     opening.current = true;
     void action("sand_open_view", { viewId }).finally(
       () => (opening.current = false),
     );
-  }, [board?.id, Boolean(app), Boolean(board?.views[viewId])]);
+  }, [board?.id, isConnected, Boolean(board?.views[viewId])]);
   useEffect(() => {
     if (board?.theme) setTheme("custom");
   }, [JSON.stringify(board?.theme)]);
@@ -149,44 +146,6 @@ function Workbench() {
     setScope("all");
     setQuery("");
     setArrows(true);
-    const objects = updated.objects.filter((o) => o.kind !== "workspace");
-    const routeIds = new Set(
-      updated.guides
-        .find((g) => g.id === focus.guideId)!
-        .steps.flatMap((s) => s.objectIds),
-    );
-    const points = objects.flatMap((o, i) =>
-      routeIds.has(o.id)
-        ? [
-            updated.placements[o.id] || {
-              x: (i % 3) * 280,
-              y: Math.floor(i / 3) * 150,
-              pinned: false,
-            },
-          ]
-        : [],
-    );
-    const left = Math.min(...points.map((p) => p.x)),
-      top = Math.min(...points.map((p) => p.y));
-    const right = Math.max(...points.map((p) => p.x)) + 252,
-      bottom = Math.max(...points.map((p) => p.y)) + 125;
-    const width = canvasRef.current?.clientWidth || 700,
-      height = canvasRef.current?.clientHeight || 660;
-    const scale = Math.min(
-      1,
-      Math.max(
-        0.1,
-        Math.min(
-          (width - 60) / (right - left),
-          (height - 100) / (bottom - top),
-        ),
-      ),
-    );
-    setZoom(scale);
-    setPan({
-      x: width / 2 - ((left + right) * scale) / 2,
-      y: (height - 36) / 2 - ((top + bottom) * scale) / 2,
-    });
   }
   async function openDocument(object: Item) {
     const updated = await edit({ selection: [object.id] });
@@ -195,9 +154,6 @@ function Workbench() {
     setKind("file");
     setScope(object.workspaceId);
     setQuery(object.title);
-    setZoom(1);
-    const p = updated.placements[object.id] || { x: 0, y: 0 };
-    setPan({ x: 24 - p.x, y: 24 - p.y });
     await readSource(object);
   }
   useEffect(() => {
@@ -235,29 +191,6 @@ function Workbench() {
     );
   const focusedGuide = board.guides.find(
     (g) => g.id === board.guideFocus?.guideId,
-  );
-  const routeIds = new Set(
-    focusedGuide?.steps.flatMap((s) => s.objectIds) || [],
-  );
-  const visible = board.objects.filter(
-    (o) =>
-      o.kind !== "workspace" &&
-      (kind === "all" || o.kind === kind) &&
-      (scope === "all" || o.workspaceId === scope) &&
-      `${o.title} ${o.source?.path || ""}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-  );
-  const positions = Object.fromEntries(
-    visible.map((o, i) => [
-      o.id,
-      draft[o.id] ||
-        board.placements[o.id] || {
-          x: (i % 3) * 280,
-          y: Math.floor(i / 3) * 150,
-          pinned: false,
-        },
-    ]),
   );
   function choose(id: string, shift = false) {
     const old = boardRef.current!.selection;
@@ -307,6 +240,9 @@ function Workbench() {
           >
             {theme === "paper" ? "切换黑白" : "切换纸张"}
           </button>
+          {board.theme && theme !== "custom" && (
+            <button onClick={() => setTheme("custom")}>使用自定义外观</button>
+          )}
           <button
             disabled={busy}
             onClick={() => void action("sand_refresh_board")}
@@ -336,9 +272,9 @@ function Workbench() {
           <strong>{board.activities.length}</strong> 活动报告
         </div>
         <div>
-          <strong>{board.selection.length}</strong> 已选对象
+          <strong>{view?.selection.length || 0}</strong> 已选组件
         </div>
-        <span>只读源码 · 本次整理不写入文件</span>
+        <span>白板确认改动 · Agent 使用宿主工具写入</span>
       </section>
       <section className="workspaces">
         <button

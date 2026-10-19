@@ -154,7 +154,7 @@ export async function startLocal(options: {
       let body = "";
       for await (const chunk of req) {
         body += chunk;
-        if (Buffer.byteLength(body) > 100000) {
+        if (Buffer.byteLength(body) > 4_000_000) {
           json({ error: "Request too large" }, 413);
           return;
         }

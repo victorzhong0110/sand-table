@@ -574,6 +574,19 @@ const palettes = {
     accent: "#222222",
   },
 };
+function contrast(a: string, b: string) {
+  const luminance = (hex: string) => {
+    const rgb = hex
+      .slice(1)
+      .match(/../g)!
+      .map((v) => parseInt(v, 16) / 255)
+      .map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+  };
+  const x = luminance(a),
+    y = luminance(b);
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
 export function ThemePanel({
   board,
   operate,
@@ -596,6 +609,14 @@ export function ThemePanel({
   return (
     <section>
       <h2>自定义外观</h2>
+      <p className="muted">
+        正文对比度 {contrast(config.ink, config.surface).toFixed(1)}:1
+      </p>
+      {contrast(config.ink, config.surface) < 4.5 && (
+        <p role="status">
+          当前正文和组件背景接近，阅读可能吃力。建议提高对比度或恢复基础皮肤。
+        </p>
+      )}
       <label>
         基础皮肤
         <select

@@ -35,6 +35,7 @@ export type Forwarder = {
 };
 export function createServer(bindings: Binding[], forward?: Forwarder) {
   const store = new BoardStore();
+  const changes = new Changes(store, bindings);
   const server = new McpServer({ name: "sand-table", version: "0.1.0" });
   const timer = setInterval(() => store.sweep(), 60_000);
   timer.unref();
@@ -151,7 +152,18 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
     "sand_refresh_board",
     "Rescan actual tracked working-tree contents. Changes invalidate evidence.",
     board,
-    (a) => store.refresh(a.boardId, scan(bindings)),
+    (a) => {
+      store.refresh(a.boardId, scan(bindings));
+      for (const p of store.get(a.boardId).proposals) {
+        const v = changes.observe(a.boardId, p);
+        if (
+          p.decision === "pending" &&
+          (v.files.some((f) => f.state !== "before") || v.outsideChanges.length)
+        )
+          p.decision = "stale";
+      }
+      return store.read(a.boardId);
+    },
   );
   tool(
     "sand_find_objects",
@@ -339,7 +351,7 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
     (a) => store.end(a.boardId),
     true,
   );
-  registerChangeTools(tool, new Changes(store, bindings));
+  registerChangeTools(tool, changes);
   registerSpaceTools(tool, new Spaces(store));
   registerAppResource(server, "Sand Table overview", uri, {}, async () =>
     forward

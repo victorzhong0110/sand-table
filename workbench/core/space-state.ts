@@ -71,6 +71,32 @@ export function syncSelection(b: Board, viewId: string, objectIds: string[]) {
         objectIds.includes(c.objectId),
     );
   }
+  for (const objectId of objectIds) {
+    if (candidates.some((c) => c.objectId === objectId)) continue;
+    const object = b.objects.find((o) => o.id === objectId);
+    if (!object) continue;
+    if (b.instances.length >= 2200) throw Error("Component limit reached.");
+    const index = b.instances.filter((c) => c.spaceId === "overview").length;
+    const reference = {
+      id: "jump:" + objectId + ":" + b.revision,
+      spaceId: "overview",
+      type: "object",
+      objectId,
+      title: object.title,
+      data: {},
+      rect: {
+        x: (index % 3) * 280,
+        y: Math.floor(index / 3) * 150,
+        width: 252,
+        height: 120,
+        pinned: false,
+      },
+      updatedAt: Date.now(),
+      author: "source-navigation",
+    };
+    b.instances.push(reference);
+    candidates.push(reference);
+  }
   view.selection = candidates.map((c) => c.id);
   view.updatedAt = Date.now();
   b.focusedViewId = viewId;

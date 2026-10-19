@@ -116,6 +116,8 @@ export class Changes {
       : undefined;
     if (a.proposalId && (!old || old.version !== a.previousVersion))
       throw Error("Proposal revision conflict.");
+    if (old && old.intentId !== i.id)
+      throw Error("Cannot replace a proposal belonging to another intent.");
     if (!old && b.proposals.length >= 12)
       throw Error("Proposal limit reached; replace an existing proposal.");
     if (new Set(a.files.map(key)).size !== a.files.length)
@@ -192,12 +194,31 @@ export class Changes {
     const b = this.store.get(boardId);
     const states = worktreeState(this.bindings, p.files);
     const files = p.files.map((f) => {
-      const actual = currentFile(this.bindings, f).hash;
+      let actual: string | null;
+      try {
+        actual = currentFile(this.bindings, f).hash;
+      } catch {
+        return {
+          workspaceId: f.workspaceId,
+          path: f.path,
+          state: "unexpected" as const,
+          actualHash: null,
+        };
+      }
+      const beforeMode = p.baseline.find((s) => s.workspaceId === f.workspaceId)
+        ?.files[f.path]?.mode;
+      const actualMode = states.find((s) => s.workspaceId === f.workspaceId)
+        ?.files[f.path]?.mode;
+      const modeChanged =
+        beforeMode !== undefined &&
+        actualMode !== undefined &&
+        beforeMode !== actualMode;
       return {
         workspaceId: f.workspaceId,
         path: f.path,
-        state:
-          actual === f.afterHash
+        state: modeChanged
+          ? ("unexpected" as const)
+          : actual === f.afterHash
             ? ("after" as const)
             : actual === f.beforeHash
               ? ("before" as const)
@@ -434,6 +455,8 @@ export function registerChangeTools(tool: RegisterTool, changes: Changes) {
         a.digest,
       );
       if (p.decision !== "accepted") throw Error("Not accepted.");
+      if (changes.observe(a.boardId, p).state === "diverged")
+        throw Error("Worktree diverged from the confirmed scope.");
       const f = p.files[a.fileIndex];
       if (!f) throw Error("Unknown file.");
       const current = currentFile(changes.bindings, f);

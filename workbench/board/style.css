@@ -827,3 +827,19 @@ legend {
     top: 0;
   }
 }
+
+.component-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.card.component-card.selected {
+  border: 2px solid var(--accent);
+}
+.component-card:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+.proposal-card small,
+.proposal-card code {
+  overflow-wrap: anywhere;
+}

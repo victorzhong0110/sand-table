@@ -15,6 +15,10 @@ import type {
 } from "./model.ts";
 export class BoardStore {
   boards = new Map<string, Board>();
+  contextSnapshots = new Map<
+    string,
+    { revision: number; parts: Record<string, string> }
+  >();
   now: () => number;
   ttl: number;
   constructor(now = Date.now, ttl = 30 * 60 * 1000) {
@@ -23,7 +27,10 @@ export class BoardStore {
   }
   sweep() {
     for (const [id, b] of this.boards)
-      if (b.expiresAt <= this.now()) this.boards.delete(id);
+      if (b.expiresAt <= this.now()) {
+        this.boards.delete(id);
+        this.contextSnapshots.delete(id);
+      }
   }
   get(id: string) {
     this.sweep();
@@ -162,6 +169,7 @@ export class BoardStore {
       b.groups.push({ id: randomUUID(), ...structuredClone(edit.group) });
     if (edit.removeGroup)
       b.groups = b.groups.filter((g) => g.id !== edit.removeGroup);
+    if (edit.viewId && b.views[edit.viewId]) b.focusedViewId = edit.viewId;
     if (edit.viewId && (edit.selection || edit.guideFocus))
       syncSelection(b, edit.viewId, b.selection);
     if (edit.placements)
@@ -177,6 +185,46 @@ export class BoardStore {
     const active = b.focusedViewId ? b.views[b.focusedViewId] : undefined;
     if (!b.selection.length && !active?.selection.length)
       throw Error("Select objects or components on the board first.");
+    const parts: Record<string, string> = {};
+    for (const i of b.instances) parts["instance:" + i.id] = JSON.stringify(i);
+    for (const g of b.groups) parts["group:" + g.id] = JSON.stringify(g);
+    for (const [key, note] of Object.entries(b.notes))
+      parts["note:" + key] = note;
+    for (const i of b.intents)
+      parts["intent:" + i.id] = JSON.stringify({
+        version: i.version,
+        request: i.request,
+        allowedFiles: i.allowedFiles,
+      });
+    for (const s of b.spaces) parts["space:" + s.id] = JSON.stringify(s);
+    for (const l of b.spaceLinks) parts["link:" + l.id] = JSON.stringify(l);
+    parts.selection = JSON.stringify({
+      objectIds: b.selection,
+      viewId: active?.id,
+      instanceIds: active?.selection,
+    });
+    const previous = this.contextSnapshots.get(id);
+    const changed = Object.keys(parts).filter(
+      (key) => previous?.parts[key] !== parts[key],
+    );
+    const removed = Object.keys(previous?.parts || {}).filter(
+      (key) => !(key in parts),
+    );
+    const intentDiff = {
+      sinceRevision: previous?.revision ?? null,
+      firstRead: !previous,
+      changed: changed.slice(0, 200),
+      removed: removed.slice(0, 200),
+      changedCount: changed.length,
+      removedCount: removed.length,
+      meaning:
+        "Attention and arrangement changes only. Explicit change intents define requested file scope; host permissions remain separate.",
+    };
+    this.contextSnapshots.set(id, { revision: b.revision, parts });
+    const chosen = active
+      ? b.instances.filter((i) => active.selection.includes(i.id))
+      : [];
+    const selectedObjects = b.objects.filter((o) => b.selection.includes(o.id));
     b.lastContextRead = {
       at: this.now(),
       revision: b.revision,
@@ -186,12 +234,29 @@ export class BoardStore {
       boardId: id,
       revision: b.revision,
       selection: b.selection,
+      intentDiff,
+      contextLimits: {
+        selectedInstances: chosen.length,
+        selectedObjects: selectedObjects.length,
+        returnedLimit: 30,
+        continuation:
+          "Use sand_read_spaces / sand_read_component and sand_find_objects for omitted details.",
+      },
       focusedView: active,
-      instances: active
-        ? b.instances.filter((i) => active.selection.includes(i.id))
-        : [],
+      instances: chosen
+        .slice(0, 30)
+        .map((i) => ({
+          ...i,
+          data:
+            JSON.stringify(i.data).length > 4000
+              ? {
+                  omitted: true,
+                  instruction: "Read this instance with sand_read_component.",
+                }
+              : i.data,
+        })),
       spaces: b.spaces,
-      objects: b.objects.filter((o) => b.selection.includes(o.id)),
+      objects: selectedObjects.slice(0, 30),
       workspaces: b.workspaces.map(
         ({ id, label, head, branch, snapshot, files, omitted }) => ({
           id,
@@ -356,6 +421,7 @@ export class BoardStore {
     return this.read(id);
   }
   end(id: string) {
+    this.contextSnapshots.delete(id);
     this.get(id);
     this.boards.delete(id);
     return { ended: true, boardId: id };

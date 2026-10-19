@@ -381,6 +381,16 @@ export function SpaceCanvas({
                 tabIndex={0}
                 role="button"
                 aria-label={c.title}
+                title={[
+                  c.title,
+                  c.type,
+                  c.objectId
+                    ? b.objects.find((o) => o.id === c.objectId)?.source?.path
+                    : "",
+                  c.rect.pinned ? "位置已固定" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
                 data-object-id={c.objectId}
                 data-instance-id={c.id}
                 className={`card component-card ${view.selection.includes(c.id) ? "selected" : ""} ${focusedGuide && c.objectId && !routeIds.has(c.objectId) ? "dimmed" : ""}`}
@@ -400,6 +410,7 @@ export function SpaceCanvas({
                   else if (mode === "arrange") void select(c.id);
                 }}
                 onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     void select(c.id, e.shiftKey);
