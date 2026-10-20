@@ -449,6 +449,11 @@ export function Toolbox({
           <HistoryPanel
             history={history}
             busy={busy}
+            /* 撤销、重做、跳转都走 MCP 工具：面板不直接改 store。 */
+            call={call}
+            refreshBoard={async () => {
+              await action("sand_read_board");
+            }}
             onUndo={() => onUndo?.()}
             onRedo={() => onRedo?.()}
             onJump={(id) => onJump?.(id)}
