@@ -13,8 +13,8 @@ import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { BoardStore } from "../core/store.ts";
 import { Changes } from "../server/changes.ts";
-import { bind, scan } from "../server/repository.ts";
-import { currentFile } from "../server/worktree.ts";
+import { bind, currentFile } from "../connectors/git.ts";
+import { scan } from "../domains/code/indexer.ts";
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "sand-change-"));
   const git = (...args: string[]) =>

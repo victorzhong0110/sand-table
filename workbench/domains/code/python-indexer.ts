@@ -1,3 +1,8 @@
+// Python 符号索引：解析源码文本，从不导入或执行被检查的代码。
+//
+// 搬迁自 server/python.ts（#13：代码领域包与连接器）。
+// 契约见 docs/architecture/domain-packs.zh-CN.md 第 4 节。
+
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 export type PythonSymbol = {

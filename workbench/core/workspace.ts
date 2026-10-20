@@ -27,6 +27,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { ObjectState } from "./content.ts";
+import { migrateHistoryState } from "./history.ts";
 import type {
   AuditEntry,
   HistoryEntry,
@@ -35,13 +36,15 @@ import type {
   PersistedBoard as SharedPersistedBoard,
   Presentation,
   ResourceReference,
+  TimelineEntry,
+  TimelineState,
   WorkspaceActivity,
   WorkspaceObject,
   WorkspaceSnapshot as SharedWorkspaceSnapshot,
 } from "./objects.ts";
 
 /** 工作空间文件格式版本。落盘文件始终写入当前版本。 */
-export const WORKSPACE_SCHEMA_VERSION = 1;
+export const WORKSPACE_SCHEMA_VERSION = 2;
 
 /** 导出包格式标识。 */
 export const WORKSPACE_BUNDLE_FORMAT = "sand-table-workspace-bundle";
@@ -116,7 +119,8 @@ export type WorkspaceFile = {
   relations: ObjectRelation[];
   resources: ResourceReference[];
   activities: WorkspaceActivity[];
-  history: { undo: HistoryEntry[]; redo: HistoryEntry[] };
+  /** 历史状态 v2：单条日志 + 游标。v1 的双栈只在迁移链里出现。 */
+  history: TimelineState;
   audit: AuditEntry[];
 };
 
@@ -511,7 +515,7 @@ const normalizePatchTarget = (value: unknown): Patch["target"] => {
   }
 };
 
-const normalizeHistoryEntry = (raw: unknown): HistoryEntry => {
+const normalizeHistoryEntry = (raw: unknown): TimelineEntry => {
   const r = isRecord(raw) ? raw : {};
   const patch = isRecord(r.patch) ? r.patch : {};
   return {
@@ -520,6 +524,12 @@ const normalizeHistoryEntry = (raw: unknown): HistoryEntry => {
     label: asString(r.label, ""),
     at: asNumber(r.at, 0),
     author: asString(r.author, "unknown"),
+    // parentId 与 seq 是时间线的骨架：归一化时丢了它，树就塌成一堆散点，
+    // 「跳到任意一条记录」随之失效。条目级字段一律保留。
+    ...(typeof r.parentId === "string" && r.parentId
+      ? { parentId: r.parentId }
+      : {}),
+    seq: asNumber(r.seq, 0),
     // kind 是 I12 的判别字段：丢了它，存一次盘之后这条动作就再也说不清是不是外部效果。
     ...(typeof r.kind === "string" && r.kind ? { kind: r.kind } : {}),
     // authorKind 决定面板上这条是人做的还是 Agent 做的：同样不能丢。
@@ -533,6 +543,34 @@ const normalizeHistoryEntry = (raw: unknown): HistoryEntry => {
       after: patch.after,
     },
   };
+};
+
+/**
+ * 归一化历史状态。
+ *
+ * v2 是权威形状；读到 v1（双栈）时按迁移链处理——这里做的是**兜底**，
+ * 正常路径由 WORKSPACE_MIGRATIONS 先把 v1 迁成 v2。
+ */
+const normalizeHistoryState = (raw: unknown): TimelineState => {
+  const r = isRecord(raw) ? raw : {};
+  if (Array.isArray(r.entries)) {
+    const entries = asArray(r.entries)
+      .filter(isRecord)
+      .map(normalizeHistoryEntry);
+    return {
+      version: 2,
+      entries,
+      cursorId:
+        typeof r.cursorId === "string" && r.cursorId ? r.cursorId : undefined,
+    };
+  }
+  // v1 双栈：undo 串成一条链，redo 挂在链尾之下作为分支，不丢记录。
+  // 迁移规则只有一处实现（core/history.ts 的 migrateHistoryState），
+  // 两边各写一份迟早会漂。
+  return migrateHistoryState({
+    undo: asArray(r.undo).filter(isRecord),
+    redo: asArray(r.redo).filter(isRecord),
+  } as never);
 };
 
 const normalizeAuditEntry = (raw: unknown): AuditEntry => {
@@ -581,10 +619,7 @@ const normalizeWorkspace = (raw: unknown): WorkspaceFile => {
     relations,
     resources: asArray(r.resources).filter(isRecord).map(normalizeResource),
     activities: asArray(r.activities).filter(isRecord).map(normalizeActivity),
-    history: {
-      undo: asArray(history.undo).filter(isRecord).map(normalizeHistoryEntry),
-      redo: asArray(history.redo).filter(isRecord).map(normalizeHistoryEntry),
-    },
+    history: normalizeHistoryState(history),
     audit: asArray(r.audit).filter(isRecord).map(normalizeAuditEntry),
   };
 };
@@ -634,6 +669,27 @@ export const WORKSPACE_MIGRATIONS: WorkspaceMigration[] = [
       if (!Array.isArray(next.audit)) next.audit = [];
       if (typeof next.contentRevision !== "number") next.contentRevision = 0;
       next.schemaVersion = 1;
+      return next;
+    },
+  },
+  {
+    from: 1,
+    to: 2,
+    describe:
+      "v1 → v2：历史从双栈（撤销栈 + 重做栈）迁成分支时间线（单条日志 + 游标）",
+    apply: (raw) => {
+      const next = { ...raw };
+      const history = isRecord(next.history) ? next.history : {};
+      if (Array.isArray(history.entries)) {
+        // 已经是 v2 形状，别动。
+        next.schemaVersion = 2;
+        return next;
+      }
+      next.history = migrateHistoryState({
+        undo: asArray(history.undo).filter(isRecord),
+        redo: asArray(history.redo).filter(isRecord),
+      } as never);
+      next.schemaVersion = 2;
       return next;
     },
   },
@@ -785,6 +841,18 @@ export class WorkspaceStore {
     return join(this.root, this.assertId(id));
   }
 
+  /**
+   * 确保工作空间目录存在，返回目录路径。
+   *
+   * 锁文件要落在目录里，而独占创建不会建目录——
+   * 新工作空间第一次保存时目录还没有，锁会直接创建失败。
+   */
+  ensureDir(id: string): string {
+    const dir = this.workspaceDir(id);
+    this.fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
   /** <root>/<workspaceId>/workspace.json */
   mainPath(id: string): string {
     return join(this.workspaceDir(id), "workspace.json");
@@ -836,7 +904,7 @@ export class WorkspaceStore {
         relations: [],
         resources: [],
         activities: [],
-        history: { undo: [], redo: [] },
+        history: { version: 2, entries: [], cursorId: undefined },
         audit: [],
       };
       this.lastError = null;

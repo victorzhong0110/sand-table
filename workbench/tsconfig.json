@@ -13,6 +13,8 @@
   },
   "include": [
     "core",
+    "connectors",
+    "domains",
     "server",
     "board",
     "dev",

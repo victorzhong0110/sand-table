@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { BoardStore } from "../core/store.ts";
-import type { Binding } from "./repository.ts";
+import type { Binding } from "../connectors/types.ts";
 import type { FileRef, FileTarget, Proposal } from "../core/changes.ts";
 import { intentSummary, proposalSummary } from "../core/changes.ts";
 import { viewResult } from "../core/results.ts";
@@ -10,7 +10,8 @@ import {
   worktreeState,
   digest,
   validatePath,
-} from "./worktree.ts";
+  observeWorktree,
+} from "../connectors/git.ts";
 import type { RegisterTool } from "./tool-types.ts";
 const id = z.string().min(1).max(500),
   board = { boardId: id };
@@ -214,93 +215,8 @@ export class Changes {
   }
   observe(boardId: string, p: Proposal) {
     const b = this.store.get(boardId);
-    const states = worktreeState(this.bindings, p.files);
-    const files = p.files.map((f) => {
-      let actual: string | null;
-      try {
-        actual = currentFile(this.bindings, f).hash;
-      } catch {
-        return {
-          workspaceId: f.workspaceId,
-          path: f.path,
-          state: "unexpected" as const,
-          actualHash: null,
-        };
-      }
-      const beforeMode = p.baseline.find((s) => s.workspaceId === f.workspaceId)
-        ?.files[f.path]?.mode;
-      const actualMode = states.find((s) => s.workspaceId === f.workspaceId)
-        ?.files[f.path]?.mode;
-      const modeChanged =
-        beforeMode !== undefined &&
-        actualMode !== undefined &&
-        beforeMode !== actualMode;
-      return {
-        workspaceId: f.workspaceId,
-        path: f.path,
-        state: modeChanged
-          ? ("unexpected" as const)
-          : actual === f.afterHash
-            ? ("after" as const)
-            : actual === f.beforeHash
-              ? ("before" as const)
-              : ("unexpected" as const),
-        actualHash: actual,
-      };
-    });
-    const outsideChanges: FileRef[] = [];
-    for (const state of states) {
-      const before = p.baseline.find(
-        (s) => s.workspaceId === state.workspaceId,
-      )!;
-      for (const path of new Set([
-        ...Object.keys(before.files),
-        ...Object.keys(state.files),
-      ])) {
-        if (
-          p.files.some(
-            (f) => f.workspaceId === state.workspaceId && f.path === path,
-          )
-        )
-          continue;
-        if (
-          JSON.stringify(before.files[path]) !==
-          JSON.stringify(state.files[path])
-        )
-          outsideChanges.push({ workspaceId: state.workspaceId, path });
-      }
-    }
-    const omitted = [
-      ...p.baseline.flatMap((s) => s.omitted),
-      ...states.flatMap((s) => s.omitted),
-    ];
-    const allAfter = files.every((f) => f.state === "after"),
-      allBefore = files.every((f) => f.state === "before");
-    const state =
-      outsideChanges.length || files.some((f) => f.state === "unexpected")
-        ? "diverged"
-        : omitted.length
-          ? "incomplete"
-          : allAfter
-            ? "matches"
-            : allBefore
-              ? "not-applied"
-              : "partial";
-    p.verification = {
-      at: Date.now(),
-      state,
-      files,
-      outsideChanges,
-      omitted,
-      fingerprint: digest(
-        JSON.stringify(
-          states.map((s) => ({
-            workspaceId: s.workspaceId,
-            fingerprint: s.fingerprint,
-          })),
-        ),
-      ),
-    };
+    // 实际内容与范围核对只有一份实现：在 Git 连接器那边（connectors/git.ts）。
+    p.verification = observeWorktree(this.bindings, p.files, p.baseline);
     b.revision++;
     return p.verification;
   }

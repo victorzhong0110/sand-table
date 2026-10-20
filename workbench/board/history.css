@@ -1,6 +1,11 @@
 /* The board's reversible history panel.
    Kept in its own file so the panel can grow without touching the canvas
-   stylesheet. */
+   stylesheet.
+
+   The panel is a single **timeline**, not two columns: every record is one
+   node on a line, the current position is highlighted, and the records that
+   a later edit branched away from stay visible (marked 旧分支) because they
+   are still reachable. */
 .history-panel {
   display: flex;
   flex-direction: column;
@@ -28,74 +33,97 @@
 .history-actions button.is-redo svg {
   transform: scaleX(-1);
 }
-.history-list {
+
+/* The line the records hang on. */
+.history-timeline {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
   overflow: auto;
   min-height: 0;
 }
+.history-node {
+  position: relative;
+}
+/* The rail: one vertical line per depth level, so a branch reads as a
+   branch. It stops at the first and the last node of the level. */
+.history-node::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+.history-node:first-child::before {
+  top: 11px;
+}
+.history-node:last-child::before {
+  bottom: calc(100% - 11px);
+}
+.history-node:only-child::before {
+  display: none;
+}
 .history-entry {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-areas:
-    "kind label"
-    "kind meta";
-  gap: 2px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   text-align: left;
-  align-items: center;
-  padding: 8px 10px;
-  background: var(--surface);
-  border: 1px solid var(--line);
+  padding: 5px 8px 5px 0;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 7px;
 }
-.history-entry .history-kind {
-  grid-area: kind;
-  font-size: 10px;
-  line-height: 1.4;
-  padding: 2px 6px;
-  border-radius: 5px;
-  border: 1px solid var(--line);
-  color: var(--muted);
-  white-space: nowrap;
-}
-.history-entry.is-undo .history-kind,
-.history-entry.is-redo .history-kind {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.history-entry .history-label {
-  grid-area: label;
-  font-size: 12px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-.history-entry small {
-  grid-area: meta;
-  font-size: 10px;
-  color: var(--muted);
+.history-entry:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: var(--line);
 }
 .history-entry:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-/* Who made this step: a person or an agent. The left edge says it at a
-   glance, the badge in the meta line says it exactly. */
-.history-entry.is-human {
-  border-left: 2px solid var(--line);
+/* The node itself on the rail. */
+.history-dot {
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  position: relative;
+  z-index: 1;
 }
-.history-entry.is-agent {
-  border-left: 2px solid var(--accent);
+.history-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
 }
+.history-entry .history-label {
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.history-entry small {
+  font-size: 10px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+/* Who made this step: a person or an agent. The dot says it at a glance,
+   the badge in the meta line says it exactly. */
 .history-author {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  margin: 0 2px;
   padding: 0 5px;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -114,28 +142,49 @@
   border-radius: 50%;
   background: currentColor;
 }
-/* Undone steps live in the redo stack: they are not on the board any more,
-   so they are not jump targets. */
-.history-entry.is-undone {
+
+/* Where this record sits on the line. */
+.history-tag {
+  flex-shrink: 0;
+  font-size: 9px;
+  line-height: 1.6;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  white-space: nowrap;
+}
+/* The board is here right now. */
+/* Who made this step: a person or an agent. The dot's edge says it at a
+   glance, the badge in the meta line says it exactly. */
+.history-node.is-agent .history-dot {
+  border-color: var(--accent);
+}
+.history-node.is-current .history-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.history-node.is-current .history-entry {
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border-color: var(--accent);
+}
+.history-node.is-current .history-tag.is-current {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* Superseded by a later edit, but still reachable: dashed, quieter. */
+.history-node.is-branch .history-dot {
   border-style: dashed;
-  background: transparent;
-  color: var(--muted);
-  cursor: default;
 }
-.history-entry.is-undone .history-label {
+.history-node.is-branch .history-label {
   color: var(--muted);
 }
-.history-entry.is-undone .history-kind {
+.history-node.is-branch .history-tag.is-branch {
   border-style: dashed;
-  color: var(--muted);
 }
-.history-divider {
-  list-style: none;
-  margin-top: 2px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--line);
-  font-size: 10px;
-  color: var(--muted);
+/* Ahead of the cursor: can still be rolled forward. */
+.history-node.is-ahead .history-dot {
+  border-color: var(--accent);
 }
 .history-more {
   align-self: flex-start;

@@ -1,47 +1,42 @@
-// 撤销/重做栈与审计日志的纯逻辑实现。
-// 契约见 docs/architecture/workspace-kernel.zh-CN.md 第 6 节（I10、I11、I12）。
+// 撤销/重做的**分支时间线**与审计日志。
+// 契约见 docs/architecture/history-timeline.zh-CN.md（v2 时间线模型）
+// 与 docs/architecture/workspace-kernel.zh-CN.md 第 6 节（I10、I11、I12）。
 // 共享类型来自 ./objects.ts（本文件只读引用，不修改它）。
 //
 // 三个概念必须分开：
 //   1. 撤销单位 = 用户意图。一次拖动、一次连续输入、一批同意图的 Agent 修改算一个单位。
 //      一个单位可以覆盖多个实体，因此合并按实体做并集：每个实体的 before 取最早值、
 //      after 取最新值；涉及多个实体时补丁升级为 target: "batch"。
-//   2. 撤销栈 / 重做栈：可回退的状态。Undo 弹撤销栈压重做栈，Redo 反之。
-//   3. 审计日志：只追加。撤销本身也进审计，但审计与撤销栈游标互不影响。
+//   2. 时间线 = 作品生命过程的记录。它是一**棵树**，不是两个栈：
+//      每条记录带 parentId（它发生在哪条之上），游标 cursorId 指向板面当前停在哪条之后。
+//      新编辑从游标分叉，旧分支原样保留，所以任意一条记录都还能跳回去。
+//      v1 的双栈模型做不到这一点：record() 会清空重做栈，被撤销的那段历史从此不可达。
+//   3. 审计日志：只追加。撤销本身也进审计，但审计与时间线游标互不影响。
 //
 // 外部效果（已发布的 PR、已运行的实验、已发送的内容）不进入白板撤销栈（I12）：
 // 它们的回滚属于补偿操作。record() 会拒绝这类条目，并把它们留在 refused 列表里。
 //
-// 本模块不含存储与 UI：调用方负责把 patch 应用到对象，并把 undo/redo 追加进审计日志。
+// 本模块不含存储与 UI：调用方负责把 patch 应用到对象，并把撤销/重做追加进审计日志。
+// 树结构与路径计算在 core/timeline.ts（本文件只调它，不重复实现）。
 
+import {
+  chainUp,
+  descendantsOf,
+  indexTimeline,
+  latestChild,
+  pathBetween,
+  pruneTimeline,
+  sortBySeq,
+} from "./timeline.ts";
+import type { TimelineIndex } from "./timeline.ts";
 import type {
   AuditEntry,
   HistoryEntry,
-  HistoryState as SharedHistoryState,
+  HistoryState as LegacyHistoryState,
   Patch,
+  TimelineEntry,
+  TimelineState,
 } from "./objects.ts";
-
-/** 撤销栈与重做栈的完整状态。持久化层按此结构保存（workspace.json 的 history 字段）。 */
-export type HistoryState = {
-  /** 撤销栈，栈顶是最近一次可撤销的意图。 */
-  undo: HistoryEntry[];
-  /** 重做栈，栈顶是最近一次被撤销的意图。 */
-  redo: HistoryEntry[];
-};
-
-/**
- * 本文件的 HistoryState 与 core/objects.ts 的共享 HistoryState 必须结构一致，
- * 否则负责人接线时 board.history 与 history.state 互相赋值会编译失败。
- * 下面是纯类型守卫：两边不再互相可赋值时直接报类型错，不产生任何运行时代码。
- */
-type AssertTrue<T extends true> = T;
-type HistoryStateMatchesShared = AssertTrue<
-  HistoryState extends SharedHistoryState
-    ? SharedHistoryState extends HistoryState
-      ? true
-      : false
-    : false
->;
 
 /**
  * 撤销单位内的一条实体快照。
@@ -64,6 +59,11 @@ export type HistoryOptions = {
   requireKind?: boolean;
   /** 拒绝条目的时间戳来源，默认 Date.now。 */
   now?: () => number;
+  /**
+   * 保留上限（条），默认 500。
+   * 只从叶子开始裁，绝不裁掉游标所在路径上的记录；详见 core/timeline.ts 的 pruneTimeline。
+   */
+  limit?: number;
 };
 
 /** 被拒绝进入撤销栈的条目。外部效果不得进白板撤销栈（契约 I12）。 */
@@ -75,8 +75,10 @@ export type HistoryRefusal = {
 
 /**
  * 面板与接口用的历史记录：不含补丁负载，只给人和 UI 看。
- * kind 区分「这是一次编辑」还是「这是一次撤销/重做」——
- * 撤销本身也进审计日志，但它不占用撤销栈的位置。
+ *
+ * v1 双栈模型里还有 kind: "edit" | "undo" | "redo"（靠它区分撤销栈与重做栈）。
+ * 时间线模型没有这个概念：每条记录都是一次编辑，位置关系由 parentId 表达，
+ * 所以 kind 退成可选的旧字段，面板改看 TimelineRecord。
  */
 export type HistoryRecord = {
   id: string;
@@ -84,15 +86,37 @@ export type HistoryRecord = {
   at: number;
   author: string;
   authorKind: "human" | "agent";
-  kind: "edit" | "undo" | "redo";
   intentId: string;
+  /** @deprecated v1 双栈模型用来区分撤销栈/重做栈；时间线模型不再使用。 */
+  kind?: "edit" | "undo" | "redo";
+};
+
+/**
+ * 时间线上的一条记录：在通用形状之外补上「它在树的哪里」。
+ *
+ * - current：板面正停在这条上。
+ * - onPath：在游标的祖先路径上，也就是「可撤销的那条线」。
+ * - ahead：在游标之后，还能前滚回去。
+ * - branch：既不在路径上也不在游标之后——被分叉取代、但**仍然可达**的旧分支。
+ */
+export type TimelineRecord = HistoryRecord & {
+  /** 父记录：这条是在哪条之上发生的。 */
+  parentId?: string;
+  /** 同一棵时间线上的序号（创建顺序）。 */
+  seq: number;
+  current: boolean;
+  onPath: boolean;
+  ahead: boolean;
+  branch: boolean;
 };
 
 /** 面板与 MCP 工具 `sand_history` 的返回形状。 */
 export type HistorySnapshot = {
   boardId: string;
-  /** 新到旧。撤销栈在前，重做栈（已撤销、待重做）在后。 */
-  records: HistoryRecord[];
+  /** 全部记录，按 seq 升序：包含被分叉取代但仍可达的旧分支。 */
+  records: TimelineRecord[];
+  /** 当前游标：板面正停在哪条记录之后。 */
+  cursorId?: string;
   canUndo: boolean;
   canRedo: boolean;
   /** 这套历史能做什么、不能做什么。UI 直接展示，不要另写一份说明。 */
@@ -116,6 +140,9 @@ const snapshotTargets: UnitSnapshot["target"][] = [
 
 /** 记录与拒绝列表的容量上限，避免长时间运行后无限增长。 */
 const refusalLimit = 50;
+
+/** 时间线的默认保留上限。 */
+const defaultLimit = 500;
 
 const entityKey = (target: string, id: string): string => `${target}:${id}`;
 
@@ -358,59 +385,203 @@ const copyEntryStructure = (entry: HistoryEntry): HistoryEntry => {
   return copied;
 };
 
+/** 复制一条时间线条目：结构与快照值都复制。 */
+const copyTimelineEntry = (entry: TimelineEntry): TimelineEntry => {
+  const copied: TimelineEntry = {
+    ...copyEntry(entry),
+    seq: entry.seq,
+  };
+  if (entry.parentId !== undefined) copied.parentId = entry.parentId;
+  return copied;
+};
+
+/** 只复制结构、快照值按引用共享：用于 state 快照。 */
+const copyTimelineEntryStructure = (entry: TimelineEntry): TimelineEntry => {
+  const copied: TimelineEntry = {
+    ...copyEntryStructure(entry),
+    seq: entry.seq,
+  };
+  if (entry.parentId !== undefined) copied.parentId = entry.parentId;
+  return copied;
+};
+
+/** 判断一份状态是不是 v2 时间线。 */
+const isTimelineState = (
+  state: TimelineState | LegacyHistoryState,
+): state is TimelineState =>
+  (state as TimelineState).version === 2 &&
+  Array.isArray((state as TimelineState).entries);
+
+/** 一批记录里的最大序号 + 1：下一条记录该用的 seq。 */
+const nextSeqOf = (entries: TimelineEntry[]): number =>
+  entries.reduce((max, entry) => Math.max(max, entry.seq), -1) + 1;
+
 /**
- * 撤销/重做栈。
+ * 把 v1 双栈状态迁移成 v2 时间线。
  *
- * 状态机（undo 栈顶 U、redo 栈顶 R）：
- *   record(e)   → e 与栈顶合并（同一 intentId、连续、且上一次动作不是 undo/redo），
- *                 否则作为新单位压入 U；R 清空。外部效果被拒绝，不进任何栈。
- *   undo()      → 弹出 U 压入 R，返回被撤销的条目；U 为空时返回 undefined。
- *   redo()      → 弹出 R 压回 U，返回被重做的条目；R 为空时返回 undefined。
- *   clearRedo() → R 清空。
+ * 迁移**不得丢记录**（契约第 6 节）：
+ *   - undo 栈按顺序串成一条链（后一条的 parentId 指向前一条），游标落在最后一条——
+ *     这正是 v1 撤销栈的语义：栈里的记录就是当前生效的那些。
+ *   - redo 栈里的记录也保留：v1 的重做栈顶是「下一个要重做的记录」，
+ *     所以从栈顶往回串成一条链，挂在游标之下——重做顺序与 v1 一致。
  *
- * 连续 Cmd+Z 不会震荡：undo 之后该条目只在 redo 栈里，再 undo 一定取到更早的条目；
- * redo 之后它回到 undo 栈，再 undo 能再次撤销它。
+ * 供 core/workspace.ts 的迁移链使用（负责人维护那条链）。
+ */
+export function migrateHistoryState(state: LegacyHistoryState): TimelineState {
+  if (!state || typeof state !== "object")
+    throw new TypeError("历史状态必须是对象。");
+  const undo = Array.isArray(state.undo) ? state.undo : [];
+  const redo = Array.isArray(state.redo) ? state.redo : [];
+  const entries: TimelineEntry[] = [];
+  let seq = 0;
+  let parentId: string | undefined;
+  for (const raw of undo) {
+    const entry: TimelineEntry = {
+      ...copyEntry(raw),
+      seq: seq++,
+    };
+    if (parentId !== undefined) entry.parentId = parentId;
+    entries.push(entry);
+    parentId = entry.id;
+  }
+  const cursorId = parentId;
+  // 重做栈：数组末尾是下一个要重做的记录（v1 的 redo() 从末尾弹）。
+  let branchParent = cursorId;
+  for (let i = redo.length - 1; i >= 0; i--) {
+    const entry: TimelineEntry = {
+      ...copyEntry(redo[i]),
+      seq: seq++,
+    };
+    if (branchParent !== undefined) entry.parentId = branchParent;
+    entries.push(entry);
+    branchParent = entry.id;
+  }
+  return {
+    version: 2,
+    entries,
+    ...(cursorId === undefined ? {} : { cursorId }),
+  };
+}
+
+/**
+ * 读回一份 v2 状态。
+ *
+ * 落盘的文件可能来自旧版本或被手工改过：这里只做**排序键**的归一化
+ * （补齐缺失的 seq、丢掉没有 id 的记录），其余字段原样保留——
+ * 归一化器最常见的失败是静默丢字段，所以这里不碰补丁负载。
+ */
+const restoreTimelineState = (state: TimelineState): TimelineState => {
+  const entries: TimelineEntry[] = [];
+  const seen = new Set<string>();
+  for (const raw of state.entries) {
+    if (!raw || typeof raw.id !== "string" || !raw.id) continue;
+    if (seen.has(raw.id)) continue;
+    seen.add(raw.id);
+    const entry: TimelineEntry = {
+      ...copyTimelineEntry(raw),
+      seq: Number.isFinite(raw.seq) ? raw.seq : entries.length,
+    };
+    entries.push(entry);
+  }
+  const cursorId =
+    state.cursorId && seen.has(state.cursorId) ? state.cursorId : undefined;
+  return {
+    version: 2,
+    entries,
+    ...(cursorId === undefined ? {} : { cursorId }),
+  };
+};
+
+/**
+ * 游标路径上的记录（从根到游标，旧的在前）——v1「撤销栈」的等价物。
+ *
+ * 过渡期接线用：core/store.ts 的 history() 应当改用 records()（完整的时间线视图）；
+ * 旧断言 `state.undo` 可以换成这个函数。
+ */
+export function undoPath(state: TimelineState): TimelineEntry[] {
+  const index = indexTimeline(state.entries);
+  return chainUp(index, state.cursorId).reverse();
+}
+
+/**
+ * 游标之后的记录（还能前滚回去的那些）——v1「重做栈」的等价物。
+ *
+ * 过渡期接线用：旧断言 `state.redo` 可以换成这个函数。
+ * 注意与 v1 的差别：v1 的重做栈只装「被撤销的那几条」，
+ * 这里给的是游标之后的整棵子树（分叉后可能有几条）。
+ */
+export function redoPath(state: TimelineState): TimelineEntry[] {
+  const index = indexTimeline(state.entries);
+  return descendantsOf(index, state.cursorId);
+}
+
+/**
+ * 分支时间线。
+ *
+ * 状态机（游标 cursor，entries 是全部记录）：
+ *   record(e)   → 从游标分叉出一条新记录（parentId = 游标），游标移到它；
+ *                 若与游标处的记录满足合并条件（同 intentId、连续、且上一次动作不是
+ *                 undo/redo/jump），则**合并进游标那条**而不是新增。
+ *                 旧分支原样保留——这是与 v1 最大的不同：v1 会清空重做栈。
+ *   undo()      → 游标移到当前记录的父节点，返回被撤销的条目；没有父节点时返回 undefined。
+ *   redo()      → 游标移到游标的某个子节点（有多个时取最近创建的），返回被重做的条目。
+ *   jumpTo(id)  → 游标移动到任意记录：先沿父链回退到最近公共祖先，再沿子链前滚到目标。
+ *
+ * 连续 Cmd+Z 不会震荡：undo 之后游标往回走，再 undo 一定取到更早的条目；
+ * redo 之后游标往前走，再 undo 能再次撤销它。
  */
 export class History {
-  private undoStack: HistoryEntry[];
-  private redoStack: HistoryEntry[];
-  /** 上一次动作之后是否允许与栈顶合并。撤销/重做会打断意图分组。 */
+  /** 全部记录（含被分叉取代但仍可达的旧分支），按创建顺序追加。 */
+  private entries: TimelineEntry[];
+  /** 游标：板面当前停在哪条记录之后。缺省表示还没开始。 */
+  private cursorId?: string;
+  /** 上一次动作之后是否允许与游标处的记录合并。撤销/重做/跳转都会打断意图分组。 */
   private mergeable: boolean;
   private options: HistoryOptions;
   private now: () => number;
   private refusals: HistoryRefusal[];
   private unclassifiedEntries: HistoryEntry[];
+  /** 下一条记录的序号。落盘读回时取已有记录的最大值 + 1。 */
+  private nextSeq: number;
 
-  constructor(state?: HistoryState, options?: HistoryOptions) {
-    if (state !== undefined) {
-      if (!Array.isArray(state.undo) || !Array.isArray(state.redo))
-        throw new TypeError("历史状态必须包含 undo 与 redo 两个数组。");
-    }
-    this.undoStack = state ? [...state.undo] : [];
-    this.redoStack = state ? [...state.redo] : [];
-    this.mergeable = true;
+  constructor(
+    state?: TimelineState | LegacyHistoryState,
+    options?: HistoryOptions,
+  ) {
     this.options = options ?? {};
     this.now = this.options.now ?? Date.now;
     this.refusals = [];
     this.unclassifiedEntries = [];
+    this.mergeable = true;
+    this.entries = [];
+    this.nextSeq = 0;
+    if (state !== undefined) {
+      const restored = isTimelineState(state)
+        ? restoreTimelineState(state)
+        : migrateHistoryState(state);
+      this.entries = restored.entries;
+      this.cursorId = restored.cursorId;
+      this.nextSeq = nextSeqOf(restored.entries);
+    }
   }
 
-  /** 当前状态快照。数组与条目是副本，改动它不会影响内部栈。 */
-  get state(): HistoryState {
+  /** 当前状态快照（v2）。数组与条目是副本，改动它不会影响内部状态。 */
+  get state(): TimelineState {
     return {
-      undo: this.undoStack.map(copyEntryStructure),
-      redo: this.redoStack.map(copyEntryStructure),
+      version: 2,
+      entries: this.entries.map(copyTimelineEntryStructure),
+      ...(this.cursorId === undefined ? {} : { cursorId: this.cursorId }),
     };
   }
 
-  /** 是否还有可撤销的意图。 */
+  /** 是否还有可撤销的意图：游标停在某条记录上就能再往回退一步。 */
   get canUndo(): boolean {
-    return this.undoStack.length > 0;
+    return this.cursorId !== undefined;
   }
 
-  /** 是否还有可重做的意图。 */
+  /** 是否还有可重做的意图：游标后面还有子节点。 */
   get canRedo(): boolean {
-    return this.redoStack.length > 0;
+    return Boolean(latestChild(this.index(), this.cursorId));
   }
 
   /**
@@ -430,13 +601,49 @@ export class History {
   }
 
   /**
+   * 全部记录（含被分叉取代但仍可达的旧分支），按 seq 升序。
+   * 面板用这个视图渲染单条时间线：每条记录带上「它在树的哪里」。
+   */
+  records(): TimelineRecord[] {
+    const index = this.index();
+    const pathIds = new Set(
+      chainUp(index, this.cursorId).map((entry) => entry.id),
+    );
+    const aheadIds = new Set(
+      descendantsOf(index, this.cursorId).map((entry) => entry.id),
+    );
+    return sortBySeq(this.entries).map((entry) => {
+      const onPath = pathIds.has(entry.id);
+      const ahead = aheadIds.has(entry.id);
+      return {
+        id: entry.id,
+        label: entry.label,
+        at: entry.at,
+        author: entry.author,
+        // 缺这一项时按人处理：读回旧文件不因为少一个字段就崩。
+        authorKind: entry.authorKind === "agent" ? "agent" : "human",
+        intentId: entry.intentId,
+        ...(entry.parentId === undefined ? {} : { parentId: entry.parentId }),
+        seq: entry.seq,
+        current: entry.id === this.cursorId,
+        onPath,
+        ahead,
+        // 既不在当前路径上、也不在游标之后：被分叉取代的旧分支，仍然可达。
+        branch: !onPath && !ahead,
+      };
+    });
+  }
+
+  /**
    * 记录一次变更。
    * 同一 intentId 的连续变更合并为一个撤销单位：按实体取并集，
    * 每个实体的 before 取最早值、after 取最新值。
-   * 新记录会清空重做栈（撤销过之后产生新编辑，重做不再有意义）。
-   * 外部效果（kind 命中 externalEffectKinds）被拒绝，不进撤销栈（契约 I12）。
+   * 新记录从游标分叉出去，**旧分支原样保留**（v1 在这里会清空重做栈）。
+   * 外部效果（kind 命中 externalEffectKinds）被拒绝，不进时间线（契约 I12）。
+   *
+   * 返回落库后的那条记录（合并时是合并后的那条）；被拒绝时返回 undefined。
    */
-  record(entry: HistoryEntry): void {
+  record(entry: HistoryEntry): TimelineEntry | undefined {
     assertEntry(entry);
     const copy = copyEntry(entry);
     // 统一成 batch 形状：core/store.ts 的 applyPatch 只认快照数组，
@@ -448,7 +655,7 @@ export class History {
         copy,
         `外部效果「${kind}」不进入白板撤销栈（契约 I12）；回滚属于补偿操作，请写审计日志。`,
       );
-      return;
+      return undefined;
     }
     if (kind === undefined) {
       this.unclassifiedEntries.push(copy);
@@ -462,99 +669,118 @@ export class History {
           copy,
           "动作种类未声明，严格模式下不进入白板撤销栈（core/objects.ts 的 HistoryEntry.kind）。",
         );
-        return;
+        return undefined;
       }
     }
-    this.redoStack = [];
-    const top = this.undoStack[this.undoStack.length - 1];
-    if (this.mergeable && top && canMerge(top, copy)) {
+    const current = this.cursorId
+      ? this.entries.find((e) => e.id === this.cursorId)
+      : undefined;
+    if (this.mergeable && current && canMerge(current, copy)) {
       const merged = mergeUnits(
-        unitFromPatch(top.patch),
+        unitFromPatch(current.patch),
         unitFromPatch(copy.patch),
       );
-      this.undoStack[this.undoStack.length - 1] = {
-        ...top,
-        kind: top.kind ?? copy.kind,
-        patch: unitToPatch(merged, top.intentId),
+      const next: TimelineEntry = {
+        ...current,
+        kind: current.kind ?? copy.kind,
+        patch: unitToPatch(merged, current.intentId),
       };
-    } else {
-      this.undoStack.push(copy);
+      this.replaceEntry(next);
+      this.mergeable = true;
+      return copyTimelineEntry(next);
     }
+    const next: TimelineEntry = {
+      ...copy,
+      seq: this.nextSeq++,
+    };
+    if (this.cursorId !== undefined) next.parentId = this.cursorId;
+    this.entries.push(next);
+    this.cursorId = next.id;
     this.mergeable = true;
+    this.prune();
+    return copyTimelineEntry(next);
   }
 
-  /** 撤销：弹撤销栈并压入重做栈。返回被撤销的条目；没有可撤销项时返回 undefined。 */
+  /** 撤销：游标退到当前记录的父节点。返回被撤销的条目；没有可撤销项时返回 undefined。 */
   undo(): HistoryEntry | undefined {
-    const entry = this.undoStack.pop();
-    if (!entry) return undefined;
-    this.redoStack.push(entry);
+    const current = this.cursorId
+      ? this.entries.find((e) => e.id === this.cursorId)
+      : undefined;
+    if (!current) return undefined;
+    this.cursorId = current.parentId;
     this.mergeable = false;
-    return copyEntry(entry);
+    return copyEntry(current);
   }
 
-  /** 重做：弹重做栈并压回撤销栈。返回被重做的条目；没有可重做项时返回 undefined。 */
+  /**
+   * 重做：游标前进到某个子节点。
+   * 分叉后同一个父节点下可能有多个子，取**最近创建**的那个——
+   * 重做回到你上次走的那条路。
+   */
   redo(): HistoryEntry | undefined {
-    const entry = this.redoStack.pop();
-    if (!entry) return undefined;
-    this.undoStack.push(entry);
+    const child = latestChild(this.index(), this.cursorId);
+    if (!child) return undefined;
+    this.cursorId = child.id;
     this.mergeable = false;
-    return copyEntry(entry);
+    return copyEntry(child);
   }
 
-  /** 丢弃重做栈（新的编辑会调用）。 */
+  /**
+   * 显式丢弃游标之后的分支。
+   *
+   * v1 的同名方法会清空重做栈；时间线模型**不会自动**丢弃任何分支，
+   * 所以这里是一次明确的破坏性操作：只删游标之后、且不在游标路径上的那些分支。
+   * 正常流程不会调用它。
+   */
   clearRedo(): void {
-    this.redoStack = [];
+    const index = this.index();
+    const ahead = new Set(
+      descendantsOf(index, this.cursorId).map((entry) => entry.id),
+    );
+    if (!ahead.size) return;
+    this.entries = this.entries.filter((entry) => !ahead.has(entry.id));
+    this.mergeable = false;
   }
 
   /**
    * 跳到某条记录：板面回到「这条记录刚发生时的样子」。
    *
-   * 双栈是有序的：撤销栈栈顶最新，重做栈栈顶最旧（重做时按时间正序弹出）。
-   * 跳转会同时动两个栈，因此插入位置必须按时间序算，不能随手 push——
-   * 否则重做时会把新的改动先应用出去，板面状态会串。
+   * 跳转要跨分支，所以是**路径重放**：先沿父链回退到最近公共祖先，再沿子链前滚到目标。
+   * undone（新→旧）与 redone（旧→新）的顺序必须与 core/store.ts 的接法一致：
+   * 先应用 undone 的 before 快照，再应用 redone 的 after 快照。
+   * 顺序错一次，板面就会串。
+   *
+   * 找不到该记录时返回 undefined——调用方要报错，不静默什么都不做。
    */
-  jumpTo(entryId: string):
-    | {
-        undone: HistoryEntry[];
-        redone: HistoryEntry[];
-      }
-    | undefined {
-    const at = this.undoStack.findIndex((e) => e.id === entryId);
-    if (at >= 0) {
-      const undone: HistoryEntry[] = [];
-      const moved: HistoryEntry[] = [];
-      // 撤销栈栈顶是最新的：先撤掉它上面（更新）的，撤到目标为止，
-      // 但**不撤目标本身**——目标是「回到它刚发生的状态」。
-      while (this.undoStack.length - 1 > at) {
-        const entry = this.undoStack.pop();
-        if (!entry) break;
-        moved.push(entry);
-        undone.push(copyEntry(entry));
-      }
-      // 被撤掉的这些比重做栈里现有的都新，要放到重做栈**栈底**（栈底最新）。
-      // moved 是新→旧，unshift 的参数要旧→新，最后一个参数落在最底。
-      if (moved.length) this.redoStack.unshift(...moved.reverse());
-      this.mergeable = false;
-      return { undone, redone: [] };
-    }
-    const redoAt = this.redoStack.findIndex((e) => e.id === entryId);
-    if (redoAt >= 0) {
-      const redone: HistoryEntry[] = [];
-      /* 目标已经被撤销过：把它重做回来。
-         注意**不要**先把撤销栈全部撤掉——那会把这条记录之前的内容也一起撤掉，
-         「跳到这条记录刚发生时的样子」就变成了「回到起点」。
-         重做栈栈顶是最旧的，依次弹出直到目标为止（含目标）。 */
-      while (this.redoStack.length) {
-        const entry = this.redoStack.pop();
-        if (!entry) break;
-        this.undoStack.push(entry);
-        redone.push(copyEntry(entry));
-        if (entry.id === entryId) break;
-      }
-      this.mergeable = false;
-      return { undone: [], redone };
-    }
-    return undefined;
+  jumpTo(
+    entryId: string,
+  ): { undone: TimelineEntry[]; redone: TimelineEntry[] } | undefined {
+    const index = this.index();
+    const path = pathBetween(index, this.cursorId, entryId);
+    if (!path) return undefined;
+    this.cursorId = entryId;
+    this.mergeable = false;
+    return { undone: path.undone, redone: path.redone };
+  }
+
+  /** 当前树的索引。条数不大（上限 500），按需重建即可。 */
+  private index(): TimelineIndex {
+    return indexTimeline(this.entries);
+  }
+
+  /** 替换一条记录（合并时用）。 */
+  private replaceEntry(next: TimelineEntry): void {
+    const at = this.entries.findIndex((entry) => entry.id === next.id);
+    if (at < 0) return;
+    this.entries[at] = next;
+  }
+
+  /** 容量裁剪：只从叶子开始，绝不裁掉游标所在路径上的记录。 */
+  private prune(): void {
+    const limit = this.options.limit ?? defaultLimit;
+    const result = pruneTimeline(this.entries, limit, this.cursorId);
+    this.entries = result.entries;
+    this.cursorId = result.cursorId;
   }
 
   private refuse(entry: HistoryEntry, reason: string): void {
@@ -651,6 +877,11 @@ export const internalEffectKinds: string[] = [
   "agent-batch",
   "edit-object",
   "edit-presentation",
+  /* 板级内容与资源引用：都是白板内编辑，可撤销。
+     未知种类按外部效果处理（宁可漏撤销），所以新加的种类必须在这里登记，
+     否则会被静默拒绝——撤销栈看起来是空的。 */
+  "edit-board",
+  "edit-resource",
   "create-object",
   "delete-object",
   "create-presentation",

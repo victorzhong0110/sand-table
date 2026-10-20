@@ -1,11 +1,23 @@
+// 代码索引：TypeScript AST 索引、内容指纹与引用校验。
+//
+// 搬迁自 server/repository.ts（#13：代码领域包与连接器）。
+// 契约见 docs/architecture/domain-packs.zh-CN.md 第 4 节。
+//
+// 这是**代码领域的实现**，不属于通用内核：通用层不得 import 本文件
+// （架构不变量 D8，由 tests/domains.test.ts 扫描 import 图守住）。
+//
+// 绑定一个 Git 根目录的能力在连接器那边（connectors/git.ts）：
+// 「怎么连到外部系统」是连接器的事，「连上之后索引出什么」才是领域的事。
+
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { realpathSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { pythonSymbols } from "./python.ts";
-import type { Evidence, Projection, Item } from "../core/model.ts";
-export type Binding = { id: string; label: string; root: string };
+import { pythonSymbols } from "./python-indexer.ts";
+import type { Binding } from "../../connectors/types.ts";
+import type { Evidence, Projection, Item } from "../../core/model.ts";
+export type { Binding };
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 const git = (root: string, args: string[]) =>
   execFileSync("git", ["-c", "core.fsmonitor=false", "-C", root, ...args], {
@@ -15,29 +27,6 @@ const git = (root: string, args: string[]) =>
     env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
-export function bind(args: string[]): Binding[] {
-  if (!args.length || args.length > 4)
-    throw Error(
-      "Configure 1–4 explicit --workspace label=/absolute/git/root arguments.",
-    );
-  const result = args.map((arg) => {
-    const at = arg.indexOf("=");
-    const label = arg.slice(0, at),
-      input = arg.slice(at + 1);
-    if (at < 1 || !/^[-\w]{1,40}$/.test(label) || !path.isAbsolute(input))
-      throw Error("Expected label=/absolute/git/root");
-    const root = realpathSync(input);
-    if (realpathSync(git(root, ["rev-parse", "--show-toplevel"])) !== root)
-      throw Error("Workspace must be a git root.");
-    return { id: hash(root).slice(0, 16), label, root };
-  });
-  if (
-    new Set(result.map((b) => b.root)).size !== result.length ||
-    new Set(result.map((b) => b.label)).size !== result.length
-  )
-    throw Error("Workspace labels and roots must be distinct.");
-  return result;
-}
 export function readFile(binding: Binding, file: string) {
   if (
     !file ||

@@ -3,6 +3,7 @@
 // 契约见 docs/architecture/workspace-kernel.zh-CN.md 第 5 节。
 
 import { WorkspaceStore, type WorkspaceFile } from "./workspace.ts";
+import { createWorkspaceLock } from "./workspace-lock.ts";
 import type { WorkspaceSnapshot } from "./objects.ts";
 import type { WorkspacePersistence } from "./store.ts";
 
@@ -22,8 +23,19 @@ export type WorkspacePort = WorkspacePersistence & {
 export function workspacePort(store: WorkspaceStore): WorkspacePort {
   const port: WorkspacePort = {
     recovered: false,
-    save(snapshot: WorkspaceSnapshot) {
-      store.save(snapshot as WorkspaceFile);
+    /**
+     * 落盘。**整段读-改-写都在跨进程锁里**：
+     * 两个进程同时写同一个工作空间时，后写者不能把先写者的内容整块覆盖。
+     * 拿不到锁就抛错——不静默跳过，那等于假装存上了。
+     */
+    async save(snapshot: WorkspaceSnapshot) {
+      const id = snapshot.id;
+      // 目录要先建：锁文件落在目录里，而独占创建不会建目录。
+      store.ensureDir(id);
+      const lock = createWorkspaceLock(store.workspaceDir(id), id);
+      await lock.withLock(() => {
+        store.save(snapshot as WorkspaceFile);
+      });
     },
     load(id: string) {
       try {

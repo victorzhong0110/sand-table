@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Sand Table 白板",
+    "description": "在 DSH 侧栏里打开 Sand Table 白板，把白板的读操作暴露给 Agent，并给白板接上「问 AI」入口。"
+  }
+}

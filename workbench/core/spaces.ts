@@ -1,4 +1,9 @@
 import type { Presentation, Rect } from "./objects.ts";
+import {
+  checkDomainData,
+  findComponentType,
+  findObjectType,
+} from "./domains.ts";
 export type { Presentation, Rect } from "./objects.ts";
 export type Camera = { x: number; y: number; zoom: number };
 export type Space = { id: string; title: string; parentId?: string };
@@ -82,11 +87,38 @@ export const nativeContentTypes = [
   "comparison",
 ] as const;
 
+/**
+ * 组件规格查询：内置类型优先，领域包声明的类型作为补充。
+ *
+ * 领域包声明的组件类型（人物卡、证据卡……）有自己的图标与材质，
+ * 不能一律用默认的 280×180 —— 那是「领域语义进了内核」的反面。
+ */
+export function findComponentSpec(type: string) {
+  const builtin = componentTypes.find((c) => c.type === type);
+  if (builtin) return builtin;
+  const domain = findComponentType(type);
+  return domain
+    ? {
+        type: domain.type,
+        title: domain.title,
+        width: 280,
+        height: 180,
+        ...(domain.icon ? { icon: domain.icon } : {}),
+        ...(domain.material ? { material: domain.material } : {}),
+      }
+    : undefined;
+}
+
 /** 指向外部资源的类型：内容是引用，失效必须可识别。 */
 export const referenceContentTypes = ["resource"] as const;
 
 export function isNativeContent(type: string) {
-  return (nativeContentTypes as readonly string[]).includes(type);
+  // 引用类型是另一回事：内容是外部资源，不是可编辑的原生正文。
+  if (isReferenceContent(type)) return false;
+  if ((nativeContentTypes as readonly string[]).includes(type)) return true;
+  /* 领域包提供的对象类型（人物、假设、证据……）同样是一等原生内容。
+     类型来自注册表而不是硬编码名单——这是「领域语义不硬编码进内核」的落点。 */
+  return Boolean(findObjectType(type));
 }
 
 export function isReferenceContent(type: string) {
@@ -130,119 +162,156 @@ export function defaultData(type: string): Record<string, unknown> {
         conclusion: "",
       };
     default:
-      return {};
+      // 内置清单里没有的类型：问领域包（注册表里的默认载荷）。
+      // 没有登记的类型就是空载荷。
+      return domainDefaultData(type);
   }
+}
+
+/** 领域包给的默认载荷：没登记就是空对象。 */
+function domainDefaultData(type: string): Record<string, unknown> {
+  const data = findObjectType(type)?.defaultData;
+  return data ? structuredClone(data) : {};
 }
 /**
  * The check every write of component data goes through — the editor, the
  * Agent's tools and an imported component pack all use this one function, so
  * there is a single set of rules rather than several that drift apart.
+ *
+ * 领域规则在这一层**追加**（不另开一个校验入口）：
+ * 基础规则与领域规则合并成一条错误清单，领域规则的错误带「领域规则：」前缀，
+ * 便于区分来源。契约见 docs/architecture/domain-packs.zh-CN.md 第 2.4 节。
  */
 export function checkComponentData(
   type: string,
   data: Record<string, unknown>,
 ) {
+  const errors: string[] = [];
   if (JSON.stringify(data).length > 40000)
-    throw Error("Component data exceeds 40 KB.");
+    errors.push("Component data exceeds 40 KB.");
   if (data.url && !safeUrl(data.url))
-    throw Error("Resource URL must use HTTP(S).");
+    errors.push("Resource URL must use HTTP(S).");
   if (data.sourceUrl && !safeUrl(data.sourceUrl))
-    throw Error("Source URL must use HTTP(S).");
+    errors.push("Source URL must use HTTP(S).");
   if (type === "chart") {
     const p = data.points;
     if (!Array.isArray(p))
-      throw Error(
+      errors.push(
         "Chart needs up to 100 finite labeled values: points must be an array.",
       );
-    if (p.length > 100)
-      throw Error(
-        "Chart needs up to 100 finite labeled values: at most 100 points.",
-      );
-    p.forEach((v: any, index: number) => {
-      if (!v || typeof v !== "object")
-        throw Error(
-          `Chart needs up to 100 finite labeled values: points[${index}] must be an object.`,
+    else {
+      if (p.length > 100)
+        errors.push(
+          "Chart needs up to 100 finite labeled values: at most 100 points.",
         );
-      if (typeof v.label !== "string")
-        throw Error(
-          `Chart needs up to 100 finite labeled values: points[${index}].label must be a string.`,
-        );
-      if (v.label.length > 100)
-        throw Error(
-          `Chart needs up to 100 finite labeled values: points[${index}].label is longer than 100 characters.`,
-        );
-      if (!Number.isFinite(v.value))
-        throw Error(
-          `Chart needs up to 100 finite labeled values: points[${index}].value must be a finite number.`,
-        );
-    });
+      p.forEach((v: any, index: number) => {
+        if (!v || typeof v !== "object")
+          errors.push(
+            `Chart needs up to 100 finite labeled values: points[${index}] must be an object.`,
+          );
+        else {
+          if (typeof v.label !== "string")
+            errors.push(
+              `Chart needs up to 100 finite labeled values: points[${index}].label must be a string.`,
+            );
+          else if (v.label.length > 100)
+            errors.push(
+              `Chart needs up to 100 finite labeled values: points[${index}].label is longer than 100 characters.`,
+            );
+          if (!Number.isFinite(v.value))
+            errors.push(
+              `Chart needs up to 100 finite labeled values: points[${index}].value must be a finite number.`,
+            );
+        }
+      });
+    }
   }
   if (type === "table") {
     if (!Array.isArray(data.columns))
-      throw Error(
+      errors.push(
         "Table dimensions or values are invalid: columns must be an array.",
       );
-    if (data.columns.length > 20)
-      throw Error(
-        "Table dimensions or values are invalid: at most 20 columns.",
-      );
-    data.columns.forEach((v, index) => {
-      if (typeof v !== "string")
-        throw Error(
-          `Table dimensions or values are invalid: columns[${index}] must be a string.`,
+    else {
+      if (data.columns.length > 20)
+        errors.push(
+          "Table dimensions or values are invalid: at most 20 columns.",
         );
-    });
-    if (!Array.isArray(data.rows))
-      throw Error(
-        "Table dimensions or values are invalid: rows must be an array.",
-      );
-    if (data.rows.length > 200)
-      throw Error("Table dimensions or values are invalid: at most 200 rows.");
-    data.rows.forEach((row, rowIndex) => {
-      if (!Array.isArray(row))
-        throw Error(
-          `Table dimensions or values are invalid: rows[${rowIndex}] must be an array.`,
-        );
-      const columns = data.columns as unknown[];
-      if (row.length !== columns.length)
-        throw Error(
-          `Table dimensions or values are invalid: rows[${rowIndex}] must have ${columns.length} columns, got ${row.length}.`,
-        );
-      row.forEach((v, cellIndex) => {
-        if (!["string", "number", "boolean"].includes(typeof v) && v !== null)
-          throw Error(
-            `Table dimensions or values are invalid: rows[${rowIndex}][${cellIndex}] must be a string, number, boolean or null.`,
+      data.columns.forEach((v, index) => {
+        if (typeof v !== "string")
+          errors.push(
+            `Table dimensions or values are invalid: columns[${index}] must be a string.`,
           );
       });
-    });
+    }
+    if (!Array.isArray(data.rows))
+      errors.push(
+        "Table dimensions or values are invalid: rows must be an array.",
+      );
+    else {
+      if (data.rows.length > 200)
+        errors.push(
+          "Table dimensions or values are invalid: at most 200 rows.",
+        );
+      data.rows.forEach((row, rowIndex) => {
+        if (!Array.isArray(row)) {
+          errors.push(
+            `Table dimensions or values are invalid: rows[${rowIndex}] must be an array.`,
+          );
+          return;
+        }
+        const columns = Array.isArray(data.columns)
+          ? (data.columns as unknown[])
+          : [];
+        if (row.length !== columns.length)
+          errors.push(
+            `Table dimensions or values are invalid: rows[${rowIndex}] must have ${columns.length} columns, got ${row.length}.`,
+          );
+        row.forEach((v, cellIndex) => {
+          if (!["string", "number", "boolean"].includes(typeof v) && v !== null)
+            errors.push(
+              `Table dimensions or values are invalid: rows[${rowIndex}][${cellIndex}] must be a string, number, boolean or null.`,
+            );
+        });
+      });
+    }
   }
   if (type === "task") {
     // 报错要能指到具体位置：items[1].done 应为 boolean，而不是一句"清单值不合法"。
     if (!Array.isArray(data.items))
-      throw Error("Checklist values are invalid: items must be an array.");
-    if (data.items.length > 100)
-      throw Error("Checklist values are invalid: at most 100 items.");
-    data.items.forEach((item: any, index: number) => {
-      if (!item || typeof item !== "object")
-        throw Error(
-          `Checklist values are invalid: items[${index}] must be an object.`,
-        );
-      if (typeof item.text !== "string")
-        throw Error(
-          `Checklist values are invalid: items[${index}].text must be a string.`,
-        );
-      if (typeof item.done !== "boolean")
-        throw Error(
-          `Checklist values are invalid: items[${index}].done must be a boolean.`,
-        );
-    });
+      errors.push("Checklist values are invalid: items must be an array.");
+    else {
+      if (data.items.length > 100)
+        errors.push("Checklist values are invalid: at most 100 items.");
+      data.items.forEach((item: any, index: number) => {
+        if (!item || typeof item !== "object") {
+          errors.push(
+            `Checklist values are invalid: items[${index}] must be an object.`,
+          );
+          return;
+        }
+        if (typeof item.text !== "string")
+          errors.push(
+            `Checklist values are invalid: items[${index}].text must be a string.`,
+          );
+        if (typeof item.done !== "boolean")
+          errors.push(
+            `Checklist values are invalid: items[${index}].done must be a boolean.`,
+          );
+      });
+    }
   }
   if (type === "events") {
     if (!Array.isArray(data.events))
-      throw Error("At most 100 current events: events must be an array.");
-    if (data.events.length > 100)
-      throw Error("At most 100 current events: at most 100 events.");
+      errors.push("At most 100 current events: events must be an array.");
+    else if (data.events.length > 100)
+      errors.push("At most 100 current events: at most 100 events.");
   }
+  // 领域规则：唯一入口在这里追加。没有登记领域规则时这段是空的。
+  for (const message of checkDomainData(type, data))
+    errors.push(
+      message.startsWith("领域规则") ? message : `领域规则：${message}`,
+    );
+  if (errors.length) throw Error(errors.join("\n"));
 }
 export function safeUrl(value: unknown) {
   if (typeof value !== "string" || !value) return undefined;

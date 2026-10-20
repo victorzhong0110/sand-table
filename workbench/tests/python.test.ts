@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pythonSymbols } from "../server/python.ts";
-import { bind, scan, sourceFor } from "../server/repository.ts";
+import { pythonSymbols } from "../domains/code/python-indexer.ts";
+import { bind } from "../connectors/git.ts";
+import { scan, sourceFor } from "../domains/code/indexer.ts";
 test("Python parsing does not execute inspected text and prefers the final definition over overload stubs", () => {
   const source =
     'raise RuntimeError("MUST NOT EXECUTE")\n@overload\ndef entry(value: str): ...\ndef helper(value):\n    return value\ndef entry(value):\n    return helper(value)\n';

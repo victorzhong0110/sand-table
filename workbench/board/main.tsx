@@ -12,6 +12,9 @@ import { resultData } from "../core/results.ts";
 import { GuidePanel } from "./GuidePanel.tsx";
 import { HistoryPanel } from "./HistoryPanel.tsx";
 import type { HistorySnapshot } from "../core/history.ts";
+import { canShowTaskEntry, resolveBridge } from "../core/host-bridge.ts";
+import { installHostBridgeClient } from "./host-bridge-client.ts";
+import type { WorkspaceDescriptor } from "../core/objects.ts";
 const relationLabels = {
   contains: "包含",
   imports: "导入",
@@ -48,6 +51,13 @@ function Workbench() {
     [groupTitle, setGroupTitle] = useState("");
   const boardRef = useRef(board);
   boardRef.current = board;
+  const [workspaces, setWorkspaces] = useState<WorkspaceDescriptor[]>([]);
+  const [workspaceErrors, setWorkspaceErrors] = useState<
+    { id: string; reason: string }[]
+  >([]);
+  const [workspaceActiveId, setWorkspaceActiveId] = useState<
+    string | undefined
+  >();
   const {
     app,
     error: connectionError,
@@ -75,6 +85,27 @@ function Workbench() {
       };
     },
   });
+  /* 宿主桥：白板内对话入口显隐由**真实能力**决定（决策 D7 / 契约 X1–X2）。
+     MCP App 宿主能发消息，算一种「host」；注入的 DSH 桥按它自报的能力算。 */
+  /* 宿主桥接线：宿主（DSH 插件）用 postMessage 送来能力，
+     提交任务走请求-应答往返。装一次就够，卸载时拆掉。 */
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.parent) return;
+    const client = installHostBridgeClient({
+      scope: window,
+      parent: window.parent,
+      /* 跨源时不能用 "*"：那等于把能力与任务内容广播给任何嵌入者。 */
+      targetOrigin: window.location.origin,
+    });
+    return () => client.dispose();
+  }, []);
+  /* 桥每帧重读：宿主可能晚于首帧注入（DSH 插件是异步加载的），
+     缓存起来会永远读不到那一次注入。 */
+  const bridge = resolveBridge(
+    typeof window === "undefined" ? undefined : window,
+    app ? "mcp" : "local",
+  );
+  const hostReady = Boolean(app) || canShowTaskEntry(bridge);
   async function call(name: string, args: Record<string, unknown> = {}) {
     if (!app) throw Error("尚未连接宿主");
     return unpack(
@@ -83,6 +114,19 @@ function Workbench() {
         arguments: { boardId: boardRef.current?.id, ...args },
       }),
     );
+  }
+  /** 读一次工作空间列表。读不到就不显示条目——不假装有。 */
+  async function refreshWorkspaces() {
+    try {
+      const data: any = await action("sand_list_workspaces");
+      setWorkspaces((data?.workspaces ?? []) as WorkspaceDescriptor[]);
+      setWorkspaceErrors(
+        (data?.errors ?? []) as { id: string; reason: string }[],
+      );
+      setWorkspaceActiveId(data?.activeId);
+    } catch {
+      /* 没连上服务端时不显示工作空间入口。 */
+    }
   }
   async function action(name: string, args: Record<string, unknown> = {}) {
     setBusy(true);
@@ -179,6 +223,11 @@ function Workbench() {
       alive = false;
     };
   }, [board?.id, board?.revision, isConnected]);
+  /* 连上服务端后读一次工作空间列表。 */
+  useEffect(() => {
+    if (!isConnected) return;
+    void refreshWorkspaces();
+  }, [isConnected]);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
@@ -337,7 +386,61 @@ function Workbench() {
         onUndo={() => void flip("undo")}
         onRedo={() => void flip("redo")}
         onJump={(recordId) => void jump(recordId)}
-        aiMode={app ? "host" : "mcp"}
+        aiMode={hostReady ? "host" : "mcp"}
+        workspacePanel={{
+          workspaces,
+          activeId: workspaceActiveId,
+          errors: workspaceErrors,
+          onRefresh: () => void refreshWorkspaces(),
+          onCreate: async (input) => {
+            await action("sand_create_workspace", input);
+            await refreshWorkspaces();
+          },
+          onSwitch: async (id) => {
+            await action("sand_switch_workspace", { id });
+            await refreshWorkspaces();
+            /* 切换之后活动工作空间的内容变了：重新载入最省事，
+               也避免旧白板的状态残留在界面上。 */
+            location.reload();
+          },
+          onRename: async (id, title) => {
+            await action("sand_rename_workspace", { id, title });
+            await refreshWorkspaces();
+          },
+          onDelete: async (id) => {
+            await action("sand_delete_workspace", { id });
+            await refreshWorkspaces();
+          },
+        }}
+        sendToHost={
+          canShowTaskEntry(bridge)
+            ? async (text) => {
+                const current = boardRef.current;
+                const selected = new Set(current?.selection ?? []);
+                /* 目标用「引用 + 版本」，不带整份快照：任务开始后用户改选择，
+                   也不会把已提交任务的目标悄悄换掉。 */
+                const targets = (current?.instances ?? [])
+                  .filter((i) => selected.has(i.id))
+                  .map((i) => {
+                    const objectId = i.binding?.objectId ?? i.objectId;
+                    if (!objectId) return undefined;
+                    const object = current?.contentObjects?.find(
+                      (o) => o.id === objectId,
+                    );
+                    return { objectId, version: object?.version ?? 0 };
+                  })
+                  .filter((t): t is { objectId: string; version: number } =>
+                    Boolean(t),
+                  );
+                await bridge.submitTask({
+                  boardId: current?.id ?? "",
+                  instruction: text,
+                  targets,
+                  contextVersion: current?.contentRevision ?? 0,
+                });
+              }
+            : undefined
+        }
         sendMessage={async (text) => {
           if (!app) throw Error("Not connected");
           const result = await app.sendMessage({

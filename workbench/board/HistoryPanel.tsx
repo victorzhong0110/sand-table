@@ -1,16 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon.tsx";
-import type { HistoryRecord, HistorySnapshot } from "../core/history.ts";
+import type { HistorySnapshot, TimelineRecord } from "../core/history.ts";
 import "./history.css";
 
 /** MCP 工具调用：与 board/main.tsx 的 call 同签名。 */
 type ToolCall = (name: string, args?: Record<string, unknown>) => Promise<any>;
-
-const kindLabel: Record<HistoryRecord["kind"], string> = {
-  edit: "编辑",
-  undo: "撤销",
-  redo: "重做",
-};
 
 function clock(at: number) {
   const d = new Date(at);
@@ -20,21 +14,42 @@ function clock(at: number) {
 }
 
 /**
- * 撤销栈与重做栈的分界。
- *
- * 服务端给的记录是「新到旧」：撤销栈在前，重做栈（已撤销、待重做）在后。
- * 重做栈的记录 kind 是 "redo"（core/store.ts 的 history() 按所在的栈给 kind：
- * 撤销栈给 "edit"，重做栈给 "redo"），所以第一条 kind 为 "redo" 的记录
- * 就是重做栈的开始。
+ * 每条记录在树里的深度：用来把分支缩进，让「哪条是从哪条分出来的」一眼看得出。
+ * 父指针成环（坏数据）时停住，不让面板卡死。
  */
-function splitStacks(records: HistoryRecord[]) {
-  const at = records.findIndex((r) => r.kind === "redo");
-  if (at < 0) return { undo: records, redo: [] as HistoryRecord[] };
-  return { undo: records.slice(0, at), redo: records.slice(at) };
+function depthOf(records: TimelineRecord[]): Map<string, number> {
+  const parents = new Map(records.map((r) => [r.id, r.parentId]));
+  const depth = new Map<string, number>();
+  for (const record of records) {
+    let value = 0;
+    let current = record.parentId;
+    const seen = new Set<string>([record.id]);
+    while (current && !seen.has(current)) {
+      seen.add(current);
+      value++;
+      current = parents.get(current);
+    }
+    depth.set(record.id, value);
+  }
+  return depth;
+}
+
+/**
+ * 这一条在时间线上的位置标签。
+ *
+ * - 当前：板面正停在这里。
+ * - 旧分支：被后来的编辑分叉取代了，但**仍然可达**（可以跳回去）。
+ * - 可重做：在游标之后，还能前滚回去。
+ */
+function stateTag(record: TimelineRecord) {
+  if (record.current) return { text: "当前", className: "is-current" };
+  if (record.branch) return { text: "旧分支", className: "is-branch" };
+  if (record.ahead) return { text: "可重做", className: "is-ahead" };
+  return undefined;
 }
 
 /** 作者是人还是 Agent：一眼看得出。 */
-function authorBadge(record: HistoryRecord) {
+function authorBadge(record: TimelineRecord) {
   const agent = record.authorKind === "agent";
   return (
     <span className={"history-author is-" + record.authorKind}>
@@ -49,14 +64,14 @@ function authorBadge(record: HistoryRecord) {
 }
 
 /**
- * 白板的可回退历史。
+ * 白板的时间线历史。
  *
  * 面板只读服务端给的历史快照（core/history.ts 的 HistorySnapshot），
  * 并且只通过 MCP 工具改历史：sand_undo / sand_redo / sand_undo_to。
  * 面板不直接碰 store，也不自己维护历史状态。
  *
- * 记录是「新到旧」：撤销栈在前，重做栈（已撤销、待重做）在后。
- * 撤销栈的记录可以跳到它；重做栈的记录已经不在板面上，只显示为「已撤销」。
+ * 记录是一条**时间线**（不是两列）：按创建顺序排成一条线，
+ * 当前位置高亮，被分叉取代但仍可达的旧分支照样显示、也能跳过去。
  */
 export function HistoryPanel({
   history,
@@ -89,6 +104,8 @@ export function HistoryPanel({
   /* 上层每次渲染都会传一个新的 call 下来，放进 ref 里才不会把读取的时机搅乱。 */
   const callRef = useRef(call);
   callRef.current = call;
+  /* 当前位置那一行：展开时把它滚进视野，省得自己找。 */
+  const currentRef = useRef<HTMLLIElement | null>(null);
 
   /* 上层给的新快照：没有本地改动在飞的时候才采纳——
      自己刚改完历史时，本地拉回来的快照更新鲜，不能被旧快照盖掉。 */
@@ -98,10 +115,16 @@ export function HistoryPanel({
   }, [history]);
 
   const records = snapshot?.records ?? [];
-  const visible = expanded ? records : records.slice(0, 10);
-  const shown = splitStacks(visible);
+  /* 折叠时只留最近的一段：时间线是按时间正序的，最近的在末尾。 */
+  const visible = expanded ? records : records.slice(-10);
+  const depths = depthOf(records);
   const boardId = snapshot?.boardId ?? history?.boardId;
   const disabled = Boolean(busy) || pending;
+
+  useEffect(() => {
+    if (!expanded) return;
+    currentRef.current?.scrollIntoView({ block: "nearest" });
+  }, [expanded, snapshot?.cursorId]);
 
   /* 打开面板时从服务端拉一次：上层给的快照最多滞后几秒，
      而面板是「现在能撤什么」的唯一去处，不能拿旧的糊弄人。 */
@@ -179,40 +202,48 @@ export function HistoryPanel({
       ) : records.length === 0 ? (
         <p className="history-empty">还没有可回退的操作。</p>
       ) : (
-        <ol className="history-list">
-          {shown.undo.map((r) => (
-            <li key={r.id}>
-              <button
-                className={"history-entry is-" + r.kind + " is-" + r.authorKind}
-                disabled={disabled}
-                onClick={() => void run("jump", r.id)}
-                title="回到这一步之后的内容"
+        <ol className="history-timeline">
+          {visible.map((record) => {
+            const tag = stateTag(record);
+            const depth = depths.get(record.id) ?? 0;
+            return (
+              <li
+                key={record.id}
+                ref={record.current ? currentRef : undefined}
+                className={
+                  "history-node is-" +
+                  record.authorKind +
+                  (tag ? " " + tag.className : "")
+                }
+                style={{ paddingLeft: `${depth * 14}px` }}
               >
-                <span className="history-kind">{kindLabel[r.kind]}</span>
-                <span className="history-label">{r.label}</span>
-                <small>
-                  {clock(r.at)} · {authorBadge(r)} {r.author}
-                </small>
-              </button>
-            </li>
-          ))}
-          {shown.redo.length > 0 && (
-            <li className="history-divider">已撤销 · 待重做</li>
-          )}
-          {shown.redo.map((r) => (
-            <li key={r.id}>
-              <div
-                className={"history-entry is-undone is-" + r.authorKind}
-                title="已撤销：用「重做」把它翻回来"
-              >
-                <span className="history-kind">已撤销</span>
-                <span className="history-label">{r.label}</span>
-                <small>
-                  {clock(r.at)} · {authorBadge(r)} {r.author}
-                </small>
-              </div>
-            </li>
-          ))}
+                <button
+                  className="history-entry"
+                  disabled={disabled}
+                  onClick={() => void run("jump", record.id)}
+                  aria-current={record.current ? "true" : undefined}
+                  title={
+                    record.current
+                      ? "板面现在停在这一步"
+                      : "回到这一步之后的内容"
+                  }
+                >
+                  <span className="history-dot" aria-hidden="true" />
+                  <span className="history-body">
+                    <span className="history-label">{record.label}</span>
+                    <small>
+                      {clock(record.at)} · {authorBadge(record)} {record.author}
+                    </small>
+                  </span>
+                  {tag && (
+                    <span className={"history-tag " + tag.className}>
+                      {tag.text}
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
         </ol>
       )}
       {records.length > 10 && (

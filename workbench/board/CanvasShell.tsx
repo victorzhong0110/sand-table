@@ -7,6 +7,7 @@ import { SpaceCanvas } from "./SpaceCanvas.tsx";
 import { Toolbox } from "./Toolbox.tsx";
 import { ComponentPanel, ThemePanel } from "./ComponentPanel.tsx";
 import { ChangePanel } from "./ChangePanel.tsx";
+import { WorkspacePanel, type WorkspacePanelProps } from "./WorkspacePanel.tsx";
 import { GuidePanel } from "./GuidePanel.tsx";
 type Action = (name: string, args?: Record<string, unknown>) => Promise<any>;
 export function CanvasShell({
@@ -24,6 +25,8 @@ export function CanvasShell({
   onRedo,
   onJump,
   aiMode = "mcp",
+  sendToHost,
+  workspacePanel,
 }: {
   board: Board;
   viewId: string;
@@ -46,6 +49,14 @@ export function CanvasShell({
    * 只有真能发能收时才显示直接对话入口（决策 D7）。
    */
   aiMode?: "host" | "mcp";
+  /**
+   * 宿主提供的**结构化**任务通道（如 DSH 宿主桥）。
+   * 有它时走它：发对象引用与版本，不塞提示词。
+   * 没有时退回 sendMessage（MCP App 的消息桥）。
+   */
+  sendToHost?: (text: string) => Promise<void>;
+  /** 工作空间管理面板的接线。传了就显示「工作空间」入口。 */
+  workspacePanel?: WorkspacePanelProps;
 }) {
   const [mode, setMode] = useState("browse"),
     [focusRevision, setFocusRevision] = useState(0),
@@ -139,6 +150,18 @@ export function CanvasShell({
         ids: [...view.selection],
         keepGuide: true,
       });
+    /* 宿主提供结构化任务通道时走它：把「选中什么、什么版本」一起发过去，
+       不把上下文拼成提示词塞回去。 */
+    if (sendToHost) {
+      try {
+        await sendToHost(prompt);
+        setHandoff("已把请求连同选中对象与版本发给宿主 AI。");
+        setPrompt("");
+      } catch (e) {
+        setHandoff(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
     const message =
       '使用 Sand Table 已有白板 boardId="' +
       b.id +
@@ -694,6 +717,15 @@ export function CanvasShell({
                   </>
                 )}
               </section>
+              {workspacePanel && (
+                <section>
+                  <h3>工作空间</h3>
+                  <p className="settings-hint">
+                    一台机器上可以并存多个工作空间；切换前会先把当前内容落盘。
+                  </p>
+                  <WorkspacePanel {...workspacePanel} />
+                </section>
+              )}
               <ThemePanel
                 board={b}
                 operate={operate}

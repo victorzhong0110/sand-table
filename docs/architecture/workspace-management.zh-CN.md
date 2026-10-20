@@ -1,0 +1,167 @@
+# 工作空间管理与跨进程文件锁
+
+> 契约版本 v1（2026-10-20）。本文是「多工作空间管理器」与「跨进程文件锁」两条线的共同规格。
+> 相关 issue：#11（通用工作空间内核）的后续项。
+
+## 1. 背景与目标
+
+现状：工作空间目录是 `~/.sand-table/workspaces/<id>/workspace.json`，一个进程只持有一个工作空间，
+id 按项目派生（绑定仓库时 `project-<hash>`，空白启动 `default`）。这带来两个真实缺陷：
+
+1. **没有多工作空间管理器**：用户同时做两个项目（小说 + 代码），只能靠换目录、换参数、
+   或手工搬文件。同一台机器上并存两套内容没有入口。
+2. **没有跨进程文件锁**：两个进程（本地服务 + MCP 客户端）同时写同一个 `workspace.json`，
+   后写者会把先写者的内容整块覆盖（读-改-写竞态）。本地启动器与 MCP stdio 子进程
+   指向同一工作空间时，这是**必然发生**而不是罕见情况。
+
+本契约的边界：只做「工作空间的集合管理」与「同一工作空间文件的并发安全」。
+不做多人协作、不做云同步、不做跨机共享。
+
+## 2. 术语
+
+- **工作空间（workspace）**：长期作品的边界，一个目录一份 `workspace.json`。
+- **根目录（root）**：存放多个工作空间目录的父目录，默认 `~/.sand-table/workspaces`。
+- **活动工作空间（active）**：当前进程正在编辑的那一个。
+- **锁文件（lock）**：`<workspaceDir>/workspace.lock`，独占创建，持有者信息写在文件里。
+
+## 3. 多工作空间管理器
+
+### 3.1 目录布局
+
+```
+<root>/
+  default/
+    workspace.json
+    workspace.json.bak
+    workspace.lock        # 存在时表示别的进程正在写
+    attachments/
+  project-3f2a9c11b7e4/
+    workspace.json
+```
+
+工作空间 id 的合法性沿用 `core/workspace.ts` 现有的 `assertId`：
+只允许字母、数字、点、下划线、连字符，且不得为 `.` / `..`。
+
+### 3.2 管理器职责
+
+管理器（`core/workspace-manager.ts`）是**目录层**的操作者，不碰板面状态：
+
+| 操作 | 语义 | 失败时 |
+|---|---|---|
+| `list()` | 列出根目录下所有工作空间：id、标题、创建/更新时间、revision、板数、对象数 | 单个损坏的工作空间**跳过并记入 errors**，不影响其他条目 |
+| `create({ id?, title? })` | 新建空白工作空间（不落盘，落盘由 `save()` 显式触发） | id 非法或已存在 → 抛错并说明原因 |
+| `open(id)` | 读取并返回该工作空间的内容 | 不存在 → `WorkspaceNotFoundError` |
+| `rename(id, title)` | 改标题 | 不存在 → 抛错 |
+| `delete(id)` | 删除该工作空间目录（`workspace.json`、`.bak`、锁文件、附件） | 不存在 → 抛错；被其他进程持锁 → 拒绝并说明 |
+| `switch(id)` | 切换活动工作空间 | 见 §3.4 |
+
+### 3.3 切换的顺序（重要）
+
+切换必须**先落盘当前工作空间，再加载目标**。顺序反了会丢当前正在编辑的内容。
+
+```
+switch(id):
+  1. flushSave()                    # 当前工作空间的未保存内容先落盘
+  2. target = open(id)              # 读目标工作空间
+  3. store.restore(target)          # 用目标内容替换运行期状态
+  4. store.workspaceId = id         # 换绑持久化目标
+```
+
+`store.restore()` 与 `attachPersistence(port, workspaceId)` 是既有的内核能力（`core/store.ts`），
+本契约不新增内核状态。
+
+### 3.4 切换期间不丢内容
+
+- 切换前若 `flushSave()` 失败（磁盘满、锁冲突），**中止切换**并把错误暴露给用户，
+  不允许「切换成功但内容没存上」。
+- 切换后原工作空间的板仍在磁盘上；再切回去时内容与切换前一致（id 不变）。
+
+## 4. 跨进程文件锁
+
+### 4.1 锁的粒度
+
+**一个工作空间一把锁**：锁文件是 `<workspaceDir>/workspace.lock`。
+同一工作空间同一时刻只允许一个写者；不同工作空间互不影响。
+
+### 4.2 锁文件内容
+
+```json
+{ "pid": 12345, "host": "machine-a", "at": 1792504221373, "workspaceId": "default" }
+```
+
+### 4.3 获取与释放
+
+- **获取**：`openSync(lockPath, "wx")` —— 独占创建，失败即已存在。
+  成功后写入持有者信息，`fsync` 并关闭。
+- **释放**：删除锁文件。**只删自己持有的那份**（比对文件里的 pid + host + at，
+  不一致说明锁已被别人抢走，此时不删）。
+- **可重入**：同一进程内重复获取同一把锁不报错，计数 +1，释放时计数 -1，
+  计数归零才真正删文件。避免「保存流程里自己锁自己」的死锁。
+- **超时**：等待锁释放有上限（默认 10 秒），超时抛 `WorkspaceLockError`，
+  错误信息要写明「谁持有、持有多久」。
+
+### 4.4 陈旧锁的判定
+
+锁文件存在，但满足以下任一条件时视为**陈旧**，允许抢占：
+
+1. 锁里的 `host` 与当前主机相同，且该 `pid` 已经不存在（用 `process.kill(pid, 0)` 判定）；
+2. 锁的 `at` 距今超过陈旧阈值（默认 60 秒）——覆盖「进程被 kill -9、来不及释放」。
+
+抢占时必须**先把陈旧锁挪走再创建新锁**（`rename` 到 `workspace.lock.stale.<时间戳>`，
+再删），避免两个进程同时判定陈旧后同时创建成功。
+
+判定陈旧与进程存活检查要**可注入**，测试里不能真去杀进程。
+
+### 4.5 与原子写的关系
+
+`core/workspace.ts` 现有的原子写顺序（写 `.tmp` → fsync → 复制 `.bak.tmp` → rename `.bak` →
+rename `.tmp` → 目录 fsync）**不变**。文件锁加在**整个读-改-写事务的外层**：
+
+```
+save(workspace):
+  withLock(workspaceId):
+     读当前文件（拿最新 revision）→ 合并 → 原子写
+```
+
+只读路径（`load` / `list`）**不取锁**：写用 rename 替换，读者要么看到旧文件要么看到新文件，
+不会看到半截内容。
+
+### 4.6 与沙箱/测试的关系
+
+锁实现不得依赖真实进程才能测。两条要求：
+
+- 文件操作走既有 `WorkspaceFileSystem` 接口（`core/workspace.ts`），
+  锁模块自己声明一个**更小的**文件接口（只需 exists/open/write/read/unlink/rename/stat），
+  测试注入假实现。
+- 进程存活检查通过可注入的 `isProcessAlive(pid)` 回调，测试传假实现。
+
+## 5. 不变量
+
+| 编号 | 不变量 | 怎么验 |
+|---|---|---|
+| J1 | 同一工作空间同一时刻只有一个写者 | 两个进程并发保存，第二个必须等或明确失败，不得静默覆盖 |
+| J2 | 锁被释放后可以再次获取 | 保存-释放-再保存，第二次必须成功 |
+| J3 | 陈旧锁可被抢占，活锁不可 | 注入假 pid 存活检查，两种情形各测一次 |
+| J4 | 抢占失败（别人同时抢）必须有一方失败并重试，不能两方都成功 | 并发抢占测试 |
+| J5 | 锁失败时主文件内容逐字节不变 | 注入写失败的 fs，断言主文件没变 |
+| J6 | 切换工作空间前先落盘当前内容 | 切换测试：改内容→切换→切回来，内容还在 |
+| J7 | 切换失败不留下半切状态 | 落盘失败时切换中止，活动工作空间不变 |
+| J8 | 列表里单个损坏的工作空间不影响其他条目 | 放一个坏文件，断言其余条目仍列出且 errors 里点名它 |
+| J9 | 锁文件不是权威数据 | load/list 都不读 `.lock`、`.lock.stale.*` |
+
+## 6. 交付形态
+
+| 文件 | 归属 | 内容 |
+|---|---|---|
+| `workbench/core/workspace-lock.ts` | 生产者 A | 锁的获取/释放/陈旧判定/超时，纯函数式，不碰 store |
+| `workbench/core/workspace-manager.ts` | 生产者 A | 多工作空间的 list/create/open/rename/delete/switch 编排 |
+| `workbench/tests/workspace-lock.test.ts` | 生产者 A | J1–J5、J9 |
+| `workbench/tests/workspace-manager.test.ts` | 生产者 A | J6–J8 |
+| `workbench/core/workspace.ts` | 负责人 | 把锁接进 `save()`；落盘失败路径保持原样 |
+| `workbench/core/store.ts` | 负责人 | `switchWorkspace` 编排 + 活动工作空间状态 |
+| `workbench/server/workspaces.ts` | 负责人 | MCP 工具：列出/新建/切换/重命名/删除工作空间 |
+| `workbench/board/WorkspacePanel.tsx` | 生产者 A | 工作空间管理面板（新建文件） |
+
+## 7. 不在本轮范围
+
+多人协作编辑、云同步、工作空间合并、跨机共享、锁的分布式实现。
