@@ -119,11 +119,7 @@ export function ChangePanel({
   };
   return (
     <section className="change-panel">
-      <span className="eyebrow">INTENT → PROPOSAL → VERIFY</span>
-      <h2>把改动说清楚</h2>
-      <p className="muted">
-        选区和整理表示关注。提交下面的请求，才会明确你希望改变什么、允许涉及哪些文件。
-      </p>
+      <h2>改动</h2>
       <label>
         你想改变什么
         <textarea
@@ -232,12 +228,6 @@ export function ChangePanel({
         </div>
       ))}
       <h3>具体目标版本</h3>
-      {!b.proposals.length && (
-        <p className="muted">
-          等待你的 Agent
-          读取意图、核对源码并提交具体修改。方案方向和具体内容的确认是两个动作。
-        </p>
-      )}
       {[...b.proposals].reverse().map((p) => (
         <ProposalCard
           key={`${p.id}:${p.version}`}
@@ -313,13 +303,6 @@ function ProposalCard({
           拒绝这一版
         </button>
       </div>
-      {p.decision === "accepted" && (
-        <p className="muted">
-          已确认这份具体内容。Agent
-          仍需核对前置条件并使用宿主工具写入；确认按钮本身不写文件。回到 AI
-          对话说“继续处理白板中已确认的提案，并核对实际结果”。
-        </p>
-      )}
       <button
         disabled={busy}
         onClick={() =>
@@ -391,9 +374,6 @@ function ProposalCard({
           </details>
         </div>
       ))}
-      <p className="fine-print">
-        核对与宿主实际写入之间可能有并发变化。是否强制执行确认约束，取决于你的客户端；板子会如实展示可核对的结果。
-      </p>
     </article>
   );
 }

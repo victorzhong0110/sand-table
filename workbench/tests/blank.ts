@@ -93,7 +93,7 @@ try {
   await page.getByRole("button", { name: "返回白板" }).click();
   const canvasBeforeDrop = await frame.locator(".canvas").boundingBox();
   await frame
-    .getByRole("button", { name: "说明／便签", exact: true })
+    .getByRole("button", { name: "便签", exact: true })
     .dragTo(frame.locator(".canvas"), { targetPosition: { x: 300, y: 240 } });
   b = await until((b) => b.instances.some((i: any) => i.type === "text"));
   assert.ok(b.instances[0].rect.x > 100);
@@ -118,6 +118,8 @@ try {
   b = await until((b) => b.instances[0].data.text === "先收集证据，再比较方案");
   const noteId = b.instances[0].id;
   const expandedRect = { ...b.instances[0].rect };
+  assert.equal(await frame.getByRole("heading", { name: "图标库" }).count(), 0);
+  await frame.getByRole("button", { name: "设置", exact: true }).click();
   await frame.getByRole("button", { name: "图标＋标题", exact: true }).click();
   b = await until((b) => b.instances[0].appearance?.detail === "label");
   let note = frame.locator('[data-instance-id="' + noteId + '"]');
@@ -127,24 +129,22 @@ try {
     expandedRect,
     "Folding preserves expanded geometry",
   );
-  await frame
-    .getByRole("button", { name: "使用 task 图标", exact: true })
-    .click();
-  await until((b) => b.instances[0].appearance?.icon === "task");
   await frame.getByRole("button", { name: "仅图标", exact: true }).click();
   await until((b) => b.instances[0].appearance?.detail === "icon");
   assert.equal(Math.round((await note.boundingBox())!.width), 48);
   await frame.getByRole("button", { name: "完整界面", exact: true }).click();
   b = await until((b) => b.instances[0].appearance?.detail === "full");
   assert.deepEqual(b.instances[0].rect, expandedRect);
+  assert.equal(await note.locator(".component-symbol").isVisible(), false);
   assert.equal(b.instances[0].data.text, "先收集证据，再比较方案");
+  await frame.getByRole("button", { name: "关闭设置" }).click();
   await page.screenshot({
     path: "artifacts/material-note.png",
     fullPage: true,
   });
-  await frame.getByRole("button", { name: "切换工具箱" }).click();
+  await frame.getByRole("button", { name: "编排", exact: true }).click();
   assert.equal(await frame.locator(".floating-tool-wrap").isVisible(), false);
-  await frame.getByRole("button", { name: "切换工具箱" }).click();
+  await frame.getByRole("button", { name: "编排", exact: true }).click();
   await frame.getByRole("button", { name: "关闭详情" }).click();
   await frame.getByRole("button", { name: "白板", exact: true }).click();
   b = await until((b) => b.instances.some((i: any) => i.type === "board"));
@@ -168,7 +168,7 @@ try {
     2,
   );
   await frame
-    .getByRole("button", { name: "和 AI 一起搭", exact: false })
+    .getByRole("button", { name: "AI 编排", exact: true })
     .first()
     .click();
   await frame
@@ -215,11 +215,12 @@ try {
   });
   await frame.getByText("● Agent 有活动报告", { exact: true }).waitFor();
   await frame
-    .getByRole("button", { name: "和 AI 一起搭", exact: false })
+    .getByRole("button", { name: "AI 编排", exact: true })
     .first()
     .click();
   await frame.getByText("Arrange the comparison", { exact: true }).waitFor();
   if (process.env.SAND_EXTERNAL_REPO) {
+    await frame.getByRole("button", { name: "编排", exact: true }).click();
     await frame.getByRole("tab", { name: "仓库", exact: true }).click();
     await frame
       .getByRole("textbox", { name: "本机仓库路径" })
@@ -262,9 +263,7 @@ try {
       .click();
     await frame.locator(".source-inspector pre.source").waitFor();
     await frame.getByRole("button", { name: "组件属性", exact: true }).click();
-    await frame
-      .getByRole("button", { name: "复制展示", exact: true })
-      .waitFor();
+    await frame.getByRole("button", { name: "复制", exact: true }).waitFor();
     await frame
       .getByRole("button", { name: "源码与理解", exact: true })
       .click();
@@ -288,7 +287,7 @@ try {
     });
     assert.ok(actualTarget.hash);
   }
-  await frame.getByRole("button", { name: "外观", exact: true }).click();
+  await frame.getByRole("button", { name: "设置", exact: true }).click();
   await frame.locator('input[type="color"]').first().fill("#edf2ed");
   await frame
     .getByRole("button", { name: "应用自定义外观", exact: true })
@@ -299,6 +298,99 @@ try {
     fullPage: true,
   });
   assert.equal(await frame.locator('[role="alert"]').count(), 0);
+  await frame.getByRole("button", { name: "关闭设置" }).click();
+  b = await read();
+  const motionView = Object.keys(b.views)[0];
+  const zoomBefore = b.views[motionView].camera.zoom;
+  await call("sand_edit_space", {
+    boardId,
+    revision: b.revision,
+    viewId: motionView,
+    author: "Motion probe",
+    operation: {
+      kind: "create",
+      type: "text",
+      title: "远处便签",
+      data: { text: "定位目标" },
+      rect: { x: 5000, y: 3000, width: 280, height: 180, pinned: false },
+    },
+  });
+  b = await read();
+  const farId = b.instances.find((i: any) => i.title === "远处便签").id;
+  await call("sand_edit_space", {
+    boardId,
+    revision: b.revision,
+    viewId: motionView,
+    author: "Motion probe",
+    operation: { kind: "select", ids: [] },
+  });
+  await frame.getByRole("button", { name: "画板", exact: true }).click();
+  const locate = frame.getByRole("button", {
+    name: "定位 远处便签",
+    exact: true,
+  });
+  await locate.waitFor();
+  const world = frame.locator(".world");
+  const cameraX = () =>
+    world.evaluate(
+      (el) => new DOMMatrixReadOnly(getComputedStyle(el).transform).m41,
+    );
+  const startX = await cameraX();
+  await locate.click();
+  await page.waitForTimeout(100);
+  const intermediateX = await cameraX();
+  await page.waitForTimeout(800);
+  const endX = await cameraX();
+  assert.ok(
+    Math.abs(intermediateX - startX) > 1 && Math.abs(endX - intermediateX) > 1,
+    "Focus moves over multiple frames",
+  );
+  b = await until((b) => b.views[motionView].camera.x < -3000);
+  assert.equal(
+    b.views[motionView].camera.zoom,
+    zoomBefore,
+    "Focusing preserves zoom",
+  );
+  const targetBox = await frame
+    .locator('[data-instance-id="' + farId + '"]')
+    .boundingBox();
+  const viewport = await frame.locator(".canvas").boundingBox();
+  assert.ok(targetBox && viewport);
+  const expectedCenter = viewport.x + (256 + viewport.width - 332) / 2;
+  assert.ok(
+    Math.abs(targetBox.x + targetBox.width / 2 - expectedCenter) < 8,
+    "Focus centers inside the area between floating panels",
+  );
+  await frame.getByRole("button", { name: "收起面板", exact: true }).click();
+  await frame.getByRole("button", { name: "关闭详情", exact: true }).click();
+  await page.mouse.move(
+    viewport.x + viewport.width - 3,
+    viewport.y + viewport.height / 2,
+  );
+  const edgeStart = await cameraX();
+  await page.waitForTimeout(300);
+  assert.ok(
+    (await cameraX()) < edgeStart - 30,
+    "Hovering at the right edge pans without a drag",
+  );
+  await page.mouse.move(
+    viewport.x + viewport.width / 2,
+    viewport.y + viewport.height / 2,
+  );
+  await page.waitForTimeout(80);
+  const stopped = await cameraX();
+  await page.waitForTimeout(150);
+  assert.ok(
+    Math.abs((await cameraX()) - stopped) < 1,
+    "Leaving the edge stops motion",
+  );
+  await frame.getByRole("button", { name: "设置", exact: true }).click();
+  assert.equal(
+    await frame
+      .locator(".settings-body")
+      .evaluate((el) => getComputedStyle(el).scrollbarWidth),
+    "none",
+  );
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: "artifacts/blank-mobile.png", fullPage: true });
   assert.ok(

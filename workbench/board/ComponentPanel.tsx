@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import type { Board } from "../core/model.ts";
 import type { ComponentInstance, ThemeConfig } from "../core/spaces.ts";
-import { Icon } from "./Icon.tsx";
-import { componentTypes, defaultData, componentIcons } from "../core/spaces.ts";
+import { componentTypes, defaultData } from "../core/spaces.ts";
 export function ComponentPanel({
   board: b,
   viewId,
@@ -97,69 +96,11 @@ export function ComponentPanel({
           >
             添加研究比较白板
           </button>
-          <p className="muted">
-            进入子白板后可加入任务、行为约定、对比、图表或文件引用。组件也可由你的
-            Agent 配置。
-          </p>
         </>
       )}
       {selected.length > 0 && (
-        <section className="appearance-controls">
-          <h3>显示方式</h3>
-          <div className="detail-options">
-            {[
-              ["full", "完整界面"],
-              ["label", "图标＋标题"],
-              ["icon", "仅图标"],
-            ].map(([detail, label]) => (
-              <button
-                key={detail}
-                aria-pressed={selected.every(
-                  (c) => (c.appearance?.detail || "full") === detail,
-                )}
-                onClick={async () => {
-                  for (const c of selected)
-                    await operate({
-                      kind: "update",
-                      instanceId: c.id,
-                      appearance: { detail },
-                    });
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <h3>图标库</h3>
-          <div className="icon-library">
-            {componentIcons.map((icon) => (
-              <button
-                key={icon}
-                aria-label={`使用 ${icon} 图标`}
-                title={
-                  componentTypes.find((t) => t.type === icon)?.title || icon
-                }
-                aria-pressed={selected.every(
-                  (c) => (c.appearance?.icon || c.type) === icon,
-                )}
-                onClick={async () => {
-                  for (const c of selected)
-                    await operate({
-                      kind: "update",
-                      instanceId: c.id,
-                      appearance: { icon },
-                    });
-                }}
-              >
-                <Icon name={icon} />
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-      {selected.length > 0 && (
         <>
-          <h3>选中的展示实例</h3>
+          <h3>选中组件</h3>
           {selected.map((c) => (
             <div key={c.id} className="report">
               <b>{c.title}</b>
@@ -169,7 +110,7 @@ export function ComponentPanel({
                   void operate({ kind: "duplicate", instanceId: c.id })
                 }
               >
-                复制展示
+                复制
               </button>
               <button
                 disabled={busy}
@@ -207,13 +148,10 @@ export function ComponentPanel({
                   void operate({ kind: "remove", instanceId: c.id })
                 }
               >
-                移除展示
+                移除
               </button>
             </div>
           ))}
-          <small>
-            移除展示不会删除对象或真实文件。白板中有内容时，需要先处理其成员。
-          </small>
         </>
       )}
       {selected.length === 1 && (
@@ -335,7 +273,7 @@ function ComponentEditor({
   const save = () => operate({ kind: "update", instanceId: c.id, title, data });
   return (
     <section className="component-editor">
-      <h3>配置这个组件</h3>
+      <h3>配置</h3>
       <label>
         名称
         <input
@@ -345,7 +283,7 @@ function ComponentEditor({
         />
       </label>
       {["text", "heading", "code"].includes(c.type) &&
-        field("text", c.type === "code" ? "展示的代码" : "内容", true)}
+        field("text", c.type === "code" ? "代码" : "内容", true)}
       {c.type === "code" && field("language", "语言")}
       {c.type === "resource" && (
         <>
@@ -571,7 +509,7 @@ function ComponentEditor({
       )}
       {!["object", "board"].includes(c.type) && (
         <details>
-          <summary>高级配置／由 AI 编辑的数据</summary>
+          <summary>高级</summary>
           <textarea
             aria-label="组件高级配置"
             value={json}
@@ -670,10 +608,7 @@ export function ThemePanel({
   );
   return (
     <section>
-      <h2>自定义外观</h2>
-      <p className="muted">
-        正文对比度 {contrast(config.ink, config.surface).toFixed(1)}:1
-      </p>
+      <h2>自定义</h2>
       {contrast(config.ink, config.surface) < 4.5 && (
         <p role="status">
           当前正文和组件背景接近，阅读可能吃力。建议提高对比度或恢复基础皮肤。
@@ -772,7 +707,6 @@ export function ThemePanel({
       <button onClick={() => void operate({ kind: "theme", theme: null })}>
         重置自定义外观
       </button>
-      <small>设置只保留在本次白板会话中。</small>
     </section>
   );
 }

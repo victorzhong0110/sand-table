@@ -30,6 +30,11 @@ export function CanvasShell({
   sendMessage: (text: string) => Promise<void>;
 }) {
   const [mode, setMode] = useState("browse"),
+    [focusRevision, setFocusRevision] = useState(0),
+    [navSection, setNavSection] = useState("tools"),
+    [edgePan, setEdgePan] = useState(true),
+    [edgeSpeed, setEdgeSpeed] = useState(600),
+    [settingsOpen, setSettingsOpen] = useState(false),
     [toolsOpen, setToolsOpen] = useState(true),
     [panel, setPanel] = useState(""),
     [query, setQuery] = useState(""),
@@ -152,23 +157,47 @@ export function CanvasShell({
           S
         </span>
         <button
-          aria-label="画板与工具"
-          aria-pressed={toolsOpen}
-          onClick={() => setToolsOpen(!toolsOpen)}
+          aria-label="画板"
+          title="画板"
+          aria-pressed={toolsOpen && navSection === "boards"}
+          onClick={() => {
+            setNavSection("boards");
+            setToolsOpen(true);
+            if (panel === "ai") setPanel("");
+          }}
         >
           <Icon name="board" />
         </button>
         <button
-          aria-label="浏览模式"
-          aria-pressed={mode === "browse"}
-          onClick={() => setMode("browse")}
+          aria-label="浏览"
+          title="浏览"
+          aria-pressed={mode === "browse" && navSection === "browse"}
+          onClick={() => {
+            setMode("browse");
+            setNavSection("browse");
+            setToolsOpen(false);
+            setPanel(
+              selected
+                ? selected.type === "object"
+                  ? "source"
+                  : "properties"
+                : "browse",
+            );
+          }}
         >
           <Icon name="browse" />
         </button>
         <button
-          aria-label="编排模式"
-          aria-pressed={mode === "arrange"}
-          onClick={() => setMode("arrange")}
+          aria-label="编排"
+          title="编排"
+          aria-expanded={toolsOpen && navSection === "tools"}
+          aria-pressed={toolsOpen && navSection === "tools"}
+          onClick={() => {
+            setToolsOpen(navSection !== "tools" || !toolsOpen);
+            setMode("arrange");
+            setNavSection("tools");
+            if (panel === "ai") setPanel("");
+          }}
         >
           <Icon name="arrange" />
         </button>
@@ -177,6 +206,8 @@ export function CanvasShell({
           aria-pressed={panel === "ai"}
           onClick={() => {
             setMode("ai");
+            setNavSection("ai");
+            setToolsOpen(false);
             setPanel("ai");
           }}
         >
@@ -184,8 +215,8 @@ export function CanvasShell({
         </button>
         <button
           className="rail-settings"
-          aria-label="外观设置"
-          onClick={() => setPanel("theme")}
+          aria-label="设置"
+          onClick={() => setSettingsOpen(true)}
         >
           <Icon name="comparison" />
         </button>
@@ -211,27 +242,6 @@ export function CanvasShell({
             if (e.key === "Enter") e.currentTarget.blur();
           }}
         />
-        <div className="canvas-top-actions">
-          <button aria-pressed={arrows} onClick={() => setArrows(!arrows)}>
-            关系 {arrows ? "开" : "关"}
-          </button>
-          <button
-            onClick={() => setTheme(theme === "paper" ? "mono" : "paper")}
-          >
-            {theme === "paper" ? "黑白" : "纸张"}
-          </button>
-          {b.theme && theme !== "custom" && (
-            <button onClick={() => setTheme("custom")}>自定义</button>
-          )}
-          <button
-            onClick={() => {
-              setMode("ai");
-              setPanel("ai");
-            }}
-          >
-            <Icon name="ai" size={14} /> 和 AI 一起搭
-          </button>
-        </div>
       </header>
       {error && (
         <div className="canvas-error" role="alert">
@@ -239,16 +249,14 @@ export function CanvasShell({
         </div>
       )}
       <div className={"studio-layout " + (panel ? "has-inspector" : "")}>
-        <button
-          className="floating-tool-toggle"
-          aria-label="切换工具箱"
-          aria-expanded={toolsOpen}
-          onClick={() => setToolsOpen(!toolsOpen)}
-        >
-          <Icon name="board" size={18} /> 工具与画板
-        </button>
         <div className={"floating-tool-wrap " + (toolsOpen ? "" : "is-hidden")}>
           <Toolbox
+            focusInstance={async (id) => {
+              await operate({ kind: "select", ids: [id] });
+              setFocusRevision((n) => n + 1);
+            }}
+            activeSection={navSection}
+            close={() => setToolsOpen(false)}
             navigate={(spaceId) => {
               setQuery("");
               void operate({ kind: "navigate", spaceId });
@@ -280,6 +288,21 @@ export function CanvasShell({
             board={b}
             viewId={viewId}
             mode={mode}
+            focusRevision={focusRevision}
+            edgePan={edgePan}
+            edgeSpeed={edgeSpeed}
+            motionPaused={settingsOpen}
+            insets={{
+              left: toolsOpen
+                ? 256
+                : (panel === "ai" || navSection === "browse") && panel
+                  ? 332
+                  : 16,
+              right:
+                panel && panel !== "ai" && navSection !== "browse" ? 332 : 16,
+              top: 120,
+              bottom: 60,
+            }}
             query={query}
             kind="all"
             scope="all"
@@ -299,20 +322,27 @@ export function CanvasShell({
               <div className="blank-invitation">
                 <span aria-hidden="true">＋</span>
                 <h1>从一块空白开始</h1>
-                <p>从左侧拖入组件，或让你的 AI 和你一起搭。</p>
+
                 <button onClick={() => create("text", "我的第一张便签")}>
                   添加第一张便签
                 </button>
               </div>
             )}
         </section>
-        {panel && (
-          <aside className="studio-inspector" aria-label="组件详情">
+        {panel && panel !== "theme" && (
+          <aside
+            className={
+              "studio-inspector " +
+              (panel === "ai" || navSection === "browse" ? "is-context" : "")
+            }
+            aria-label="组件详情"
+          >
             <div className="inspector-heading">
               <span>
                 {
                   (
                     {
+                      browse: "浏览",
                       properties: "组件属性",
                       source: "源码与理解",
                       ai: "和 AI 一起搭",
@@ -336,7 +366,9 @@ export function CanvasShell({
                 ×
               </button>
             </div>
-            {panel === "properties" ? (
+            {panel === "browse" ? (
+              <p>选择组件</p>
+            ) : panel === "properties" ? (
               <ComponentPanel
                 board={b}
                 viewId={viewId}
@@ -345,12 +377,6 @@ export function CanvasShell({
                 action={action}
                 selectNew={() => setQuery("")}
                 detailsOnly
-              />
-            ) : panel === "theme" ? (
-              <ThemePanel
-                board={b}
-                operate={operate}
-                onUseCustom={() => setTheme("custom")}
               />
             ) : panel === "changes" ? (
               <ChangePanel
@@ -361,12 +387,7 @@ export function CanvasShell({
               />
             ) : panel === "ai" ? (
               <section className="ai-composer">
-                <span className="eyebrow">BUILD TOGETHER</span>
                 <h2>你想怎么搭？</h2>
-                <p>
-                  让自己的 Agent
-                  添加组件、组织关系或调整布局。它会读取这张板子的最新状态。
-                </p>
                 <textarea
                   ref={field}
                   aria-label="给 AI 的编排请求"
@@ -382,9 +403,6 @@ export function CanvasShell({
                   交给我的 AI
                 </button>
                 {handoff && <p role="status">{handoff}</p>}
-                <p className="muted">
-                  不内置模型。连接入口在页面顶部；本地浏览器会准备好消息供你复制到客户端。
-                </p>
                 {(b.spaceActivities?.length || 0) > 0 && (
                   <>
                     <h3>Agent 在哪里</h3>
@@ -518,6 +536,132 @@ export function CanvasShell({
           </aside>
         )}
       </div>
+      {settingsOpen && (
+        <div
+          className="settings-backdrop"
+          onClick={() => setSettingsOpen(false)}
+        >
+          <section
+            className="settings-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="设置"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setSettingsOpen(false);
+              if (e.key === "Tab") {
+                const items = [
+                  ...e.currentTarget.querySelectorAll<HTMLElement>(
+                    'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex="0"]',
+                  ),
+                ];
+                const first = items[0],
+                  last = items.at(-1);
+                if (e.shiftKey && document.activeElement === first) {
+                  e.preventDefault();
+                  last?.focus();
+                } else if (!e.shiftKey && document.activeElement === last) {
+                  e.preventDefault();
+                  first?.focus();
+                }
+              }
+            }}
+          >
+            <header>
+              <h2>设置</h2>
+              <button
+                aria-label="关闭设置"
+                autoFocus
+                onClick={() => setSettingsOpen(false)}
+              >
+                ×
+              </button>
+            </header>
+            <div className="settings-body">
+              <section>
+                <h3>外观</h3>
+                <div className="settings-presets">
+                  {[
+                    ["paper", "纸张"],
+                    ["mono", "黑白"],
+                    ...(b.theme ? [["custom", "自定义"]] : []),
+                  ].map(([id, label]) => (
+                    <button
+                      key={id}
+                      aria-pressed={theme === id}
+                      onClick={() =>
+                        setTheme(id as "paper" | "mono" | "custom")
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={arrows}
+                    onChange={(e) => setArrows(e.target.checked)}
+                  />{" "}
+                  显示关系
+                </label>
+                <h3>画布</h3>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={edgePan}
+                    onChange={(e) => setEdgePan(e.target.checked)}
+                  />{" "}
+                  边缘移动
+                </label>
+                <label>
+                  移动速度
+                  <input
+                    aria-label="边缘移动速度"
+                    type="range"
+                    min="200"
+                    max="1200"
+                    step="100"
+                    value={edgeSpeed}
+                    onChange={(e) => setEdgeSpeed(Number(e.target.value))}
+                  />
+                </label>
+                {view && view.selection.length > 0 && (
+                  <>
+                    <h3>选中组件</h3>
+                    <div className="detail-options">
+                      {[
+                        ["full", "完整界面"],
+                        ["label", "图标＋标题"],
+                        ["icon", "仅图标"],
+                      ].map(([detail, label]) => (
+                        <button
+                          key={detail}
+                          onClick={async () => {
+                            for (const id of view.selection)
+                              await operate({
+                                kind: "update",
+                                instanceId: id,
+                                appearance: { detail },
+                              });
+                          }}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </section>
+              <ThemePanel
+                board={b}
+                operate={operate}
+                onUseCustom={() => setTheme("custom")}
+              />
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

@@ -3,6 +3,7 @@ import type { Board } from "../core/model.ts";
 import { Icon } from "./Icon.tsx";
 import { componentTypes, displayRect, material } from "../core/spaces.ts";
 import type { Camera, ComponentInstance, Rect } from "../core/spaces.ts";
+import { centerCamera, easeCamera, edgeVelocity } from "./camera-motion.ts";
 import { ComponentRenderer } from "./ComponentRenderer.tsx";
 type Props = {
   board: Board;
@@ -13,6 +14,11 @@ type Props = {
   scope: string;
   arrows: boolean;
   busy: boolean;
+  focusRevision?: number;
+  edgePan?: boolean;
+  edgeSpeed?: number;
+  motionPaused?: boolean;
+  insets?: { left: number; right: number; top: number; bottom: number };
   operate: (op: any) => Promise<any>;
   call: (name: string, args?: Record<string, unknown>) => Promise<any>;
   onOpenLink: (url: string) => void;
@@ -27,6 +33,11 @@ export function SpaceCanvas({
   scope,
   arrows,
   busy,
+  focusRevision = 0,
+  edgePan = false,
+  edgeSpeed = 600,
+  motionPaused = false,
+  insets = { left: 0, right: 0, top: 0, bottom: 0 },
   operate,
   call,
   onOpenLink,
@@ -34,10 +45,167 @@ export function SpaceCanvas({
 }: Props) {
   const view = b.views[viewId],
     canvas = useRef<HTMLElement>(null);
-  const [camera, setCamera] = useState<Camera>({ x: 24, y: 24, zoom: 1 }),
+  const [camera, setCameraState] = useState<Camera>({ x: 24, y: 24, zoom: 1 }),
     [draft, setDraft] = useState<Record<string, Rect>>({});
   const live = useRef({ camera, draft });
   live.current = { camera, draft };
+  const setCamera = (next: Camera) => {
+    live.current.camera = next;
+    setCameraState(next);
+  };
+  const animation = useRef(0);
+  const edge = useRef({
+    frame: 0,
+    point: undefined as { x: number; y: number } | undefined,
+    last: 0,
+    dirty: false,
+    saved: 0,
+  });
+  const options = useRef({ operate, edgePan, edgeSpeed, motionPaused });
+  options.current = { operate, edgePan, edgeSpeed, motionPaused };
+  const stopAnimation = (commit = false) => {
+    if (commit && animation.current)
+      void options.current.operate({
+        kind: "camera",
+        camera: live.current.camera,
+      });
+    cancelAnimationFrame(animation.current);
+    animation.current = 0;
+  };
+  const stopEdge = (commit = true) => {
+    cancelAnimationFrame(edge.current.frame);
+    if (commit && edge.current.dirty)
+      void options.current.operate({
+        kind: "camera",
+        camera: live.current.camera,
+      });
+    edge.current = {
+      frame: 0,
+      point: undefined,
+      last: 0,
+      dirty: false,
+      saved: 0,
+    };
+  };
+  const animateTo = (next: Camera) => {
+    stopEdge();
+    stopAnimation();
+    const from = live.current.camera;
+    if (
+      b.theme?.reduceMotion ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      setCamera(next);
+      void operate({ kind: "camera", camera: next });
+      return;
+    }
+    const distance = Math.hypot(next.x - from.x, next.y - from.y);
+    const duration = Math.min(700, Math.max(260, distance * 0.35));
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration),
+        eased = easeCamera(t);
+      setCamera({
+        x: from.x + (next.x - from.x) * eased,
+        y: from.y + (next.y - from.y) * eased,
+        zoom: from.zoom + (next.zoom - from.zoom) * eased,
+      });
+      if (t < 1) animation.current = requestAnimationFrame(tick);
+      else {
+        animation.current = 0;
+        void options.current.operate({ kind: "camera", camera: next });
+      }
+    };
+    animation.current = requestAnimationFrame(tick);
+  };
+  const trackEdge = (e: React.PointerEvent<HTMLElement>) => {
+    if (
+      e.pointerType !== "mouse" ||
+      e.buttons ||
+      !options.current.edgePan ||
+      options.current.motionPaused ||
+      animation.current ||
+      drag.current ||
+      (e.target as HTMLElement).closest("button,input,textarea,select,a")
+    ) {
+      stopEdge();
+      return;
+    }
+    const box = canvas.current!.getBoundingClientRect();
+    edge.current.point = { x: e.clientX - box.left, y: e.clientY - box.top };
+    if (edge.current.frame) return;
+    const tick = (now: number) => {
+      const state = edge.current,
+        point = state.point,
+        element = canvas.current;
+      if (
+        !point ||
+        !element ||
+        !options.current.edgePan ||
+        options.current.motionPaused ||
+        drag.current ||
+        animation.current
+      ) {
+        stopEdge();
+        return;
+      }
+      const velocity = edgeVelocity(
+        point.x,
+        point.y,
+        element.clientWidth,
+        element.clientHeight,
+        options.current.edgeSpeed,
+      );
+      if (!velocity.x && !velocity.y) {
+        stopEdge();
+        return;
+      }
+      const dt = state.last ? Math.min(32, now - state.last) / 1000 : 0;
+      state.last = now;
+      setCamera({
+        ...live.current.camera,
+        x: live.current.camera.x + velocity.x * dt,
+        y: live.current.camera.y + velocity.y * dt,
+      });
+      state.dirty = true;
+      if (now - state.saved > 500) {
+        state.saved = now;
+        void options.current.operate({
+          kind: "camera",
+          camera: live.current.camera,
+        });
+      }
+      state.frame = requestAnimationFrame(tick);
+    };
+    edge.current.frame = requestAnimationFrame(tick);
+  };
+  useEffect(() => {
+    const stop = () => {
+      stopAnimation(true);
+      stopEdge();
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") stop();
+    };
+    const visibility = () => {
+      if (document.hidden) stop();
+    };
+    window.addEventListener("blur", stop);
+    window.addEventListener("keydown", key);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      stopAnimation();
+      stopEdge(false);
+      window.removeEventListener("blur", stop);
+      window.removeEventListener("keydown", key);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, []);
+  useEffect(() => {
+    stopAnimation();
+    stopEdge(false);
+  }, [view?.spaceId, motionPaused, edgePan, edgeSpeed]);
+
   const drag = useRef<
     | {
         id?: string;
@@ -101,8 +269,7 @@ export function SpaceCanvas({
       y: (h - 40) / 2 - ((y + bottom) * zoom) / 2,
       zoom,
     };
-    setCamera(next);
-    void operate({ kind: "camera", camera: next });
+    animateTo(next);
   };
   const guideKey = b.guideFocus
     ? `${b.guideFocus.guideId}:${b.guideFocus.step}`
@@ -123,23 +290,37 @@ export function SpaceCanvas({
     return () => clearTimeout(timer);
   }, [query, kind, scope, view?.spaceId]);
   useEffect(() => {
-    if (!view?.selection.length || !canvas.current) return;
-    const selected = b.instances.filter(
-      (c) => view.selection.includes(c.id) && c.spaceId === view.spaceId,
-    );
-    if (!selected.length) return;
-    const c = selected.at(-1)!,
-      r = displayRect(c),
-      w = canvas.current.clientWidth,
-      h = canvas.current.clientHeight;
     if (
-      r.x * camera.zoom + camera.x < 0 ||
-      (r.x + r.width) * camera.zoom + camera.x > w ||
-      r.y * camera.zoom + camera.y < 0 ||
-      (r.y + r.height) * camera.zoom + camera.y > h
+      !view?.selection.length ||
+      !canvas.current ||
+      drag.current ||
+      motionPaused
     )
-      fit(selected);
-  }, [view?.selection.join("|")]);
+      return;
+    const c = b.instances.find(
+      (c) => c.id === view.selection.at(-1) && c.spaceId === view.spaceId,
+    );
+    if (!c) return;
+    const r = displayRect(c),
+      current = live.current.camera;
+    const w = canvas.current.clientWidth,
+      h = canvas.current.clientHeight;
+    const area = {
+      left: Math.min(insets.left, w * 0.32),
+      right: w - Math.min(insets.right, w * 0.32),
+      top: insets.top,
+      bottom: h - insets.bottom,
+    };
+    const x = r.x * current.zoom + current.x,
+      y = r.y * current.zoom + current.y + 36;
+    if (
+      x < area.left ||
+      x + r.width * current.zoom > area.right ||
+      y < area.top ||
+      y + r.height * current.zoom > area.bottom
+    )
+      animateTo(centerCamera(current, r, area));
+  }, [view?.selection.join("|"), view?.spaceId, focusRevision]);
   const navigate = (spaceId: unknown) => {
     clearFilters();
     return operate({ kind: "navigate", spaceId });
@@ -263,6 +444,11 @@ export function SpaceCanvas({
             clearFilters();
           } catch {}
         }}
+        onPointerDownCapture={() => {
+          stopAnimation(true);
+          stopEdge();
+        }}
+        onPointerLeave={() => stopEdge()}
         onPointerDown={(e) => {
           if (e.target !== e.currentTarget) return;
           drag.current = {
@@ -276,6 +462,7 @@ export function SpaceCanvas({
           e.currentTarget.setPointerCapture(e.pointerId);
         }}
         onPointerMove={(e) => {
+          trackEdge(e);
           const d = drag.current;
           if (!d) return;
           const dx = e.clientX - d.x,
@@ -344,13 +531,6 @@ export function SpaceCanvas({
           }
         }}
       >
-        <div className="canvas-hint">
-          {focusedGuide
-            ? "功能路径定位 · 其他对象淡化"
-            : mode === "arrange"
-              ? "拖动／右下角调整大小 · 双击选择 · Alt+方向键调整大小"
-              : "点击查看 · Shift 多选或框选 · 拖动空白平移"}
-        </div>
         <div
           className="world"
           style={{
@@ -626,7 +806,16 @@ export function SpaceCanvas({
                     className="component-symbol"
                     title={componentTypes.find((t) => t.type === c.type)?.title}
                   >
-                    <Icon name={c.appearance?.icon || c.type} size={20} />
+                    <Icon
+                      name={
+                        componentTypes.some((t) => t.type === c.type)
+                          ? c.type === "space-link" || c.type === "object"
+                            ? "board"
+                            : c.type
+                          : c.appearance?.icon || "board"
+                      }
+                      size={20}
+                    />
                   </span>
                   {c.appearance?.detail &&
                     c.appearance.detail !== "full" &&

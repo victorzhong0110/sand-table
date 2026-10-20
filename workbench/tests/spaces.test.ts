@@ -210,13 +210,51 @@ test("appearance levels preserve source identity, expanded geometry and componen
     b = spaces.update(b.id, store.get(b.id).revision, "appearance-view", {
       kind: "update",
       instanceId: original.id,
-      appearance: { detail, icon: "task" },
+      appearance: { detail },
     });
     const c = b.instances.find((c) => c.id === original.id)!;
     assert.deepEqual(c.rect, original.rect);
     assert.deepEqual(c.data, original.data);
     assert.equal(c.objectId, original.objectId);
     assert.equal(c.appearance?.detail, detail);
-    assert.equal(c.appearance?.icon, "task");
+    assert.equal(c.appearance?.icon, undefined);
   }
+});
+
+test("builtin icons are fixed and custom icons are assigned only at creation", () => {
+  const store = new BoardStore();
+  let b = store.open(p, "icons");
+  openView(store.get(b.id), "icons-view");
+  const spaces = new Spaces(store);
+  const op = (operation: any) =>
+    (b = spaces.update(
+      b.id,
+      store.get(b.id).revision,
+      "icons-view",
+      operation,
+    ));
+  op({ kind: "create", type: "text", title: "Note", icon: "task" });
+  const note = b.instances.at(-1)!;
+  assert.equal(note.appearance?.icon, undefined);
+  op({
+    kind: "update",
+    instanceId: note.id,
+    appearance: { icon: "task", detail: "icon" },
+  });
+  assert.equal(
+    b.instances.find((c) => c.id === note.id)?.appearance?.icon,
+    undefined,
+  );
+  op({ kind: "create", type: "custom-example", title: "Custom", icon: "task" });
+  const custom = b.instances.at(-1)!;
+  assert.equal(custom.appearance?.icon, "task");
+  op({
+    kind: "update",
+    instanceId: custom.id,
+    appearance: { icon: "chart", detail: "label" },
+  });
+  assert.equal(
+    b.instances.find((c) => c.id === custom.id)?.appearance?.icon,
+    "task",
+  );
 });

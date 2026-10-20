@@ -94,7 +94,7 @@ export function ComponentRenderer({
         <>
           {header}
           <p className="component-text">
-            {text(d.text) || "添加说明、疑问或约束"}
+            {text(d.text) || "写点什么…"}
           </p>
         </>
       );

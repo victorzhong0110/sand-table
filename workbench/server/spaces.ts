@@ -212,6 +212,9 @@ export class Spaces {
         spaceId: v.spaceId,
         type,
         objectId: op.objectId,
+        ...(op.icon && !componentTypes.some((c) => c.type === type)
+          ? { appearance: { icon: op.icon } }
+          : {}),
         title: op.title,
         data: structuredClone(data),
         rect: op.rect || {
@@ -263,7 +266,8 @@ export class Spaces {
         if (c.type === "space-link") validSpace(String(op.data.spaceId));
         c.data = structuredClone(op.data);
       }
-      if (op.appearance) c.appearance = { ...c.appearance, ...op.appearance };
+      if (op.appearance?.detail)
+        c.appearance = { ...c.appearance, detail: op.appearance.detail };
       c.updatedAt = Date.now();
       c.author = author;
     }
@@ -406,6 +410,7 @@ const operation = z.discriminatedUnion("kind", [
     title: z.string().min(1).max(120),
     data: z.record(z.string(), z.unknown()).optional(),
     objectId: id.optional(),
+    icon: z.string().max(80).optional(),
     rect: rect.optional(),
   }),
   z.object({
@@ -413,26 +418,6 @@ const operation = z.discriminatedUnion("kind", [
     instanceId: id,
     appearance: z
       .object({
-        icon: z
-          .enum([
-            "text",
-            "board",
-            "code",
-            "resource",
-            "chart",
-            "table",
-            "task",
-            "reasoning",
-            "comparison",
-            "events",
-            "metric",
-            "status",
-            "ai",
-            "intent",
-            "proposal",
-            "validation",
-          ])
-          .optional(),
         detail: z.enum(["full", "label", "icon"]).optional(),
       })
       .optional(),

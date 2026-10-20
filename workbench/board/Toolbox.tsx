@@ -20,25 +20,6 @@ const groups = [
     types: ["intent", "proposal", "validation"],
   },
 ];
-const icons: Record<string, string> = {
-  text: "Aa",
-  heading: "H",
-  board: "▣",
-  resource: "◇",
-  code: "</>",
-  metric: "#",
-  status: "●",
-  chart: "▥",
-  table: "▦",
-  events: "≡",
-  task: "☑",
-  reasoning: "?",
-  comparison: "⇄",
-  intent: "↗",
-  proposal: "±",
-  validation: "✓",
-  object: "{ }",
-};
 export function Toolbox({
   board: b,
   viewId,
@@ -49,7 +30,13 @@ export function Toolbox({
   action,
   showPanel,
   navigate,
+  activeSection = "tools",
+  focusInstance,
+  close,
 }: {
+  focusInstance?: (id: string) => void;
+  activeSection?: string;
+  close?: () => void;
   board: Board;
   viewId: string;
   mode: string;
@@ -99,46 +86,34 @@ export function Toolbox({
   }
   return (
     <aside className="canvas-toolbox" aria-label="组件工具箱">
-      <div className="tool-modes" aria-label="操作工具">
-        {[
-          ["browse", "↖", "浏览"],
-          ["arrange", "✥", "编排"],
-          ["ai", "✦", "AI"],
-        ].map(([id, icon, label]) => (
-          <button
-            key={id}
-            title={label}
-            aria-pressed={mode === id}
-            onClick={() => {
-              setMode(id);
-              if (id === "ai") showPanel("ai");
-            }}
-          >
-            <span aria-hidden="true">
-              <Icon name={id} />
-            </span>
-            {label}
-          </button>
-        ))}
+      <div className="palette-heading">
+        <strong>{activeSection === "boards" ? "画板" : "工具"}</strong>
+        <button aria-label="收起面板" onClick={close}>
+          ×
+        </button>
       </div>
-      <div className="toolbox-nav" role="tablist" aria-label="素材">
-        {[
-          ["components", "组件"],
-          ["presets", "场景"],
-          ["sources", "仓库"],
-        ].map(([id, label]) => (
-          <button
-            role="tab"
-            key={id}
-            aria-selected={section === id}
-            onClick={() => setSection(id)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {activeSection !== "boards" && (
+        <>
+          <div className="toolbox-nav" role="tablist" aria-label="素材">
+            {[
+              ["components", "组件"],
+              ["presets", "场景"],
+              ["sources", "仓库"],
+            ].map(([id, label]) => (
+              <button
+                role="tab"
+                key={id}
+                aria-selected={section === id}
+                onClick={() => setSection(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
       <div className="toolbox-content">
-        {navigate && (
+        {activeSection === "boards" && navigate && (
           <details className="board-library" open>
             <summary>画板</summary>
             <div>
@@ -156,7 +131,23 @@ export function Toolbox({
             </div>
           </details>
         )}
-        {section === "components" ? (
+        {activeSection === "boards" && focusInstance && (
+          <div className="board-components">
+            {b.instances
+              .filter((c) => c.spaceId === b.views[viewId]?.spaceId)
+              .map((c) => (
+                <button
+                  key={c.id}
+                  aria-label={`定位 ${c.title}`}
+                  onClick={() => focusInstance(c.id)}
+                >
+                  <Icon name={c.type} size={16} />
+                  <span>{c.title}</span>
+                </button>
+              ))}
+          </div>
+        )}
+        {activeSection === "boards" ? null : section === "components" ? (
           <>
             <input
               aria-label="搜索组件"
@@ -187,20 +178,7 @@ export function Toolbox({
                   title={"拖入画布，或点击添加" + c.title}
                 >
                   <span className={"palette-icon " + group} aria-hidden="true">
-                    {[
-                      "text",
-                      "heading",
-                      "code",
-                      "metric",
-                      "reasoning",
-                      "intent",
-                      "proposal",
-                      "validation",
-                    ].includes(c.type) ? (
-                      icons[c.type]
-                    ) : (
-                      <Icon name={c.type} />
-                    )}
+                    <Icon name={c.type} />
                   </span>
                   <span>{c.title}</span>
                   <span className="palette-grip" aria-hidden="true">
@@ -209,16 +187,10 @@ export function Toolbox({
                 </button>
               ))}
             </div>
-            <p className="toolbox-hint">
-              拖进画布，或点击添加。
-              <br />
-              选中后修改内容；双击白板进入。
-            </p>
           </>
         ) : section === "presets" ? (
           <>
             <h2>从一个场景开始</h2>
-            <p className="muted">只添加你选择的内容。</p>
             <button
               className="preset-choice"
               disabled={busy}
@@ -249,9 +221,6 @@ export function Toolbox({
         ) : (
           <>
             <h2>导入代码仓库</h2>
-            <p className="muted">
-              把本机已有的 Git 仓库作为一个子白板加入。不会安装或运行它。
-            </p>
             <label>
               本机仓库路径
               <input
@@ -322,11 +291,9 @@ export function Toolbox({
         )}
       </div>
       <div className="toolbox-bottom">
-        <button onClick={() => showPanel("theme")}>外观</button>
         {b.workspaces.length > 0 && (
           <button onClick={() => showPanel("changes")}>代码改动</button>
         )}
-        <small>本次会话 · 不自动保存</small>
       </div>
     </aside>
   );
