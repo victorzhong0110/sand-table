@@ -116,6 +116,35 @@ try {
     .fill("先收集证据，再比较方案");
   await frame.getByRole("button", { name: "保存组件", exact: true }).click();
   b = await until((b) => b.instances[0].data.text === "先收集证据，再比较方案");
+  const noteId = b.instances[0].id;
+  const expandedRect = { ...b.instances[0].rect };
+  await frame.getByRole("button", { name: "图标＋标题", exact: true }).click();
+  b = await until((b) => b.instances[0].appearance?.detail === "label");
+  let note = frame.locator('[data-instance-id="' + noteId + '"]');
+  assert.equal(Math.round((await note.boundingBox())!.height), 48);
+  assert.deepEqual(
+    b.instances[0].rect,
+    expandedRect,
+    "Folding preserves expanded geometry",
+  );
+  await frame
+    .getByRole("button", { name: "使用 task 图标", exact: true })
+    .click();
+  await until((b) => b.instances[0].appearance?.icon === "task");
+  await frame.getByRole("button", { name: "仅图标", exact: true }).click();
+  await until((b) => b.instances[0].appearance?.detail === "icon");
+  assert.equal(Math.round((await note.boundingBox())!.width), 48);
+  await frame.getByRole("button", { name: "完整界面", exact: true }).click();
+  b = await until((b) => b.instances[0].appearance?.detail === "full");
+  assert.deepEqual(b.instances[0].rect, expandedRect);
+  assert.equal(b.instances[0].data.text, "先收集证据，再比较方案");
+  await page.screenshot({
+    path: "artifacts/material-note.png",
+    fullPage: true,
+  });
+  await frame.getByRole("button", { name: "切换工具箱" }).click();
+  assert.equal(await frame.locator(".floating-tool-wrap").isVisible(), false);
+  await frame.getByRole("button", { name: "切换工具箱" }).click();
   await frame.getByRole("button", { name: "关闭详情" }).click();
   await frame.getByRole("button", { name: "白板", exact: true }).click();
   b = await until((b) => b.instances.some((i: any) => i.type === "board"));

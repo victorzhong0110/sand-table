@@ -12,6 +12,7 @@ export type ComponentInstance = {
   spaceId: string;
   type: string;
   objectId?: string;
+  appearance?: { icon?: string; detail?: "full" | "label" | "icon" };
   title: string;
   data: Record<string, unknown>;
   rect: Rect;
@@ -121,4 +122,51 @@ export function safeUrl(value: unknown) {
   } catch {
     return undefined;
   }
+}
+
+// Presentation changes never replace the expanded geometry or source data.
+export const componentIcons = [
+  "text",
+  "board",
+  "code",
+  "resource",
+  "chart",
+  "table",
+  "task",
+  "reasoning",
+  "comparison",
+  "events",
+  "metric",
+  "status",
+  "ai",
+  "intent",
+  "proposal",
+  "validation",
+];
+export function displayRect(c: ComponentInstance, rect = c.rect): Rect {
+  return c.appearance?.detail === "icon"
+    ? { ...rect, width: 48, height: 48 }
+    : c.appearance?.detail === "label"
+      ? { ...rect, width: Math.min(rect.width, 240), height: 48 }
+      : rect;
+}
+export function material(type: string) {
+  return ["text", "heading", "reasoning", "comparison", "task"].includes(type)
+    ? "paper"
+    : ["board", "space-link"].includes(type)
+      ? "container"
+      : ["code"].includes(type)
+        ? "screen"
+        : [
+              "chart",
+              "table",
+              "metric",
+              "status",
+              "events",
+              "validation",
+            ].includes(type)
+          ? "instrument"
+          : type === "resource"
+            ? "media"
+            : "document";
 }

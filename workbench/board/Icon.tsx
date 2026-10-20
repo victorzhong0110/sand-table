@@ -1,5 +1,38 @@
 export function Icon({ name, size = 20 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
+    text: (
+      <>
+        <path d="M4 2h12v13l-4 3H4Z" />
+        <path d="M7 6h6M7 9h6M7 12h3m2 6v-3h4" />
+      </>
+    ),
+    heading: <path d="M5 3v14M15 3v14M5 10h10" />,
+    code: <path d="m6 5-4 5 4 5m8-10 4 5-4 5M12 3 8 17" />,
+    metric: (
+      <>
+        <path d="M3 16V8m6 8V3m6 13v-5" />
+        <path d="M2 18h16" />
+      </>
+    ),
+    reasoning: (
+      <>
+        <circle cx="10" cy="9" r="6" />
+        <path d="M8 16v2h4v-2M8 7a2 2 0 1 1 3 2l-1 1m0 2v.1" />
+      </>
+    ),
+    intent: <path d="M3 17 17 3M8 3h9v9M3 10v7h7" />,
+    proposal: (
+      <>
+        <rect x="3" y="2" width="14" height="16" rx="2" />
+        <path d="M6 7h8m-4-3v6M6 14h8" />
+      </>
+    ),
+    validation: (
+      <>
+        <path d="m10 2 7 3v5c0 4-7 8-7 8s-7-4-7-8V5Z" />
+        <path d="m6 10 3 3 5-6" />
+      </>
+    ),
     browse: <path d="m5 3 13 9-6 1-3 6Z" />,
     arrange: (
       <>

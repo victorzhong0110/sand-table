@@ -1380,3 +1380,398 @@ main.canvas-app {
   align-items: center;
   gap: 5px;
 }
+/* One continuous workspace; controls float above it rather than splitting it. */
+.canvas-app .canvas-topbar {
+  position: absolute;
+  z-index: 8;
+  top: 12px;
+  left: 16px;
+  right: 16px;
+  height: 48px;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 3px 18px #00000008;
+}
+.canvas-app .studio-layout,
+.canvas-app .studio-layout.has-inspector {
+  display: block;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.canvas-app .studio-stage {
+  position: absolute;
+  inset: 0;
+}
+.canvas-app .stage-search {
+  position: absolute;
+  z-index: 4;
+  top: 72px;
+  right: 20px;
+  height: 38px;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: 0 3px 16px #00000006;
+}
+.canvas-app .studio-stage .space-shell {
+  height: 100%;
+}
+.canvas-app .studio-stage .breadcrumbs {
+  position: absolute;
+  z-index: 4;
+  left: 280px;
+  top: 76px;
+  max-width: calc(100% - 610px);
+  border-radius: 14px;
+}
+.canvas-app .studio-stage .breadcrumbs > span {
+  display: none;
+}
+.canvas-app .studio-stage .canvas {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+.canvas-app .canvas-hint {
+  top: auto;
+  bottom: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.floating-tool-toggle {
+  position: absolute;
+  z-index: 7;
+  left: 16px;
+  top: 76px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 3px 18px #0000000b;
+}
+.floating-tool-wrap {
+  position: absolute;
+  z-index: 6;
+  left: 16px;
+  top: 124px;
+  bottom: 58px;
+  width: 224px;
+  pointer-events: none;
+}
+.floating-tool-wrap.is-hidden {
+  display: none;
+}
+.canvas-app .canvas-toolbox {
+  width: 100%;
+  height: auto;
+  max-height: 100%;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 8px 32px #0000000c;
+  pointer-events: auto;
+}
+.canvas-app .studio-inspector {
+  position: absolute;
+  z-index: 7;
+  top: 124px;
+  right: 16px;
+  bottom: 58px;
+  width: 300px;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 8px 32px #0000000c;
+}
+.board-library {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+  margin-bottom: 14px;
+}
+.board-library summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.board-library > div {
+  max-height: 140px;
+  overflow: auto;
+}
+.board-library button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+  width: 100%;
+  background: transparent;
+  border-color: transparent;
+  font-size: 12px;
+}
+.board-library button[aria-current] {
+  background: var(--soft);
+  border-color: var(--line);
+}
+.canvas-app .component-card {
+  padding: 16px;
+  border-radius: 10px;
+  box-shadow: 0 3px 12px #00000009;
+}
+.component-chrome {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 24px;
+  margin-bottom: 8px;
+  color: var(--muted);
+}
+.component-symbol {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.detail-toggle {
+  margin-left: auto;
+  padding: 0 4px;
+  border: 0;
+  opacity: 0;
+  background: transparent;
+}
+.component-card:hover .detail-toggle,
+.component-card:focus-within .detail-toggle,
+.component-card.selected .detail-toggle {
+  opacity: 1;
+}
+.canvas-app .component-card .card-type {
+  display: none;
+}
+.canvas-app .material-paper {
+  background: #fff1b9;
+  border-color: #e9dca5;
+  border-radius: 3px 3px 10px 3px;
+  box-shadow: 1px 4px 9px #60491612;
+}
+.canvas-app.mono .material-paper {
+  background: #f1f0eb;
+  border-color: #dfded8;
+}
+.canvas-app .material-screen {
+  background: #23262b;
+  color: #f0f1f2;
+  border-color: #393e46;
+  font-family: ui-monospace, monospace;
+}
+.canvas-app .material-screen .component-chrome {
+  color: #bbc1cc;
+}
+.canvas-app .material-screen pre {
+  background: transparent;
+  color: inherit;
+}
+.canvas-app .material-container {
+  background: color-mix(in srgb, var(--surface) 65%, var(--bg));
+  border: 2px solid var(--line);
+  border-radius: 20px;
+  box-shadow: inset 0 0 0 5px #00000002;
+}
+.canvas-app .material-instrument {
+  background: var(--surface);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px #00000004;
+}
+.canvas-app .material-document {
+  background: var(--surface);
+  border-radius: 3px;
+  border-left: 4px solid var(--line);
+}
+.canvas-app .material-media {
+  background: var(--surface);
+  padding: 10px;
+}
+.canvas-app .component-card.detail-label,
+.canvas-app .component-card.detail-icon {
+  padding: 11px;
+  border-radius: 14px;
+  overflow: visible;
+}
+.detail-label .component-chrome,
+.detail-icon .component-chrome {
+  margin: 0;
+}
+.collapsed-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: 13px;
+}
+.detail-icon .detail-toggle {
+  position: absolute;
+  right: -9px;
+  top: -9px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+}
+.detail-icon .pin-badge,
+.detail-label .pin-badge {
+  top: -12px;
+}
+.icon-library {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.icon-library button {
+  display: grid;
+  place-items: center;
+  padding: 9px;
+}
+.detail-options {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.detail-options button {
+  font-size: 11px;
+  padding: 5px 7px;
+}
+.appearance-controls button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--soft);
+}
+@media (max-width: 700px) {
+  .canvas-app .canvas-topbar {
+    left: 8px;
+    right: 8px;
+    padding: 0 8px;
+    gap: 6px;
+  }
+  .canvas-brand > span {
+    display: none;
+  }
+  .canvas-app .canvas-top-actions button {
+    padding: 5px;
+    font-size: 10px;
+  }
+  .canvas-app .board-title {
+    width: 90px;
+    min-width: 0;
+  }
+  .floating-tool-wrap {
+    width: 190px;
+    left: 8px;
+    top: 120px;
+    bottom: 65px;
+  }
+  .canvas-app .canvas-toolbox {
+    flex-direction: column;
+  }
+  .canvas-app .stage-search {
+    top: 76px;
+    right: 8px;
+    width: 145px;
+  }
+  .canvas-app .stage-search input {
+    width: 100%;
+  }
+  .canvas-app .studio-inspector {
+    top: 120px;
+    right: 8px;
+    width: min(300px, calc(100% - 24px));
+    bottom: 65px;
+  }
+  .canvas-app .studio-stage .breadcrumbs {
+    top: auto;
+    bottom: 48px;
+    left: 8px;
+    max-width: calc(100% - 16px);
+  }
+  .canvas-app .canvas-hint {
+    display: none;
+  }
+}
+
+.canvas-app .component-card.detail-label,
+.canvas-app .component-card.detail-icon {
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Stable application rail, with a separate rounded workspace palette. */
+.canvas-app {
+  padding-left: 58px;
+}
+.app-rail {
+  position: absolute;
+  z-index: 12;
+  inset: 0 auto 0 0;
+  width: 58px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 8px;
+  background: var(--surface);
+}
+.rail-brand {
+  font-size: 24px;
+  line-height: 32px;
+  margin-bottom: 14px;
+}
+.app-rail button {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  border-radius: 12px;
+}
+.app-rail button:hover,
+.app-rail button[aria-pressed="true"] {
+  background: var(--soft);
+}
+.app-rail .rail-settings {
+  margin-top: auto;
+}
+.canvas-app .canvas-topbar {
+  left: 74px;
+}
+@media (max-width: 700px) {
+  .canvas-app {
+    padding-left: 44px;
+  }
+  .app-rail {
+    width: 44px;
+    padding: 12px 4px;
+  }
+  .app-rail button {
+    width: 36px;
+    height: 36px;
+  }
+  .canvas-app .canvas-topbar {
+    left: 52px;
+  }
+}
+main.canvas-app { padding-left: 58px; }
+@media (max-width: 700px) { main.canvas-app { padding-left: 44px; } }
+.canvas-app .studio-layout, .canvas-app .studio-layout.has-inspector { width: auto; align-self: stretch; }
+.app-rail button[aria-pressed="true"], .appearance-controls button[aria-pressed="true"] { color: var(--ink); }
+@media (max-width: 700px) {
+ .canvas-app .canvas-topbar { display: grid; grid-template-columns: 24px minmax(0, 1fr); grid-template-rows: 24px 28px; height: 68px; min-height: 68px; gap: 2px 6px; padding: 6px 10px; flex-wrap: nowrap; }
+ .canvas-app .board-title { width: 100%; font-size: 12px; padding: 2px; }
+ .canvas-app .canvas-top-actions { grid-column: 1 / -1; margin: 0; justify-content: flex-end; }
+ .canvas-app .canvas-top-actions button { padding: 3px 6px; }
+ .canvas-app .floating-tool-toggle { top: 92px; font-size: 11px; padding: 8px; }
+ .canvas-app .stage-search { top: 92px; width: 130px; }
+ .canvas-app .agent-beacon { display: none; }
+ .canvas-app .floating-tool-wrap, .canvas-app .studio-inspector { top: 138px; }
+}

@@ -48,6 +48,7 @@ export function Toolbox({
   create,
   action,
   showPanel,
+  navigate,
 }: {
   board: Board;
   viewId: string;
@@ -57,6 +58,7 @@ export function Toolbox({
   create: (type: string, title: string, data?: any, objectId?: string) => void;
   action: (name: string, args?: Record<string, unknown>) => Promise<any>;
   showPanel: (panel: string) => void;
+  navigate?: (spaceId: string) => void;
 }) {
   const [section, setSection] = useState("components"),
     [group, setGroup] = useState("basic"),
@@ -136,6 +138,24 @@ export function Toolbox({
         ))}
       </div>
       <div className="toolbox-content">
+        {navigate && (
+          <details className="board-library" open>
+            <summary>画板</summary>
+            <div>
+              {b.spaces.map((space) => (
+                <button
+                  key={space.id}
+                  aria-current={
+                    b.views[viewId]?.spaceId === space.id ? "page" : undefined
+                  }
+                  onClick={() => navigate(space.id)}
+                >
+                  <Icon name="board" size={14} /> {space.title}
+                </button>
+              ))}
+            </div>
+          </details>
+        )}
         {section === "components" ? (
           <>
             <input
