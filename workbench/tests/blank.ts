@@ -691,7 +691,12 @@ try {
   b = await until((b) => b.instances.some((i: any) => i.title === "目标与验收条件"));
   const preset = b.instances.find((i: any) => i.title === "目标与验收条件");
   assert.equal(preset.type, "task", "The preset fills in a type that exists.");
-  assert.deepEqual(preset.data.items, [], "The preset uses the type's own data.");
+  // 预设的原生内容进对象，实例只是展示（P2 的对象/展示分离）。
+  assert.deepEqual(
+    contentOf(b, preset)?.data?.items,
+    [],
+    "The preset uses the type's own data.",
+  );
   /* #10: in the "icon + title" level a long title must not push the card's
      own level toggle out of the card. A flex item's automatic minimum size
      is its content size, so the title used to refuse to shrink: the
