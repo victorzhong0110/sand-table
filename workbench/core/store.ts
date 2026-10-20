@@ -1065,6 +1065,16 @@ export class BoardStore {
     return { redone: true, entry, board: this.read(boardId) };
   }
 
+  /**
+   * 被拒绝进入撤销栈的条目（外部效果、未声明种类的动作）。
+   * 拒绝不是静默丢弃：调用方要能看见「这条没能撤销」。
+   */
+  historyRefusals(id: string) {
+    const b = this.get(id);
+    const h = this.histories.get(b.id);
+    return h ? h.refused : [];
+  }
+
   /** 统一读回：原生内容对象与代码投影对象一起返回，kind 区分来源。 */
   listObjects(
     id: string,

@@ -353,6 +353,12 @@ export function createServer(
         auditCount: b.audit.length,
         nativeObjectCount: b.contentObjects.length,
         relationCount: b.objectRelations.length,
+        // 没能进入撤销栈的动作（外部效果等）：可见，不是静默丢弃。
+        refusedCount: store.historyRefusals(a.boardId).length,
+        refused: store
+          .historyRefusals(a.boardId)
+          .slice(-10)
+          .map((r) => ({ label: r.entry.label, kind: r.entry.kind, reason: r.reason })),
       };
     },
   );
