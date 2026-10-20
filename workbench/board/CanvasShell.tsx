@@ -1,7 +1,7 @@
 import { Icon } from "./Icon.tsx";
 import { useState, useEffect, useRef, type CSSProperties } from "react";
 import type { Board, Item } from "../core/model.ts";
-import { safeUrl, defaultData } from "../core/spaces.ts";
+import { safeUrl, defaultData, componentTypes } from "../core/spaces.ts";
 import { SpaceCanvas } from "./SpaceCanvas.tsx";
 import { Toolbox } from "./Toolbox.tsx";
 import { ComponentPanel, ThemePanel } from "./ComponentPanel.tsx";
@@ -81,11 +81,24 @@ export function CanvasShell({
   ) => {
     setQuery("");
     setMode("arrange");
+    const size = componentTypes.find((c) => c.type === type);
+    const narrow = window.innerWidth < 700;
+    if (narrow) setToolsOpen(false);
+    const camera = view?.camera || { x: 24, y: 24, zoom: 1 };
+    const offset =
+      (b.instances.filter((c) => c.spaceId === view?.spaceId).length % 6) * 24;
     void operate({
       kind: "create",
       type,
       title,
       data: data ?? defaultData(type),
+      rect: {
+        x: ((narrow ? 24 : 280) + offset - camera.x) / camera.zoom,
+        y: (160 + offset - 36 - camera.y) / camera.zoom,
+        width: size?.width || 280,
+        height: size?.height || 180,
+        pinned: false,
+      },
       ...(objectId ? { objectId } : {}),
     });
   };
