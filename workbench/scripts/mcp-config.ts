@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { bind } from "../server/repository.ts";
+import { bind } from "../connectors/git.ts";
 const roots = bind(process.argv.slice(2));
 console.log(
   JSON.stringify(

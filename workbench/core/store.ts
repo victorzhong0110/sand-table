@@ -1,3 +1,4 @@
+import { checkDomainRelation } from "./domains.ts";
 import {
   initializeSpaces,
   syncSourceInstances,
@@ -20,9 +21,11 @@ import type { HistoryRecord, HistorySnapshot } from "./history.ts";
 import type {
   AuditEntry,
   BoardStateKey,
+  ExternalLocator,
   HistoryEntry,
   ObjectRelation,
   Patch,
+  ResourceReference,
   WorkspaceObject,
   WorkspaceSnapshot,
 } from "./objects.ts";
@@ -41,7 +44,8 @@ import type {
  * 内核只依赖这个接口，不关心文件布局、原子写与迁移细节。
  */
 export type WorkspacePersistence = {
-  save(snapshot: WorkspaceSnapshot): void;
+  /** 落盘。允许返回 Promise：跨进程锁的等待是异步的。 */
+  save(snapshot: WorkspaceSnapshot): void | Promise<void>;
   load(id: string): WorkspaceSnapshot | undefined;
 };
 
@@ -166,7 +170,7 @@ export class BoardStore {
       objectRelations: [],
       resources: [],
       contentRevision: 0,
-      history: { undo: [], redo: [] },
+      history: { version: 2, entries: [], cursorId: undefined },
       audit: [],
       ...(this.workspaceId ? { workspaceId: this.workspaceId } : {}),
     };
@@ -966,6 +970,76 @@ export class BoardStore {
     return removed;
   }
 
+  /**
+   * 登记一条资源引用（文献片段、代码位置……）。
+   *
+   * 引用要能被识别为失效，所以它的状态变化必须**可撤销**：
+   * 复核一遍发现文献换了版本，这一改也要能退回去。
+   */
+  createResource(
+    b: Board,
+    resource: ResourceReference,
+    author: string,
+    intentId: string = randomUUID(),
+    authorKind: "human" | "agent" = "human",
+  ) {
+    const before = structuredClone(b.resources);
+    if (b.resources.some((r) => r.id === resource.id))
+      throw new Error(`资源引用 ${resource.id} 已存在。`);
+    b.resources = [...b.resources, structuredClone(resource)];
+    b.contentRevision++;
+    this.recordBoardState(
+      b,
+      "resources",
+      before,
+      b.resources,
+      author,
+      intentId,
+      "edit-resource",
+      `登记引用「${resource.title ?? resource.uri}」`,
+      authorKind,
+    );
+    this.touch();
+    return resource;
+  }
+
+  /**
+   * 更新资源引用（最常见的是失效状态：valid → stale / missing）。
+   * 外部内容变了必须可识别，但**不能静默覆盖**——所以每次变化都留痕。
+   */
+  updateResource(
+    b: Board,
+    id: string,
+    patch: Partial<Omit<ResourceReference, "id">>,
+    author: string,
+    intentId: string = randomUUID(),
+    authorKind: "human" | "agent" = "human",
+  ) {
+    const before = structuredClone(b.resources);
+    const index = b.resources.findIndex((r) => r.id === id);
+    if (index < 0) throw new Error(`找不到资源引用 ${id}。`);
+    const current = b.resources[index];
+    b.resources = [
+      ...b.resources.slice(0, index),
+      { ...current, ...structuredClone(patch), id },
+      ...b.resources.slice(index + 1),
+    ];
+    b.contentRevision++;
+    this.recordBoardState(
+      b,
+      "resources",
+      before,
+      b.resources,
+      author,
+      intentId,
+      "edit-resource",
+      `更新引用「${current.title ?? current.uri}」`,
+      authorKind,
+    );
+    this.touch();
+    return b.resources[index];
+  }
+
   /** 建立语义关系。与布局无关，也不因位置相近自动建立。 */
   relateContent(
     b: Board,
@@ -976,19 +1050,37 @@ export class BoardStore {
       status?: "confirmed" | "inferred";
       attributes?: Record<string, unknown>;
       basis?: string;
+      /** 外部定位：关系可以指向具体的文献片段或代码位置。 */
+      evidence?: ExternalLocator[];
     },
     author: string,
     intentId: string = randomUUID(),
     authorKind: "human" | "agent" = "human",
   ) {
+    /* 推测性关系不得伪装成已确认事实：标了 inferred 就必须说清依据。
+       这是内核职责（契约 I5），不留给领域包自觉。 */
+    const status = input.status ?? "confirmed";
+    if (status === "inferred" && !input.basis?.trim())
+      throw new Error(
+        "推测性关系必须给出依据（basis）：不确定的关系要说清凭什么推测。",
+      );
+    /* 领域关系规则：注册了才有要求。 */
+    for (const message of checkDomainRelation(input.kind, {
+      status,
+      basis: input.basis,
+      attributes: input.attributes,
+      evidence: input.evidence,
+    }))
+      throw new Error(`关系不合法：${message}`);
     const created = relateObjects(b.objectRelations, {
       id: randomUUID(),
       source: input.source,
       target: input.target,
       kind: input.kind,
-      ...(input.status ? { status: input.status } : {}),
+      status,
       ...(input.attributes ? { attributes: input.attributes } : {}),
       ...(input.basis ? { basis: input.basis } : {}),
+      ...(input.evidence?.length ? { evidence: input.evidence } : {}),
       now: this.now(),
       author,
     });
@@ -1181,33 +1273,22 @@ export class BoardStore {
    * 面板与 MCP 工具用的历史快照。
    * 撤销栈在前（可再撤），重做栈在后（已撤销、待重做）。
    */
+  /**
+   * 历史面板与 MCP 工具 `sand_history` 的数据源。
+   *
+   * 返回的是**整条时间线**（含被分叉取代但仍可达的旧分支），
+   * 不再是两列列表——这样「跳到任意一条记录」才有意义。
+   */
   history(id: string): HistorySnapshot {
     const b = this.get(id);
     const h = this.historyFor(b);
-    const toRecord = (
-      entry: HistoryEntry,
-      kind: HistoryRecord["kind"],
-    ): HistoryRecord => ({
-      id: entry.id,
-      label: entry.label,
-      at: entry.at,
-      author: entry.author,
-      // 缺这一项时按人处理：读回旧文件不因为少一个字段就崩。
-      authorKind: entry.authorKind === "agent" ? "agent" : "human",
-      kind,
-      intentId: entry.intentId,
-    });
-    const undoStack = h.state.undo;
-    const redoStack = h.state.redo;
     return {
       boardId: b.id,
-      records: [
-        ...[...undoStack].reverse().map((e) => toRecord(e, "edit")),
-        ...[...redoStack].reverse().map((e) => toRecord(e, "redo")),
-      ],
+      records: h.records(),
+      cursorId: h.state.cursorId,
       canUndo: h.canUndo,
       canRedo: h.canRedo,
-      note: "撤销按你的意图分组：一次连续输入、一次拖动算一步。审计日志与撤销导航分开，外部效果（已发布的改动、已运行的任务）不在撤销栈里。",
+      note: "撤销按你的意图分组：一次连续输入、一次拖动算一步。撤销后新编辑会分出分支，旧记录仍可跳回去。审计日志与撤销导航分开，外部效果（已发布的改动、已运行的任务）不在撤销栈里。",
     };
   }
 
@@ -1340,22 +1421,33 @@ export class BoardStore {
   touch() {
     if (!this.persistence || !this.workspaceId) return;
     if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => this.flushSave(), this.saveDelay);
+    this.saveTimer = setTimeout(() => {
+      // 定时路径不抛：错误由 lastSaveError 承载，界面据此显示「保存失败」。
+      void this.flushSave().catch(() => {});
+    }, this.saveDelay);
     this.saveTimer.unref?.();
   }
 
   /** 立即保存。保存失败会记录原因，不显示虚假的「已保存」。 */
-  flushSave() {
+  /**
+   * 立即落盘。
+   *
+   * 失败会**抛错**：调用方（如切换工作空间）要能据此中止，
+   * 否则会出现「切换成功但内容没存上」——那不是切换，是丢内容。
+   * 定时保存路径自己 catch，错误照旧记在 lastSaveError 里供界面显示。
+   */
+  async flushSave(): Promise<void> {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = undefined;
     }
     if (!this.persistence || !this.workspaceId) return;
     try {
-      this.persistence.save(this.snapshot());
+      await this.persistence.save(this.snapshot());
       this.lastSaveError = undefined;
     } catch (e) {
       this.lastSaveError = e instanceof Error ? e.message : String(e);
+      throw e;
     }
   }
 
@@ -1364,7 +1456,9 @@ export class BoardStore {
     const b = this.boards.values().next().value as Board | undefined;
     if (!b) throw Error("没有可保存的白板。");
     return {
-      schemaVersion: 1,
+      // 工作空间文件格式版本。与 core/workspace.ts 的 WORKSPACE_SCHEMA_VERSION 保持一致
+      // （内核不 import 存储层，避免把存储细节漏进核心）。
+      schemaVersion: 2,
       id: this.workspaceId || b.id,
       title: b.title,
       createdAt: this.now(),

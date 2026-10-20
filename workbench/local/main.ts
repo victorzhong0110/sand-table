@@ -1,6 +1,6 @@
 import { resolve, basename } from "node:path";
 import { spawn } from "node:child_process";
-import { bind } from "../server/repository.ts";
+import { bind } from "../connectors/git.ts";
 import { startLocal } from "./service.ts";
 import { defaultSessionFile } from "./session.ts";
 let open = false,

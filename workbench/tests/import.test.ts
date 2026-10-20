@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import { BoardStore } from "../core/store.ts";
 import { openView } from "../core/space-state.ts";
-import { registerRepositoryImport } from "../server/import.ts";
-import { scan, type Binding } from "../server/repository.ts";
+import { registerRepositoryImport } from "../connectors/git.ts";
+import { scan } from "../domains/code/indexer.ts";
+import type { Binding } from "../connectors/types.ts";
+import { Spaces } from "../server/spaces.ts";
 test(
   "explicit external import nests a scene and invalid import leaves the blank board untouched",
   { skip: !process.env.SAND_EXTERNAL_REPO },
@@ -16,8 +18,7 @@ test(
       (name, _description, shape, fn) => {
         tools[name] = (a) => fn(z.object(shape).parse(a));
       },
-      store,
-      bindings,
+      { store, bindings, scan, spaces: new Spaces(store) },
     );
     const opened = store.open(
         { workspaces: [], objects: [], relations: [] },

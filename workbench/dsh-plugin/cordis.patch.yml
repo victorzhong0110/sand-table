@@ -1,0 +1,18 @@
+# Sand Table 插件的补丁层：插入一行插件。
+#
+# 行 id 与 name 都要唯一。插件不声明 Config（那需要宿主的 schemastery），
+# 所以这里的 config 是「默认值」：用户可以在 profile 的 cordis.patch.yml 里
+# 用同一个 id 覆盖整行 config（补丁是整行替换，不是深合并）。
+#
+# 可覆盖的键：
+#   serverEntry   Sand Table MCP server 入口（相对本插件目录，或绝对路径）
+#   workspaceDir  工作空间存储目录（白板落盘位置）
+#   workspaceId   工作空间 ID（同一目录下的不同工作空间）
+#   boardUrl      白板画布地址（Client 半用 iframe 承载它）
+#   nodePath      跑 MCP server 的 node 可执行文件
+#   timeoutMs     单次 MCP 调用超时（毫秒）
+- insert:
+    - id: sand-table
+      name: "@sand-table/dsh-plugin"
+      config:
+        boardUrl: http://127.0.0.1:4173/board.html

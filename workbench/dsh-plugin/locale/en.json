@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Sand Table",
+    "description": "Opens a Sand Table whiteboard in the DSH sidebar, exposes read-only board tools to the agent, and gives the board an \"Ask AI\" entry point."
+  }
+}

@@ -5,6 +5,8 @@ import {
   appendAudit,
   externalEffectKinds,
   isExternalEffect,
+  redoPath,
+  undoPath,
 } from "../core/history.ts";
 import type { AuditEntry, HistoryEntry, Patch } from "../core/objects.ts";
 
@@ -107,8 +109,8 @@ test("不同 intentId 的编辑各自是一个撤销单位，undo 三次回到�
   assert.equal(board.size, 3, "三个意图各建了一个对象");
   assert.equal(h.canUndo, true);
   assert.equal(h.canRedo, false);
-  assert.equal(h.state.undo.length, 3);
-  assert.equal(h.state.redo.length, 0);
+  assert.equal(undoPath(h.state).length, 3);
+  assert.equal(redoPath(h.state).length, 0);
 
   const first = h.undo();
   assert.equal(first!.id, c.id);
@@ -127,8 +129,8 @@ test("不同 intentId 的编辑各自是一个撤销单位，undo 三次回到�
   assert.equal(board.size, 0, "三次 undo 必须把三个对象都清掉");
 
   assert.equal(h.canUndo, false);
-  assert.equal(h.state.undo.length, 0);
-  assert.equal(h.state.redo.length, 3);
+  assert.equal(undoPath(h.state).length, 0);
+  assert.equal(redoPath(h.state).length, 3);
 });
 
 test("同一 intentId 的连续变更合并为一个撤销单位，undo 一次回到最初 before", () => {
@@ -140,8 +142,8 @@ test("同一 intentId 的连续变更合并为一个撤销单位，undo 一次�
   h.record(entry("typing", single("object", "o1", "abc", "abcd")));
   applyValues(board, [{ id: "o1", value: "abcd" }]);
 
-  assert.equal(h.state.undo.length, 1, "一个意图只占一个撤销单位");
-  const merged = h.state.undo[0];
+  assert.equal(undoPath(h.state).length, 1, "一个意图只占一个撤销单位");
+  const merged = undoPath(h.state)[0];
   assert.equal(
     valueOf(merged.patch, "before"),
     "a",
@@ -193,7 +195,11 @@ test("同一意图内创建两个对象：一次 undo 全部回退，redo 全部
   ]);
   assert.equal(board.size, 2);
 
-  assert.equal(h.state.undo.length, 1, "同一意图的多条 record 合并为一个单位");
+  assert.equal(
+    undoPath(h.state).length,
+    1,
+    "同一意图的多条 record 合并为一个单位",
+  );
   const undone = h.undo();
   assert.equal(undone!.patch.target, "batch", "多实体必须用 batch 表达");
   const before = undone!.patch.before as { id: string; value: unknown }[];
@@ -246,7 +252,7 @@ test("同一意图内同一实体被改多次：合并后 before 取最早、aft
       ),
     ),
   );
-  const merged = h.state.undo[0];
+  const merged = undoPath(h.state)[0];
   const before = merged.patch.before as { id: string; value: unknown }[];
   const after = merged.patch.after as { id: string; value: unknown }[];
   assert.equal(before.length, 1);
@@ -267,7 +273,7 @@ test("同一意图内混合单目标补丁与 batch 补丁：合并成覆盖全�
       ),
     ),
   );
-  const merged = h.state.undo[0];
+  const merged = undoPath(h.state)[0];
   assert.equal(merged.patch.target, "batch");
   const before = merged.patch.before as { target: string; id: string }[];
   assert.equal(before.length, 2);
@@ -282,7 +288,7 @@ test("不连续的同一 intentId 不合并，各算一个撤销单位", () => {
   h.record(entry("i1", single("object", "o1", 0, 1)));
   h.record(entry("i2", single("object", "o2", 1, 2)));
   h.record(entry("i1", single("object", "o3", 2, 3)));
-  assert.equal(h.state.undo.length, 3);
+  assert.equal(undoPath(h.state).length, 3);
   const top = h.undo();
   assert.equal(top!.patch.id, "o3", "后来的 i1 不得并入前面的 i1");
 });
@@ -297,23 +303,23 @@ test("undo 后 redo 恢复，再 undo 能再次撤销，不来回震荡", () => 
   h.record(c);
 
   assert.equal(h.undo()!.id, c.id);
-  assert.equal(h.state.undo.length, 2);
-  assert.equal(h.state.redo.length, 1);
-  assert.equal(h.state.redo[0].id, c.id);
+  assert.equal(undoPath(h.state).length, 2);
+  assert.equal(redoPath(h.state).length, 1);
+  assert.equal(redoPath(h.state)[0].id, c.id);
   assert.equal(
-    h.state.undo.some((e) => e.id === c.id),
+    undoPath(h.state).some((e) => e.id === c.id),
     false,
     "撤销后该条目只能出现在 redo 栈",
   );
 
   assert.equal(h.undo()!.id, b.id, "再次 undo 必须取到更早的条目");
-  assert.equal(h.state.undo.length, 1);
-  assert.equal(h.state.redo.length, 2);
+  assert.equal(undoPath(h.state).length, 1);
+  assert.equal(redoPath(h.state).length, 2);
 
   assert.equal(h.redo()!.id, b.id, "redo 恢复最近被撤销的条目");
-  assert.equal(h.state.undo.length, 2);
+  assert.equal(undoPath(h.state).length, 2);
   assert.equal(
-    h.state.undo.some((e) => e.id === b.id),
+    undoPath(h.state).some((e) => e.id === b.id),
     true,
   );
 
@@ -326,7 +332,7 @@ test("undo 后 redo 恢复，再 undo 能再次撤销，不来回震荡", () => 
   assert.equal(h.redo()!.id, b.id);
   assert.equal(h.redo()!.id, c.id);
   assert.equal(h.redo(), undefined);
-  assert.equal(h.state.undo.length, 3);
+  assert.equal(undoPath(h.state).length, 3);
   assert.equal(h.canRedo, false);
 });
 
@@ -336,12 +342,12 @@ test("undo 之后产生新记录会清空重做栈", () => {
   h.record(entry("i2", single("object", "o2", 1, 2)));
   h.undo();
   assert.equal(h.canRedo, true);
-  assert.equal(h.state.redo.length, 1);
+  assert.equal(redoPath(h.state).length, 1);
 
   h.record(entry("i3", single("object", "o3", 2, 3)));
   assert.equal(h.canRedo, false);
-  assert.equal(h.state.redo.length, 0);
-  assert.equal(h.state.undo.length, 2);
+  assert.equal(redoPath(h.state).length, 0);
+  assert.equal(undoPath(h.state).length, 2);
 });
 
 test("clearRedo 显式丢弃重做栈", () => {
@@ -351,7 +357,7 @@ test("clearRedo 显式丢弃重做栈", () => {
   assert.equal(h.canRedo, true);
   h.clearRedo();
   assert.equal(h.canRedo, false);
-  assert.equal(h.state.redo.length, 0);
+  assert.equal(redoPath(h.state).length, 0);
 });
 
 test("撤销之后的新编辑不会并入被撤销的意图", () => {
@@ -360,7 +366,11 @@ test("撤销之后的新编辑不会并入被撤销的意图", () => {
   h.record(entry("other", single("object", "o2", 1, 2)));
   h.undo();
   h.record(entry("drag", single("object", "o1", 1, 5)));
-  assert.equal(h.state.undo.length, 2, "被撤销的意图与新编辑是两个撤销单位");
+  assert.equal(
+    undoPath(h.state).length,
+    2,
+    "被撤销的意图与新编辑是两个撤销单位",
+  );
   assert.equal(valueOf(h.undo()!.patch, "before"), 1);
 });
 
@@ -373,8 +383,8 @@ test("外部效果不进撤销栈，只留在拒绝列表里", () => {
     }),
   );
   assert.equal(h.canUndo, false, "外部效果不得进入白板撤销栈（I12）");
-  assert.equal(h.state.undo.length, 0);
-  assert.equal(h.state.redo.length, 0);
+  assert.equal(undoPath(h.state).length, 0);
+  assert.equal(redoPath(h.state).length, 0);
   assert.equal(h.refused.length, 1);
   assert.equal(h.refused[0].entry.kind, "publish");
   assert.match(h.refused[0].reason, /I12/);
@@ -385,8 +395,8 @@ test("外部效果不进撤销栈，只留在拒绝列表里", () => {
     }),
   );
   assert.equal(h.canUndo, true, "白板内编辑照常进撤销栈");
-  assert.equal(h.state.undo.length, 1);
-  assert.equal(h.state.undo[0].kind, "edit-object");
+  assert.equal(undoPath(h.state).length, 1);
+  assert.equal(undoPath(h.state)[0].kind, "edit-object");
   assert.equal(h.refused.length, 1, "拒绝列表不受后续记录影响");
 });
 
@@ -403,8 +413,8 @@ test("外部效果被拒绝后不会进入重做栈，也不影响已有撤销�
     }),
   );
   assert.equal(h.canRedo, true, "被拒绝的外部效果不得清空重做栈");
-  assert.equal(h.state.redo.length, 1);
-  assert.equal(h.state.undo.length, 0);
+  assert.equal(redoPath(h.state).length, 1);
+  assert.equal(undoPath(h.state).length, 0);
 });
 
 test("严格模式下未声明动作种类的条目不进撤销栈", () => {
@@ -447,8 +457,8 @@ test("审计日志只追加不删除，撤销本身由调用方写进审计", ()
   assert.equal(log[2].via, "redo");
 
   assert.equal(log.length, 3, "审计条目数与撤销栈长度是两回事");
-  assert.equal(h.state.undo.length, 1);
-  assert.equal(h.state.redo.length, 1);
+  assert.equal(undoPath(h.state).length, 1);
+  assert.equal(redoPath(h.state).length, 1);
 });
 
 test("isExternalEffect 区分外部效果与白板内操作", () => {
@@ -480,8 +490,8 @@ test("空栈 undo/redo 返回 undefined，不抛错", () => {
   assert.equal(h.undo(), undefined);
   assert.equal(h.redo(), undefined);
   assert.equal(h.undo(), undefined);
-  assert.equal(h.state.undo.length, 0);
-  assert.equal(h.state.redo.length, 0);
+  assert.equal(undoPath(h.state).length, 0);
+  assert.equal(redoPath(h.state).length, 0);
 });
 
 test("可以从持久化状态恢复，state 返回副本", () => {
@@ -491,19 +501,24 @@ test("可以从持久化状态恢复，state 返回副本", () => {
   const h = new History({ undo: [a, b], redo: [c] });
   assert.equal(h.canUndo, true);
   assert.equal(h.canRedo, true);
-  assert.equal(h.state.undo.length, 2);
-  assert.equal(h.state.redo.length, 1);
+  assert.equal(undoPath(h.state).length, 2);
+  assert.equal(redoPath(h.state).length, 1);
   assert.equal(h.undo()!.id, b.id);
 
+  /* v2 里没有双栈：直接往时间线上追加一条记录，游标停在它上面。 */
   const snapshot = h.state;
-  snapshot.undo.push(entry("i4", single("object", "o4", 2, 9)));
-  snapshot.redo.length = 0;
+  snapshot.entries.push({
+    ...entry("i4", single("object", "o4", 2, 9)),
+    parentId: snapshot.cursorId,
+    seq: snapshot.entries.length,
+  });
+  snapshot.cursorId = "i4";
   assert.equal(
-    h.state.undo.length,
+    undoPath(h.state).length,
     1,
     "state 必须是副本，外部改动不得影响内部状态",
   );
-  assert.equal(h.state.redo.length, 2);
+  assert.equal(redoPath(h.state).length, 2);
 });
 
 test("记录后改写原条目不影响撤销栈", () => {
@@ -570,5 +585,5 @@ test("记录格式错误的历史条目时立刻报错", () => {
       } as unknown as HistoryEntry),
     /target/,
   );
-  assert.equal(h.state.undo.length, 0);
+  assert.equal(undoPath(h.state).length, 0);
 });

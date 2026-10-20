@@ -1,4 +1,5 @@
-import { registerRepositoryImport } from "./import.ts";
+import { redoPath, undoPath } from "../core/history.ts";
+import { registerRepositoryImport } from "../connectors/git.ts";
 import { readFileSync } from "node:fs";
 import {
   McpServer,
@@ -14,11 +15,22 @@ import { z } from "zod";
 import { Spaces, registerSpaceTools } from "./spaces.ts";
 import { Changes, registerChangeTools } from "./changes.ts";
 import { registerPackTools } from "./packs.ts";
+import {
+  createWorkspaceManager,
+  registerWorkspaceTools,
+} from "./workspaces.ts";
+import {
+  registerAllDomains,
+  registerCodeDomainSync,
+} from "../domains/index.ts";
+import { registerConnectorTools } from "../connectors/tools.ts";
+import { folderConnector } from "../connectors/folder.ts";
 import { boardSummary } from "../core/results.ts";
 import { BoardStore } from "../core/store.ts";
 import { WorkspaceStore } from "../core/workspace.ts";
 import { workspacePort } from "../core/persistence.ts";
-import { scan, sourceFor, verifyEvidence, type Binding } from "./repository.ts";
+import { scan, sourceFor, verifyEvidence } from "../domains/code/indexer.ts";
+import type { Binding } from "../connectors/types.ts";
 const uri = "ui://sand-table/overview.html";
 const id = z.string().min(1).max(500),
   ids = z.array(id).max(1200),
@@ -48,6 +60,11 @@ export function createServer(
   forward?: Forwarder,
   options?: ServerOptions,
 ) {
+  /* 领域包注册：内核只认注册表，领域语义不进内核。
+     代码包只在绑了仓库时才注册——它会带进索引器，空白启动不该背这份依赖。 */
+  registerAllDomains();
+  if (bindings.length) registerCodeDomainSync();
+
   const store = new BoardStore();
   if (options?.workspaceRoot) {
     const workspaces = new WorkspaceStore(options.workspaceRoot);
@@ -57,6 +74,7 @@ export function createServer(
     );
   }
   const changes = new Changes(store, bindings);
+  const spaces = new Spaces(store);
   const server = new McpServer({ name: "sand-table", version: "0.3.0" });
   const timer = setInterval(() => store.sweep(), 60_000);
   timer.unref();
@@ -340,8 +358,8 @@ export function createServer(
         lastLoadError: store.lastLoadError || null,
         revision: b.revision,
         contentRevision: b.contentRevision,
-        canUndo: b.history.undo.length > 0,
-        canRedo: b.history.redo.length > 0,
+        canUndo: undoPath(b.history).length > 0,
+        canRedo: redoPath(b.history).length > 0,
         auditCount: b.audit.length,
         nativeObjectCount: b.contentObjects.length,
         relationCount: b.objectRelations.length,
@@ -536,10 +554,25 @@ export function createServer(
     (a) => store.end(a.boardId),
     true,
   );
-  registerRepositoryImport(tool, store, bindings);
+  registerRepositoryImport(tool, { store, bindings, scan, spaces });
   registerChangeTools(tool, changes);
-  registerSpaceTools(tool, new Spaces(store));
+  registerSpaceTools(tool, spaces);
   registerPackTools(tool, store);
+  /* 连接器的读工具：工具名与描述都来自能力声明，
+     声明里没有的种类，调用时会被拒绝并说明原因。
+     只注册只读的 folder 连接器——Git 的写入走既有确认链路，不在这里开口子。 */
+  registerConnectorTools(tool, [folderConnector]);
+  /* 多工作空间：只有配置了工作空间根目录才有意义（否则无处可列）。 */
+  if (options?.workspaceRoot) {
+    const manager = createWorkspaceManager(
+      store,
+      options.workspaceRoot,
+      options.workspaceId || "default",
+    );
+    registerWorkspaceTools(manager, (name, description, shape, fn) =>
+      tool(name, description, shape as never, fn as never),
+    );
+  }
   registerAppResource(server, "Sand Table overview", uri, {}, async () =>
     forward
       ? forward.resource()

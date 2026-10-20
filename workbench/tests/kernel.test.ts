@@ -11,7 +11,7 @@ import { BoardStore } from "../core/store.ts";
 import { Spaces } from "../server/spaces.ts";
 import { openView } from "../core/space-state.ts";
 import { resolveContent } from "../core/content.ts";
-import { History } from "../core/history.ts";
+import { History, redoPath, undoPath } from "../core/history.ts";
 import {
   WorkspaceStore,
   readObjectState,
@@ -259,20 +259,20 @@ test("审计日志与撤销栈是两个概念", () => {
   op({ kind: "create", type: "text", title: "林澈", data: { text: "一稿" } });
   const before = store.get(boardId);
   const auditBefore = before.audit.length;
-  const undoDepth = before.history.undo.length;
+  const undoDepth = undoPath(before.history).length;
   assert.ok(undoDepth > 0, "新建内容进入撤销栈");
   assert.ok(auditBefore > 0, "新建内容也进审计");
 
   op({ kind: "undo" });
   const after = store.get(boardId);
-  assert.equal(after.history.undo.length, undoDepth - 1, "撤销栈少了一项");
+  assert.equal(undoPath(after.history).length, undoDepth - 1, "撤销栈少了一项");
   assert.ok(after.audit.length > auditBefore, "撤销本身也进审计日志（只追加）");
   assert.ok(
     after.audit.some((a) => a.via === "undo"),
     "审计记录标注了这是撤销触发的",
   );
   assert.equal(
-    after.history.redo.length,
+    redoPath(after.history).length,
     1,
     "被撤销的条目在重做栈里，不在撤销栈里",
   );
@@ -297,19 +297,32 @@ test("语义关系与展示关系分离", () => {
     "建关系不改布局",
   );
 
-  // 推测性关系必须显式标注
+  // 推测性关系必须显式标注，而且必须说清凭什么推测（不给依据会被拒）。
+  assert.throws(
+    () =>
+      op({
+        kind: "relate",
+        source: c.id,
+        target: a.id,
+        relation: "可能导致",
+        status: "inferred",
+      }),
+    /依据/,
+    "推测性关系没有依据必须被拒绝",
+  );
   op({
     kind: "relate",
     source: c.id,
     target: a.id,
     relation: "可能导致",
     status: "inferred",
+    basis: "两处描写都提到了港口",
   });
   const b2 = store.get(boardId);
   assert.equal(b2.objectRelations[1].status, "inferred");
 });
 
-test("工作空间落盘后重开仍在：重启不该清空作品", () => {
+test("工作空间落盘后重开仍在：重启不该清空作品", async () => {
   const root = mkdtempSync(join(tmpdir(), "sand-kernel-"));
   try {
     const workspaces = new WorkspaceStore(root);
@@ -325,7 +338,7 @@ test("工作空间落盘后重开仍在：重启不该清空作品", () => {
       title: "林澈",
       data: { text: "在港口长大" },
     });
-    store.flushSave();
+    await store.flushSave();
     assert.ok(!store.lastSaveError, "保存没有失败");
 
     // 换一个新的 store 实例，模拟重启
@@ -349,7 +362,7 @@ test("工作空间落盘后重开仍在：重启不该清空作品", () => {
   }
 });
 
-test("保存失败必须可观察，不能显示虚假的「已保存」", () => {
+test("保存失败必须可观察，不能显示虚假的「已保存」", async () => {
   const store = new BoardStore();
   store.attachPersistence(
     {
@@ -368,7 +381,9 @@ test("保存失败必须可观察，不能显示虚假的「已保存」", () =>
     { type: "text", title: "林澈" },
     "human",
   );
-  store.flushSave();
+  /* 保存失败要**抛出来**：调用方（如切换工作空间）得能据此中止，
+     否则会出现「切换成功但内容没存上」。错误同时留在 lastSaveError 里供界面显示。 */
+  await assert.rejects(() => store.flushSave(), /disk is full/);
   assert.equal(store.lastSaveError, "disk is full");
   assert.ok(!store.lastSaveError === false, "失败原因被保留");
 });
@@ -413,7 +428,7 @@ test("删除对象后撤销能把它连同引用一起放回来", () => {
   assert.equal(b3.objectRelations.length, 1, "关系也回来了");
 });
 
-test("空白预设不会抹掉已保存的作品：恢复的白板带着用户自己的内容", () => {
+test("空白预设不会抹掉已保存的作品：恢复的白板带着用户自己的内容", async () => {
   const root = mkdtempSync(join(tmpdir(), "sand-kernel-preset-"));
   try {
     const store = new BoardStore();
@@ -427,7 +442,7 @@ test("空白预设不会抹掉已保存的作品：恢复的白板带着用户�
       title: "林澈",
       data: { text: "在港口长大" },
     });
-    store.flushSave();
+    await store.flushSave();
 
     // 重开：空白预设下，恢复出来的卡片必须还在
     const restarted = new BoardStore();
@@ -459,11 +474,11 @@ test("每个可撤销的动作都声明了种类；外部效果进不了撤销�
     intentId: "同一个意图",
   });
   const b = store.get(boardId);
-  assert.ok(b.history.undo.length > 0, "有可撤销的意图");
-  for (const entry of b.history.undo)
+  assert.ok(undoPath(b.history).length > 0, "有可撤销的意图");
+  for (const entry of undoPath(b.history))
     assert.ok(entry.kind, "每个撤销条目都声明了动作种类");
   assert.ok(
-    b.history.undo.every((e) => e.kind !== "publish"),
+    undoPath(b.history).every((e) => e.kind !== "publish"),
     "外部效果不在撤销栈里",
   );
   // 未声明种类的条目不进撤销栈：白板撤销宁可漏撤销，也不得冒充外部回滚。
@@ -552,7 +567,7 @@ test("预设里的原生内容同样是一等对象，不是卡在实例上的�
   );
 });
 
-test("动作种类（kind）落盘往返不丢：重启后撤销依然可用", () => {
+test("动作种类（kind）落盘往返不丢：重启后撤销依然可用", async () => {
   const root = mkdtempSync(join(tmpdir(), "sand-kernel-kind-"));
   try {
     const store = new BoardStore();
@@ -566,12 +581,12 @@ test("动作种类（kind）落盘往返不丢：重启后撤销依然可用", (
       title: "林澈",
       data: { text: "在港口长大" },
     });
-    store.flushSave();
+    await store.flushSave();
 
     const file = JSON.parse(
       readFileSync(join(root, "default", "workspace.json"), "utf8"),
     );
-    const entry = file.history.undo[0];
+    const entry = undoPath(file.history)[0];
     assert.ok(entry, "落盘文件里要有撤销条目");
     assert.equal(entry.kind, "create-object", "kind 不能在写盘时丢掉");
 
@@ -723,7 +738,7 @@ test("对象状态与文件结构的对应是显式的：展示实例在 boards[
     relations: [],
     resources: [],
     activities: [],
-    history: { undo: [], redo: [] },
+    history: { version: 2 as const, entries: [], cursorId: undefined },
     audit: [],
   };
 

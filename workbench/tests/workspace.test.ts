@@ -2,6 +2,7 @@
 // 只用 node 内置模块；node --experimental-strip-types --test tests/workspace.test.ts
 
 import { test } from "node:test";
+import { redoPath, undoPath } from "../core/history.ts";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -136,7 +137,8 @@ const sampleWorkspace = (id: string, title = "Sample"): WorkspaceFile => ({
     },
   ],
   history: {
-    undo: [
+    version: 2,
+    entries: [
       {
         id: "h-1",
         intentId: "intent-1",
@@ -149,9 +151,10 @@ const sampleWorkspace = (id: string, title = "Sample"): WorkspaceFile => ({
           before: "旧正文",
           after: "正文",
         },
+        seq: 0,
       },
     ],
-    redo: [],
+    cursorId: "h-1",
   },
   audit: [
     {
@@ -355,7 +358,12 @@ test("旧版本文件被逐级迁移到当前版本", () => {
   assert.equal(migrated.boards[0].id, "board-legacy");
   assert.equal(migrated.objects.length, 1);
   assert.equal(migrated.objects[0].typeVersion, 1);
-  assert.deepEqual(migrated.history, { undo: [], redo: [] });
+  /* v0 → v1 → v2：历史迁成时间线（单条日志 + 游标），不再有双栈。 */
+  assert.deepEqual(migrated.history, {
+    version: 2,
+    entries: [],
+    cursorId: undefined,
+  });
   assert.deepEqual(migrated.audit, []);
 
   // 迁移是幂等的：再次迁移得到同样结果。
@@ -525,19 +533,22 @@ test("共享类型里的可选字段（spaceActivities / theme / objectId / batc
   workspace.boards[0].spaces = [
     { id: "space-1", title: "空间", objectId: "obj-1" },
   ];
-  workspace.history.undo.push({
+  workspace.history.entries.push({
     id: "h-2",
     intentId: "intent-2",
     label: "批量改动",
     at: 1900,
     author: "agent",
     patch: { target: "batch", id: "batch-1", before: null, after: null },
+    parentId: workspace.history.cursorId,
+    seq: workspace.history.entries.length,
   });
+  workspace.history.cursorId = "h-2";
 
   store.save(workspace);
   const loaded = store.load("ws-seam").workspace;
   assert.deepEqual(loaded.boards[0].spaceActivities, [{ id: "sa-1" }]);
   assert.deepEqual(loaded.boards[0].theme, { base: "paper" });
   assert.equal(loaded.boards[0].spaces[0].objectId, "obj-1");
-  assert.equal(loaded.history.undo[1].patch.target, "batch");
+  assert.equal(undoPath(loaded.history)[1].patch.target, "batch");
 });

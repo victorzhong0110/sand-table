@@ -130,7 +130,7 @@ test("一次连续编辑算一次撤销：连撤连重不震荡，撤销栈与�
   const history = store.history(boardId);
   assert.equal(history.canUndo, true);
   assert.equal(
-    history.records.filter((r) => r.kind === "edit").length,
+    history.records.filter((r) => r.onPath).length,
     2,
     "创建 + 一次连续编辑 = 两条记录（连续编辑合成了一个撤销单位）",
   );
@@ -187,10 +187,11 @@ test("跳到某条历史记录：板面回到那条记录刚发生时的样子",
     intentId: "s2",
   });
   const history = store.history(boardId);
-  const edits = history.records.filter((r) => r.kind === "edit");
+  /* 时间线按 seq 升序：最早的在前面，最新的在后面。 */
+  const edits = history.records.filter((r) => r.onPath);
   assert.equal(edits.length, 3, "创建 + 两次编辑");
-  const oldest = edits[edits.length - 1];
-  const newest = edits[0];
+  const oldest = edits[0];
+  const newest = edits[edits.length - 1];
 
   store.jumpTo(boardId, oldest.id, "human");
   const b1 = store.get(boardId);
@@ -199,6 +200,8 @@ test("跳到某条历史记录：板面回到那条记录刚发生时的样子",
     "一",
     "跳到最早那条：回到它刚发生时的内容",
   );
+  /* 往回跳之后，更新的记录仍在「前面」，可以再前滚回去。 */
+  assert.equal(store.history(boardId).canRedo, true, "往回跳之后仍可前滚");
   store.jumpTo(boardId, newest.id, "human");
   const b2 = store.get(boardId);
   assert.equal(
@@ -206,7 +209,12 @@ test("跳到某条历史记录：板面回到那条记录刚发生时的样子",
     "三",
     "再跳回最新那条：内容回来",
   );
-  assert.equal(store.history(boardId).canRedo, true, "跳回去之后仍可重做");
+  /* 回到最新一条：板面就在最前沿，前面没有东西了。 */
+  assert.equal(
+    store.history(boardId).canRedo,
+    false,
+    "回到最新那条后前面没有记录",
+  );
 });
 
 test("移除展示不误删对象：删对象与撤销都不留残留", () => {
@@ -362,7 +370,7 @@ test("历史记录分得清是人改的还是 Agent 改的", () => {
   );
 });
 
-test("保存后重开：内容、关系、展示、嵌套与历史都回来", () => {
+test("保存后重开：内容、关系、展示、嵌套与历史都回来", async () => {
   const root = mkdtempSync(join(tmpdir(), "sand-integration-"));
   try {
     const store = new BoardStore();
@@ -397,7 +405,7 @@ test("保存后重开：内容、关系、展示、嵌套与历史都回来", ()
     });
     const before = store.get(board.id);
     const beforeHistory = store.history(board.id).records.length;
-    store.flushSave();
+    await store.flushSave();
 
     // 重启：同一个工作空间读回来
     const restarted = new BoardStore();
@@ -422,7 +430,7 @@ test("保存后重开：内容、关系、展示、嵌套与历史都回来", ()
     const file = JSON.parse(
       readFileSync(join(root, "default", "workspace.json"), "utf8"),
     );
-    assert.ok(file.history.undo.length > 0, "落盘文件里带着撤销栈");
+    assert.ok(file.history.entries.length > 0, "落盘文件里带着历史时间线");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

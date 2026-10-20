@@ -117,8 +117,49 @@
 | 标题同源 | 折叠/展开/图标态、无障碍名称、属性栏、搜索都从对象解析 | `tests/blank.ts`、`tests/kernel.test.ts` |
 | AI 入口 | 只有宿主能发能收才显示直接对话；只有 MCP 时只留接入状态与外部路径 | 人工验收（浏览器） |
 
-**本轮没有做的**：多工作空间管理器、跨进程文件锁、领域包（#13）、
-小说/科研纵向验证（#14）、DSH 宿主集成（#18）、发布与真人验收（#15）。
+**本轮没有做的**：发布与真人验收（#15）。真人验收需要真实被试、任务脚本与记录，
+脚本通过不等于它通过。
+
+## 收尾轮（2026-10-20）：内核加固与领域扩展
+
+本轮把上一轮列为「仍未做」的前五项补齐。规格与逐条裁决见
+[工作空间管理与文件锁](../../docs/architecture/workspace-management.zh-CN.md)、
+[历史时间线](../../docs/architecture/history-timeline.zh-CN.md)、
+[领域包与连接器](../../docs/architecture/domain-packs.zh-CN.md)、
+[DSH 宿主集成](../../docs/architecture/dsh-integration.zh-CN.md)。
+
+| 范围 | 实现 | 可重复证据 |
+|---|---|---|
+| 跨进程文件锁 | `<工作空间>/workspace.lock` 独占创建；可重入；陈旧锁抢占；超时明确报错 | `tests/workspace-lock.test.ts`（13 例） |
+| 多工作空间管理器 | list/create/open/rename/delete/switch；切换前先落盘，落盘失败即中止 | `tests/workspace-manager.test.ts`（12 例） |
+| 撤销到任意记录 | 历史从双栈改成**分支时间线**：新编辑分叉，旧分支仍可达 | `tests/timeline.test.ts`（22 例）、`tests/integration.test.ts` |
+| 领域包与连接器 | 类型/组件/关系/工具/模板来自注册表；folder（只读）与 git（写入需确认）两个连接器 | `tests/domains.test.ts`、`tests/connectors.test.ts` |
+| 小说/科研纵向验证 | 两个领域包 + 三个场景的**可重复**自动测试（人物双板展示、引用失效识别、混合工作空间） | `tests/vertical.test.ts`（9 例） |
+| DSH 宿主集成 | 宿主桥协议（能力探测 + 结构化任务提交）；按官方 bundle 规范写的插件包 | `tests/host-bridge.test.ts`（9 例）、`tests/dsh-plugin.test.ts`（9 例） |
+| 领域写路径 | 领域类型能过统一写路径；推测关系必须给依据；资源引用可登记/失效/撤销 | `tests/domain-write-path.test.ts`（4 例） |
+
+### 迁移说明（#13 要求写明）
+
+| 原来 | 现在 | 兼容性 |
+|---|---|---|
+| `server/repository.ts` | `workbench/domains/code/indexer.ts` | 内部路径变化，**MCP 工具语义不变** |
+| `server/python.ts`、`server/python_index.py` | `workbench/domains/code/python-indexer.ts` | 同上 |
+| `server/import.ts`、`server/worktree.ts` | `workbench/connectors/git.ts` | 同上；写入确认链路一字未改 |
+| `core/spaces.ts` 里的代码类组件 | 代码领域包的注册表 | 同上 |
+| 工作空间文件 `history: {undo, redo}` | `history: {version: 2, entries, cursorId}` | **文件格式版本 1 → 2**，读旧文件自动迁移，记录一条不丢 |
+
+**MCP 工具语义没有静默变化**：`sand_*` 工具名与参数含义保持不变。
+新增的工具是加法：`sand_list_workspaces` / `sand_create_workspace` / `sand_switch_workspace` /
+`sand_rename_workspace` / `sand_delete_workspace`。
+唯一的参数扩展：`relate` 操作新增可选的 `evidence`（关系可挂外部定位）。
+
+### 行为变更（会影响用户）
+
+- **工作空间文件格式从 v1 升到 v2**：历史从双栈变成分支时间线。旧文件自动迁移，不需要手工处理。
+- **保存变成异步**：跨进程锁的等待是异步的。`flushSave()` 现在会**抛错**（保存失败必须能被调用方看见），
+  定时保存路径自己 catch，错误照旧显示在「保存失败」上。
+- **推测性关系必须给依据**：`status: "inferred"` 而没有 `basis` 的关系会被拒绝（契约 I5）。
+- **多工作空间**：默认仍是单个工作空间；管理器是加法，不改变默认路径。
 
 ## 空白画布修正（2026-10-20）
 

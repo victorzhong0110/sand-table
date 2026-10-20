@@ -1,3 +1,4 @@
+import { undoPath } from "../core/history.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
@@ -461,7 +462,7 @@ test("a host that resolves to a private address is refused", async () => {
   );
 });
 
-test("only https and public hosts are fetched", () => {
+test("only https and public hosts are fetched", async () => {
   assert.throws(
     () => assertPublicHttpsUrl("http://example.com/pack.json"),
     /只允许 https/,
@@ -597,7 +598,7 @@ test("the import is recorded as a board-level edit, not as an external effect", 
   const snapshot = store.history(id);
   assert.equal(snapshot.canUndo, true, "导入是可撤销的");
   assert.equal(snapshot.records[0].label, "导入组件包「评审包」");
-  const entry = store.get(id).history.undo[0];
+  const entry = undoPath(store.get(id).history)[0];
   /* 白板内编辑的种类才会进撤销栈；外部效果会被拒绝。 */
   assert.equal(entry.kind, "import");
   assert.equal(entry.patch.target, "batch");
@@ -655,7 +656,7 @@ test("an imported pack is saved with the board and is still there after a restar
       viewId: "view-a",
       source: { json: JSON.stringify(manifest) },
     });
-    store.flushSave();
+    await store.flushSave();
     assert.ok(!store.lastSaveError, "保存没有失败：" + store.lastSaveError);
 
     // 换一个新的 store 实例，模拟重启

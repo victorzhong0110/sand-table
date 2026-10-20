@@ -150,7 +150,9 @@ export type BoardStateKey =
   | "groups"
   | "placements"
   | "componentPacks"
-  | "theme";
+  | "theme"
+  /** 资源引用（文献片段、代码位置……）：失效状态变了也要能撤销。 */
+  | "resources";
 
 /** 批量补丁里的单个实体快照。value 为 null 表示该实体在此刻不存在。 */
 export type EntitySnapshot = {
@@ -187,6 +189,213 @@ export type HistoryEntry = {
 
 /** 撤销栈状态：撤销栈与重做栈分离（I10）。 */
 export type HistoryState = { undo: HistoryEntry[]; redo: HistoryEntry[] };
+
+/**
+ * 时间线条目：在撤销条目基础上带父指针。
+ *
+ * 双栈模型（v1）在「撤销之后又做了新编辑」时会清空重做栈，
+ * 被撤销的那段历史从此不可达——想跳回去就没路了。
+ * 时间线模型把历史记成**一棵树**：新编辑从当前游标分叉，
+ * 旧分支保留，任意一条记录都还能跳回去。
+ * 契约见 docs/architecture/history-timeline.zh-CN.md。
+ */
+export type TimelineEntry = HistoryEntry & {
+  /** 父条目 ID：这条记录是在哪条记录之上发生的。缺省表示它是起点。 */
+  parentId?: string;
+  /** 同一棵时间线上的序号，用于稳定排序。 */
+  seq: number;
+};
+
+/** 时间线状态 v2：单条日志 + 游标，取代 v1 的双栈。 */
+export type TimelineState = {
+  version: 2;
+  /** 全部记录，含已被分叉取代但仍可达的分支。 */
+  entries: TimelineEntry[];
+  /** 当前位置：最后一条已生效的记录 ID。缺省表示还没开始。 */
+  cursorId?: string;
+};
+
+/** 领域包提供的对象类型。 */
+export type DomainObjectType = {
+  /** 类型名，例如 character / hypothesis。 */
+  type: string;
+  title: string;
+  /** 字段说明，供 UI 渲染与提示。 */
+  fields?: {
+    key: string;
+    label: string;
+    kind: "text" | "longtext" | "number" | "boolean" | "list";
+    required?: boolean;
+  }[];
+  /** 默认载荷。 */
+  defaultData?: Record<string, unknown>;
+  /** 校验：返回错误文案数组，空数组表示通过。 */
+  check?: (data: Record<string, unknown>) => string[];
+};
+
+/** 领域包提供的组件类型（呈现方式）。 */
+export type DomainComponentType = {
+  type: string;
+  title: string;
+  icon?: string;
+  material?: "paper" | "glass" | "grid";
+  /** 该组件默认绑定哪种对象类型。 */
+  objectType?: string;
+};
+
+/** 领域包提供的语义关系类型。 */
+export type DomainRelationType = {
+  kind: string;
+  title: string;
+  /** 是否允许推测性关系。推测关系不得伪装成已确认事实。 */
+  allowsInferred: boolean;
+  /** 关系级校验：返回错误文案数组，空数组表示通过。 */
+  check?: (relation: {
+    status?: "confirmed" | "inferred";
+    basis?: string;
+    attributes?: Record<string, unknown>;
+    evidence?: unknown[];
+  }) => string[];
+};
+
+/** 领域包提供的工具（领域专用的 MCP 工具）。 */
+export type DomainToolSpec = {
+  name: string;
+  title: string;
+  description: string;
+  /** 参数 JSON Schema。 */
+  inputSchema: Record<string, unknown>;
+};
+
+/** 领域包提供的模板。模板是可选起点，不是强制流程。 */
+export type DomainTemplate = {
+  id: string;
+  title: string;
+  description?: string;
+  /** 模板产出的对象，按顺序编号，关系用下标引用。 */
+  objects: {
+    type: string;
+    title: string;
+    data?: Record<string, unknown>;
+  }[];
+  relations?: {
+    source: number;
+    target: number;
+    kind: string;
+    status: "confirmed" | "inferred";
+    basis?: string;
+  }[];
+};
+
+/**
+ * 领域包：向内核提供类型、组件、关系、工具与模板。
+ *
+ * 领域语义不硬编码进内核——内核只认这张表。
+ * 契约见 docs/architecture/domain-packs.zh-CN.md。
+ */
+export type DomainPack = {
+  id: string;
+  title: string;
+  version: number;
+  description?: string;
+  objectTypes?: DomainObjectType[];
+  componentTypes?: DomainComponentType[];
+  relationTypes?: DomainRelationType[];
+  tools?: DomainToolSpec[];
+  templates?: DomainTemplate[];
+};
+
+/**
+ * 连接器能力声明：能读什么、能写什么、写入是否需要人确认。
+ *
+ * 未声明的能力在调用时被拒绝，并说明原因——
+ * 不允许「先做了再说」。
+ */
+export type ConnectorCapabilities = {
+  read: {
+    /** 能读取的资源种类。 */
+    kinds: ("file" | "git" | "pdf" | "url" | "dataset" | "symbol")[];
+    /** 作用域说明（目录、仓库等）。 */
+    scopes: string[];
+  };
+  /** 写入能力。只读连接器不声明这一项。 */
+  write?: {
+    /** 写入前是否必须由人确认提案。 */
+    requiresConfirmation: boolean;
+    /** 外部影响范围：写入会影响哪些外部系统。 */
+    externalScope: string;
+    /** 允许的写入种类。 */
+    kinds: string[];
+  };
+};
+
+/** 连接器描述符：多连接器管理器列出的条目。 */
+export type ConnectorDescriptor = {
+  id: string;
+  title: string;
+  description?: string;
+  capabilities: ConnectorCapabilities;
+  /** 当前是否可用（例如缺少凭据）。 */
+  available: boolean;
+  /** 不可用时的原因。 */
+  unavailableReason?: string;
+};
+
+/** 工作空间描述符：多工作空间管理器列出的条目。 */
+export type WorkspaceDescriptor = {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  revision: number;
+  boardCount: number;
+  objectCount: number;
+  /** 目录路径。 */
+  dir?: string;
+};
+
+/**
+ * 宿主能力声明：宿主**实际**能做什么。
+ *
+ * 白板内的 AI 入口按此显示，不按猜测显示：
+ * 只有 taskSubmit 为真才显示对话入口。
+ * 契约见 docs/architecture/dsh-integration.zh-CN.md。
+ */
+export type HostCapabilities = {
+  /** 宿主标识，例如 "dsh" / "local"。 */
+  host: string;
+  version?: string;
+  /** 能否接收任务并返回响应。 */
+  taskSubmit: boolean;
+  /** 能否流式回传任务事件。 */
+  eventStream: boolean;
+  /** 能否读取工作空间内容。 */
+  contentRead: boolean;
+  /** 能呈现哪些插件结果种类。 */
+  resultKinds?: string[];
+};
+
+/** 发给宿主的任务请求。上下文用**引用 + 版本**，不用整份快照。 */
+export type HostTaskRequest = {
+  boardId: string;
+  instruction: string;
+  /** 目标对象引用与开始时的版本。 */
+  targets: { objectId: string; version: number }[];
+  /** 开始时的上下文版本。 */
+  contextVersion: number;
+  /** 关联的会话 ID（宿主侧）。 */
+  sessionId?: string;
+};
+
+/** 宿主回传的任务事件。状态必须来自实际执行反馈，不伪造进度。 */
+export type HostTaskEvent = {
+  taskId: string;
+  state: "queued" | "running" | "waiting" | "done" | "failed" | "cancelled";
+  message?: string;
+  /** 结果关联到哪个对象。 */
+  targetObjectId?: string;
+  at: number;
+};
 
 /** 审计条目：只追加。与撤销栈是两个概念。 */
 export type AuditEntry = {
@@ -268,6 +477,7 @@ export type WorkspaceSnapshot = {
   relations: ObjectRelation[];
   resources: ResourceReference[];
   activities: WorkspaceActivity[];
-  history: HistoryState;
+  /** 历史状态 v2：单条日志 + 游标（双栈 v1 只在迁移链里出现）。 */
+  history: TimelineState;
   audit: AuditEntry[];
 };

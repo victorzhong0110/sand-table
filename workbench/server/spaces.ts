@@ -7,6 +7,7 @@ import type { Board } from "../core/model.ts";
 import type { ComponentInstance, Rect, View } from "../core/spaces.ts";
 import {
   componentTypes,
+  findComponentSpec,
   defaultData,
   safeUrl,
   isNativeContent,
@@ -149,6 +150,18 @@ const operation = z.discriminatedUnion("kind", [
     relation: z.string().min(1).max(60),
     status: z.enum(["confirmed", "inferred"]).optional(),
     basis: z.string().max(1000).optional(),
+    /* 外部定位：关系可以指向具体的文献片段或代码位置。 */
+    evidence: z
+      .array(
+        z.object({
+          kind: z.enum(["file", "git", "pdf", "url", "dataset", "symbol"]),
+          uri: z.string().min(1).max(1000),
+          fragment: z.string().max(500).optional(),
+          version: z.string().max(200).optional(),
+        }),
+      )
+      .max(50)
+      .optional(),
     intentId: z.string().min(1).max(200).optional(),
   }),
   z.object({
@@ -366,7 +379,7 @@ export class Spaces {
       if (type === "space-link") {
         validSpace(String(data.spaceId));
       }
-      const config = componentTypes.find((c) => c.type === type);
+      const config = findComponentSpec(type);
       const width = config?.width || 280,
         height = config?.height || 180;
       let spawnX = -v.camera.x / v.camera.zoom + 30,
@@ -435,7 +448,7 @@ export class Spaces {
         type,
         objectId: binding?.objectId || op.objectId,
         ...(binding ? { binding } : {}),
-        ...(op.icon && !componentTypes.some((c) => c.type === type)
+        ...(op.icon && !findComponentSpec(type)
           ? { appearance: { icon: op.icon } }
           : {}),
         title: op.title,
@@ -459,7 +472,7 @@ export class Spaces {
           ? [op.objectId]
           : [];
       definitions.forEach(([type, title], index) => {
-        const size = componentTypes.find((t) => t.type === type)!;
+        const size = findComponentSpec(type)!;
         // 预设里的原生内容同样是一等对象：内容进对象，实例只管位置。
         const content =
           isNativeContent(type) || isReferenceContent(type)
@@ -773,7 +786,7 @@ export class Spaces {
       const target = op.spaceId ? String(op.spaceId) : v.spaceId;
       validSpace(target);
       const type = op.type || object.type;
-      const config = componentTypes.find((c) => c.type === type);
+      const config = findComponentSpec(type);
       const index = b.instances.filter((c) => c.spaceId === target).length;
       const instance = {
         id: randomUUID(),
@@ -816,7 +829,7 @@ export class Spaces {
         intentKey,
         authorKind,
       );
-      const config = componentTypes.find((t) => t.type === c.type);
+      const config = findComponentSpec(c.type);
       const index = b.instances.filter((x) => x.spaceId === v.spaceId).length;
       const instance = {
         id: randomUUID(),
@@ -873,6 +886,7 @@ export class Spaces {
           kind: op.relation,
           ...(op.status ? { status: op.status } : {}),
           ...(op.basis ? { basis: op.basis } : {}),
+          ...(op.evidence?.length ? { evidence: op.evidence } : {}),
         },
         author,
         intentKey,

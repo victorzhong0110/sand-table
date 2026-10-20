@@ -1,5 +1,5 @@
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
-import { bind } from "./repository.ts";
+import { bind } from "../connectors/git.ts";
 import { createServer } from "./server.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";

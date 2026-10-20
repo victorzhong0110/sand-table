@@ -12,7 +12,7 @@ import type {
   ResourceReference,
   HistoryEntry,
   AuditEntry,
-  HistoryState,
+  TimelineState,
 } from "./objects.ts";
 import type { ChangeIntent, Proposal, ValidationReport } from "./changes.ts";
 export type Evidence = {
@@ -173,7 +173,7 @@ export type Board = Projection & {
   /** 内容版本：与布局 revision 分离，避免镜头操作干扰内容编辑。 */
   contentRevision: number;
   /** 撤销栈：按用户意图分组。与审计日志不是同一概念。 */
-  history: HistoryState;
+  history: TimelineState;
   /** 审计日志：只追加，记录执行者与动作。 */
   audit: AuditEntry[];
 };

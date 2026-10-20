@@ -4,7 +4,8 @@ import { mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { bind, scan, sourceFor, readFile } from "../server/repository.ts";
+import { bind } from "../connectors/git.ts";
+import { scan, sourceFor, readFile } from "../domains/code/indexer.ts";
 test("actual dirty contents invalidate source while HEAD stays unchanged; worktrees have distinct identities", () => {
   const root = mkdtempSync(join(tmpdir(), "sand-unit-")),
     other = root + "-worktree";

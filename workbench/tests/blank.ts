@@ -303,8 +303,9 @@ try {
   assert.ok(history.records.length >= 2, "The writes are on the history.");
   assert.equal(history.canUndo, true);
   assert.equal(history.canRedo, false);
+  /* 时间线模型：kind 字段已废弃，用 onPath（游标路径上 = 可撤销的那条线）。 */
   const edit = history.records.find(
-    (r: any) => r.kind === "edit" && r.label.includes("我的计划"),
+    (r: any) => r.onPath && r.label.includes("我的计划"),
   );
   assert.ok(edit, "The edit is on the history with a readable label.");
   await call("sand_undo", { boardId });
@@ -321,10 +322,10 @@ try {
     "先收集证据，再比较方案",
   );
   /* 跳到某条记录：板面回到那条记录刚发生时的样子。
-     记录按新到旧排列，所以最老的那条在末尾。 */
-  const edits = history.records.filter((r: any) => r.kind === "edit");
-  const oldest = edits.at(-1)!;
-  const newest = edits[0];
+     时间线按 seq 升序：最早的在前面，最新的在后面。 */
+  const edits = history.records.filter((r: any) => r.onPath);
+  const oldest = edits[0];
+  const newest = edits.at(-1)!;
   const jumped = await call("sand_undo_to", { boardId, recordId: oldest.id });
   assert.ok(jumped, "A recorded step can be jumped back to.");
   b = await read();
