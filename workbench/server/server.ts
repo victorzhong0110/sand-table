@@ -568,5 +568,13 @@ export function createServer(
           ],
         },
   );
-  return { server, store, dispose: () => clearInterval(timer) };
+  return {
+    server,
+    store,
+    dispose: () => {
+      clearInterval(timer);
+      // 进程退出前把作品落盘：被关掉不该丢掉最后一次改动。
+      store.flushSave();
+    },
+  };
 }

@@ -223,12 +223,16 @@ try {
   assert.notEqual(connection.token, oldToken);
   const fresh = await call("sand_list_boards");
   assert.equal(fresh.boards.length, 1);
-  assert.notEqual(fresh.boards[0].boardId, browserId);
+  // 重启后恢复的是**同一块**白板：作品不随进程消失（issue #11 的 P1）。
+  assert.equal(fresh.boards[0].boardId, browserId);
   const old = await client.callTool({
     name: "sand_read_board",
     arguments: { boardId: browserId },
   });
-  assert.equal(old.isError, true);
+  assert.notEqual(old.isError, true, "重启后旧 boardId 仍然可读");
+  const restored = resultData(old) as any;
+  assert.equal(restored.title, "项目总览", "恢复出来的白板还是原来那块");
+  assert.ok(restored.instances.length > 0, "重启后白板上的东西还在，不是空板");
   assert.deepEqual(errors, []);
   console.log(
     "Local workbench passed: real launcher, generated MCP config, independent stdio client, shared selection/guide, reload, auth, clean shutdown, token rotation and bridge reconnect.",
