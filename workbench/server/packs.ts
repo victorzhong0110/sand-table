@@ -20,7 +20,10 @@ const intentId = z.string().min(1).max(200).optional();
 const source = z.union(
   [
     z.strictObject({
-      json: z.string().min(1, { error: "json 不能为空。" }).max(MAX_MANIFEST_BYTES),
+      json: z
+        .string()
+        .min(1, { error: "json 不能为空。" })
+        .max(MAX_MANIFEST_BYTES),
     }),
     z.strictObject({
       url: z.string().min(1, { error: "url 不能为空。" }).max(2000),
@@ -70,9 +73,7 @@ export function registerPackTools(tool: RegisterTool, store: BoardStore) {
       /* 导入前的完整值：撤销靠它把白板恢复回去（板级快照按键记录）。 */
       const before = structuredClone(packs);
       b.componentPacks =
-        at < 0
-          ? [...packs, pack]
-          : packs.map((p, i) => (i === at ? pack : p));
+        at < 0 ? [...packs, pack] : packs.map((p, i) => (i === at ? pack : p));
       if (b.views[a.viewId]) b.focusedViewId = a.viewId;
       b.revision++;
       /* Importing a pack is a board content change, so it goes on the board

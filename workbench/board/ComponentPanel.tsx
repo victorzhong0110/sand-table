@@ -351,7 +351,7 @@ function ComponentEditor({
   const [dirty, setDirty] = useState(
     restored
       ? Object.keys(restored.edits).length > 0 ||
-        restored.title !== restored.startTitle
+          restored.title !== restored.startTitle
       : false,
   );
   const timer = useRef(0);
@@ -531,7 +531,10 @@ function ComponentEditor({
     const server = content.data;
     serverData.current = server;
     serverTitle.current = content.title;
-    if (bound && (version.current === undefined || bound.version > version.current))
+    if (
+      bound &&
+      (version.current === undefined || bound.version > version.current)
+    )
       version.current = bound.version;
     const next = applyPaths(server, edits.current);
     draftData.current = next;
@@ -735,13 +738,17 @@ function ComponentEditor({
               <input
                 aria-label={`方案 ${i + 1} 名称`}
                 value={data[key]?.title || ""}
-                onChange={(e) => touch(`${key}.title`, `方案 ${i + 1} 名称`, e.target.value)}
+                onChange={(e) =>
+                  touch(`${key}.title`, `方案 ${i + 1} 名称`, e.target.value)
+                }
                 onBlur={leave}
                 onKeyDown={onKey(`${key}.title`)}
               />
               <textarea
                 value={data[key]?.text || ""}
-                onChange={(e) => touch(`${key}.text`, `方案 ${i + 1} 内容`, e.target.value)}
+                onChange={(e) =>
+                  touch(`${key}.text`, `方案 ${i + 1} 内容`, e.target.value)
+                }
                 onBlur={leave}
                 onKeyDown={onKey(`${key}.text`)}
               />
@@ -756,7 +763,9 @@ function ComponentEditor({
             列名（用逗号分隔）
             <input
               value={(data.columns || []).join(",")}
-              onChange={(e) => touch("columns", "列名", e.target.value.split(","))}
+              onChange={(e) =>
+                touch("columns", "列名", e.target.value.split(","))
+              }
             />
           </label>
           <label>
@@ -866,7 +875,8 @@ function ComponentEditor({
       )}
       {dirty && !error && !failure && (
         <p className="edit-status">
-          有未保存的改动：停止输入约 0.6 秒后自动写入，也可以点「保存组件」立即写入。
+          有未保存的改动：停止输入约 0.6
+          秒后自动写入，也可以点「保存组件」立即写入。
         </p>
       )}
       <button
@@ -1015,9 +1025,7 @@ export function ThemePanel({
           <input
             type="color"
             value={String(config[key as keyof ThemeConfig])}
-            onChange={(e) =>
-              setConfig({ ...config, [key]: e.target.value })
-            }
+            onChange={(e) => setConfig({ ...config, [key]: e.target.value })}
           />
         </label>
       ))}
@@ -1059,7 +1067,9 @@ export function ThemePanel({
           min="0"
           max="24"
           value={config.radius}
-          onChange={(e) => setConfig({ ...config, radius: Number(e.target.value) })}
+          onChange={(e) =>
+            setConfig({ ...config, radius: Number(e.target.value) })
+          }
         />
       </label>
       <label className="file-choice">

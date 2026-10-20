@@ -140,8 +140,7 @@ export function parsePackManifest(text: string): {
   manifest: PackManifest;
   warnings: string[];
 } {
-  if (typeof text !== "string" || !text.trim())
-    throw Error("组件包内容为空。");
+  if (typeof text !== "string" || !text.trim()) throw Error("组件包内容为空。");
   const bytes = Buffer.byteLength(text, "utf8");
   if (bytes > MAX_MANIFEST_BYTES)
     throw Error(
@@ -181,8 +180,7 @@ export function parsePackManifest(text: string): {
   const seen = new Set<string>();
   const components: PackComponent[] = [];
   for (const c of parsed.data.components) {
-    if (seen.has(c.key))
-      throw Error(`包里有重复的组件 key「${c.key}」。`);
+    if (seen.has(c.key)) throw Error(`包里有重复的组件 key「${c.key}」。`);
     seen.add(c.key);
     /* A type this version does not know is still imported: the data is kept
        and the canvas shows the placeholder the renderer already shows for an
@@ -330,7 +328,9 @@ export function packManifestOf(pack: ComponentPack): PackManifest {
     version: pack.version,
     id: pack.id,
     name: pack.name,
-    ...(pack.description !== undefined ? { description: pack.description } : {}),
+    ...(pack.description !== undefined
+      ? { description: pack.description }
+      : {}),
     ...(pack.author !== undefined ? { author: pack.author } : {}),
     ...(pack.homepage !== undefined ? { homepage: pack.homepage } : {}),
     components: pack.components.map((c) => ({

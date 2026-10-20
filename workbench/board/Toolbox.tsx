@@ -373,7 +373,8 @@ export function Toolbox({
               <summary>导入组件包</summary>
               <div className="pack-import-body">
                 <p className="pack-hint">
-                  组件包是一份 JSON 清单，只是数据：它只会给这里多出几组预填组件，
+                  组件包是一份 JSON
+                  清单，只是数据：它只会给这里多出几组预填组件，
                   不会安装新代码，也不会改动任何源码。
                 </p>
                 <label>

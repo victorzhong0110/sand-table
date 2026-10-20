@@ -129,7 +129,12 @@ test("a type this version does not know is imported with a warning", async () =>
     JSON.stringify({
       ...manifest,
       components: [
-        { key: "tl", type: "timeline", title: "时间线", data: { steps: [1, 2] } },
+        {
+          key: "tl",
+          type: "timeline",
+          title: "时间线",
+          data: { steps: [1, 2] },
+        },
       ],
     }),
   );
@@ -139,7 +144,8 @@ test("a type this version does not know is imported with a warning", async () =>
     result.warnings.some(
       (w: string) => w.includes("未知组件类型") && w.includes("timeline"),
     ),
-    "the import says which type it did not know: " + result.warnings.join(" / "),
+    "the import says which type it did not know: " +
+      result.warnings.join(" / "),
   );
   /* The data is kept, not dropped: the canvas shows the placeholder the
      renderer already shows for a type it does not know. */
@@ -373,9 +379,7 @@ test("a known type in a pack goes through checkComponentData", async () => {
       importJson(
         JSON.stringify({
           ...manifest,
-          components: [
-            { key: "goal", type: "task", title: "目标", data },
-          ],
+          components: [{ key: "goal", type: "task", title: "目标", data }],
         }),
       ),
     /items\[0\]\.done must be a boolean/,
@@ -418,8 +422,14 @@ test("the pack and the editor agree on every data", () => {
     { type: "task", data: { goal: "g" } },
     { type: "task", data: { goal: "g", items: [] } },
     { type: "chart", data: { kind: "bar", points: [] } },
-    { type: "chart", data: { kind: "bar", points: [{ label: "a", value: 1 }] } },
-    { type: "chart", data: { kind: "bar", points: [{ label: "a", value: "x" }] } },
+    {
+      type: "chart",
+      data: { kind: "bar", points: [{ label: "a", value: 1 }] },
+    },
+    {
+      type: "chart",
+      data: { kind: "bar", points: [{ label: "a", value: "x" }] },
+    },
     { type: "table", data: { columns: ["a"], rows: [["x"]] } },
     { type: "table", data: { columns: ["a"], rows: [["x", "y"]] } },
     { type: "table", data: { columns: ["a"], rows: "no" } },
@@ -522,7 +532,10 @@ test("a fetched manifest has to be JSON", async () => {
     headers: { "content-type": "application/json" },
     body: Buffer.from(JSON.stringify(manifest)),
   });
-  const fetched = await fetchPackManifest("https://203.0.113.10/pack.json", json);
+  const fetched = await fetchPackManifest(
+    "https://203.0.113.10/pack.json",
+    json,
+  );
   assert.equal(fetched.text, JSON.stringify(manifest));
   assert.equal(fetched.url, "https://203.0.113.10/pack.json");
 });
@@ -593,11 +606,7 @@ test("the import is recorded as a board-level edit, not as an external effect", 
     [{ target: "board", id: "componentPacks", value: [] }],
     "板级快照按键记录：撤销只动 componentPacks 这一键",
   );
-  assert.deepEqual(
-    store.historyRefusals(id),
-    [],
-    "没有任何动作被拒绝进撤销栈",
-  );
+  assert.deepEqual(store.historyRefusals(id), [], "没有任何动作被拒绝进撤销栈");
 });
 
 test("undoing an import does not roll back a theme change made before it", async () => {
@@ -624,11 +633,7 @@ test("undoing an import does not roll back a theme change made before it", async
   const themed = store.get(id).theme;
   assert.ok(themed, "主题改过了");
   spaces.undo(id, undefined, "human");
-  assert.equal(
-    (store.get(id).componentPacks ?? []).length,
-    0,
-    "包被撤销了",
-  );
+  assert.equal((store.get(id).componentPacks ?? []).length, 0, "包被撤销了");
   assert.deepEqual(
     store.get(id).theme,
     themed,
