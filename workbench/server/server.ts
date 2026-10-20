@@ -15,6 +15,8 @@ import { Spaces, registerSpaceTools } from "./spaces.ts";
 import { Changes, registerChangeTools } from "./changes.ts";
 import { boardSummary } from "../core/results.ts";
 import { BoardStore } from "../core/store.ts";
+import { WorkspaceStore } from "../core/workspace.ts";
+import { workspacePort } from "../core/persistence.ts";
 import { scan, sourceFor, verifyEvidence, type Binding } from "./repository.ts";
 const uri = "ui://sand-table/overview.html";
 const id = z.string().min(1).max(500),
@@ -34,8 +36,25 @@ export type Forwarder = {
   ) => Promise<CallToolResult>;
   resource: () => Promise<ReadResourceResult>;
 };
-export function createServer(bindings: Binding[], forward?: Forwarder) {
+export type ServerOptions = {
+  /** 工作空间存储根目录。给了就会落盘，重启后作品仍在。 */
+  workspaceRoot?: string;
+  /** 工作空间 ID。默认 "default"。 */
+  workspaceId?: string;
+};
+export function createServer(
+  bindings: Binding[],
+  forward?: Forwarder,
+  options?: ServerOptions,
+) {
   const store = new BoardStore();
+  if (options?.workspaceRoot) {
+    const workspaces = new WorkspaceStore(options.workspaceRoot);
+    store.attachPersistence(
+      workspacePort(workspaces),
+      options.workspaceId || "default",
+    );
+  }
   const changes = new Changes(store, bindings);
   const server = new McpServer({ name: "sand-table", version: "0.3.0" });
   const timer = setInterval(() => store.sweep(), 60_000);
@@ -208,6 +227,132 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
         objects: matches.slice(a.offset, a.offset + a.limit),
         nextOffset:
           a.offset + a.limit < matches.length ? a.offset + a.limit : null,
+      };
+    },
+  );
+  tool(
+    "sand_list_objects",
+    "List workspace objects: native content and indexed code in one view, distinguished by kind. Native content exists without any repository. Returns stable ids, versions and the read-back path.",
+    {
+      ...board,
+      query: z.string().max(300).default(""),
+      kind: z.enum(["native", "code", "reference"]).optional(),
+      offset: z.number().int().nonnegative().default(0),
+      limit: z.number().int().min(1).max(50).default(20),
+    },
+    (a) => {
+      const b = store.get(a.boardId);
+      const listed = store.listObjects(a.boardId, {
+        text: a.query,
+        ...(a.kind ? { kind: a.kind } : {}),
+      });
+      return {
+        boardId: b.id,
+        revision: b.revision,
+        contentRevision: b.contentRevision,
+        total: listed.total,
+        objects: listed.objects.slice(a.offset, a.offset + a.limit),
+        nextOffset:
+          a.offset + a.limit < listed.total ? a.offset + a.limit : null,
+        counts: listed.counts,
+        readBack: "sand_read_object",
+        hint: "Native content is a first-class citizen: it is searchable, persistable and shareable across boards.",
+      };
+    },
+  );
+  tool(
+    "sand_read_object",
+    "Read one object by id: its content, source, version, the boards it appears on, and its semantic relations.",
+    { ...board, objectId: id },
+    (a) => {
+      const b = store.get(a.boardId);
+      const object = b.contentObjects.find((o) => o.id === a.objectId);
+      if (object)
+        return {
+          boardId: b.id,
+          contentRevision: b.contentRevision,
+          object,
+          presentations: b.instances
+            .filter(
+              (i) => i.binding?.kind === "object" && i.binding.objectId === object.id,
+            )
+            .map((i) => ({
+              instanceId: i.id,
+              spaceId: i.spaceId,
+              type: i.type,
+              rect: i.rect,
+            })),
+          relations: b.objectRelations.filter(
+            (r) => r.source === object.id || r.target === object.id,
+          ),
+        };
+      const code = b.objects.find((o) => o.id === a.objectId);
+      if (code)
+        return {
+          boardId: b.id,
+          revision: b.revision,
+          object: { ...code, kind: "code", typeVersion: 1, version: 1 },
+          presentations: b.instances
+            .filter((i) => i.objectId === code.id)
+            .map((i) => ({
+              instanceId: i.id,
+              spaceId: i.spaceId,
+              type: i.type,
+              rect: i.rect,
+            })),
+          relations: [],
+        };
+      throw Error("Unknown object.");
+    },
+  );
+  tool(
+    "sand_undo",
+    "Undo the last user intent on this board. Edits are grouped by intent; external effects (published changes, executed tasks) are not undone by this.",
+    board,
+    (a) => {
+      const r = store.undo(a.boardId, "agent", "agent");
+      return {
+        boardId: a.boardId,
+        undone: r.undone,
+        label: r.entry?.label,
+        board: r.board,
+      };
+    },
+  );
+  tool(
+    "sand_redo",
+    "Redo the last undone user intent on this board.",
+    board,
+    (a) => {
+      const r = store.redo(a.boardId, "agent", "agent");
+      return {
+        boardId: a.boardId,
+        redone: r.redone,
+        label: r.entry?.label,
+        board: r.board,
+      };
+    },
+  );
+  tool(
+    "sand_workspace_status",
+    "Report whether the workspace is persisted, where it is stored, and the last save error if any. A failed save is never reported as saved.",
+    board,
+    (a) => {
+      const b = store.get(a.boardId);
+      return {
+        boardId: b.id,
+        workspaceId: store.workspaceId || null,
+        persisted: Boolean(store.persistence),
+        saved: store.persistence ? !store.lastSaveError : false,
+        lastSaveError: store.lastSaveError || null,
+        lastLoadError: store.lastLoadError || null,
+        revision: b.revision,
+        contentRevision: b.contentRevision,
+        canUndo: b.history.undo.length > 0,
+        canRedo: b.history.redo.length > 0,
+        auditCount: b.audit.length,
+        nativeObjectCount: b.contentObjects.length,
+        relationCount: b.objectRelations.length,
       };
     },
   );

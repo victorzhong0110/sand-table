@@ -6,6 +6,8 @@ import { defaultSessionFile } from "./session.ts";
 let open = true,
   port = 0,
   sessionFile = defaultSessionFile,
+  workspaceDir: string | undefined,
+  workspaceId: string | undefined,
   preset: "blank" | "code" = "blank";
 const roots: string[] = [];
 const args = process.argv.slice(2);
@@ -13,11 +15,17 @@ for (let i = 0; i < args.length; i++) {
   const arg = args[i];
   if (arg === "--code-board") preset = "code";
   else if (arg === "--no-open") open = false;
-  else if (["--workspace", "--port", "--session-file"].includes(arg)) {
+  else if (
+    ["--workspace", "--port", "--session-file", "--workspace-dir", "--workspace-id"].includes(
+      arg,
+    )
+  ) {
     const value = args[++i];
     if (!value) throw Error(`Missing value for ${arg}`);
     if (arg === "--workspace") roots.push(value);
     else if (arg === "--session-file") sessionFile = resolve(value);
+    else if (arg === "--workspace-dir") workspaceDir = resolve(value);
+    else if (arg === "--workspace-id") workspaceId = value;
     else {
       port = Number(value);
       if (!Number.isInteger(port) || port < 0 || port > 65535)
@@ -42,6 +50,8 @@ try {
     sessionFile,
     port,
     preset,
+    workspaceDir,
+    workspaceId,
   });
   console.log(
     `\nSand Table 已就绪：${local.url}\n在页面点击「连接我的 AI」安装 MCP 连接。保持这个终端运行；Ctrl+C 结束会话。\nREADY ${local.url}`,

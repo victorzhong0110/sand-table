@@ -6,6 +6,14 @@ import type {
   Asset,
   ThemeConfig,
 } from "./spaces.ts";
+import type {
+  WorkspaceObject,
+  ObjectRelation,
+  ResourceReference,
+  HistoryEntry,
+  AuditEntry,
+  HistoryState,
+} from "./objects.ts";
 import type { ChangeIntent, Proposal, ValidationReport } from "./changes.ts";
 export type Evidence = {
   workspaceId: string;
@@ -125,4 +133,19 @@ export type Board = Projection & {
   validations: ValidationReport[];
   guideFocus?: GuideFocus;
   lastContextRead?: { at: number; revision: number; objectIds: string[] };
+  // —— 通用工作空间内核（issue #11）——
+  /** 所属工作空间。空白启动时也会落盘，不依赖 Git 或 AI。 */
+  workspaceId?: string;
+  /** 原生内容对象：内容的唯一真相，与代码投影对象分开。 */
+  contentObjects: WorkspaceObject[];
+  /** 语义关系：对象之间的语义，与展示布局无关。 */
+  objectRelations: ObjectRelation[];
+  /** 外部资源引用：整体或具体片段，失效必须可识别。 */
+  resources: ResourceReference[];
+  /** 内容版本：与布局 revision 分离，避免镜头操作干扰内容编辑。 */
+  contentRevision: number;
+  /** 撤销栈：按用户意图分组。与审计日志不是同一概念。 */
+  history: HistoryState;
+  /** 审计日志：只追加，记录执行者与动作。 */
+  audit: AuditEntry[];
 };

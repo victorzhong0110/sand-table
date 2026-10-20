@@ -212,6 +212,21 @@ export function CanvasShell({
           }}
         />
         <div className="canvas-top-actions">
+          <button
+            aria-label="撤销"
+            disabled={busy || !b.history.undo.length}
+            title="按你的意图分组撤销；外部效果（已发布的改动、已运行的任务）不在此列"
+            onClick={() => void operate({ kind: "undo" })}
+          >
+            撤销
+          </button>
+          <button
+            aria-label="重做"
+            disabled={busy || !b.history.redo.length}
+            onClick={() => void operate({ kind: "redo" })}
+          >
+            重做
+          </button>
           <button aria-pressed={arrows} onClick={() => setArrows(!arrows)}>
             关系 {arrows ? "开" : "关"}
           </button>

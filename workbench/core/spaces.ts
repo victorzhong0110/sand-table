@@ -1,24 +1,13 @@
+import type { Presentation, Rect } from "./objects.ts";
+export type { Presentation, Rect } from "./objects.ts";
 export type Camera = { x: number; y: number; zoom: number };
-export type Rect = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  pinned: boolean;
-};
 export type Space = { id: string; title: string; parentId?: string };
-export type ComponentInstance = {
-  id: string;
-  spaceId: string;
-  type: string;
-  objectId?: string;
-  appearance?: { icon?: string; detail?: "full" | "label" | "icon" };
-  title: string;
-  data: Record<string, unknown>;
-  rect: Rect;
-  updatedAt: number;
-  author: string;
-};
+/**
+ * 展示实例：对象在某白板上的一次呈现。
+ * 内容由被绑定的对象提供，布局与展示状态由实例自己持有。
+ * 见 docs/architecture/workspace-kernel.zh-CN.md 第 3 节。
+ */
+export type ComponentInstance = Presentation;
 export type SpaceLink = {
   id: string;
   source: string;
@@ -74,6 +63,36 @@ export const componentTypes = [
   { type: "proposal", title: "目标版本", width: 300, height: 180 },
   { type: "validation", title: "验证结果", width: 300, height: 180 },
 ] as const;
+/**
+ * 原生内容类型：内容进入对象，实例只负责呈现与布局。
+ * 同一个对象可以出现在多块白板上，改内容会同时更新所有展示。
+ * 见 docs/architecture/workspace-kernel.zh-CN.md 第 3 节。
+ */
+export const nativeContentTypes = [
+  "text",
+  "heading",
+  "code",
+  "metric",
+  "status",
+  "chart",
+  "table",
+  "events",
+  "task",
+  "reasoning",
+  "comparison",
+] as const;
+
+/** 指向外部资源的类型：内容是引用，失效必须可识别。 */
+export const referenceContentTypes = ["resource"] as const;
+
+export function isNativeContent(type: string) {
+  return (nativeContentTypes as readonly string[]).includes(type);
+}
+
+export function isReferenceContent(type: string) {
+  return (referenceContentTypes as readonly string[]).includes(type);
+}
+
 export function defaultData(type: string): Record<string, unknown> {
   switch (type) {
     case "text":

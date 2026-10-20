@@ -4,7 +4,13 @@ import { z } from "zod";
 import type { BoardStore } from "../core/store.ts";
 import type { Board } from "../core/model.ts";
 import type { ComponentInstance, Rect, View } from "../core/spaces.ts";
-import { componentTypes, defaultData, safeUrl } from "../core/spaces.ts";
+import {
+  componentTypes,
+  defaultData,
+  safeUrl,
+  isNativeContent,
+  isReferenceContent,
+} from "../core/spaces.ts";
 import { openView } from "../core/space-state.ts";
 import type { RegisterTool } from "./tool-types.ts";
 const id = z.string().min(1).max(500),
@@ -29,6 +35,12 @@ const theme = z.object({
   radius: z.number().min(0).max(24),
   reduceMotion: z.boolean(),
 });
+/** 标题长度与内容检查。原生对象的标题同样受约束。 */
+function checkTitle(title: string) {
+  if (!title || !title.trim() || title.length > 120)
+    throw Error("Title must be 1–120 characters.");
+}
+
 function checkData(type: string, data: Record<string, unknown>) {
   if (JSON.stringify(data).length > 40000)
     throw Error("Component data exceeds 40 KB.");
@@ -207,11 +219,47 @@ export class Spaces {
           }
         }
       }
+      // 原生内容：内容进入对象，实例只负责呈现与布局。
+      // 同一个对象可以再放到别的白板上，改内容会同时更新所有展示。
+      let binding: { kind: "object"; objectId: string } | undefined;
+      if (isNativeContent(type)) {
+        const object = this.store.createContent(
+          b,
+          { type, title: op.title, data },
+          author,
+          op.intentId,
+        );
+        binding = { kind: "object", objectId: object.id };
+        data = {};
+      } else if (isReferenceContent(type)) {
+        const object = this.store.createContent(
+          b,
+          {
+            type,
+            title: op.title,
+            data,
+            kind: "reference",
+            source: {
+              origin: "human",
+              author,
+              external: {
+                kind: "url",
+                uri: String(data.url || ""),
+              },
+            },
+          },
+          author,
+          op.intentId,
+        );
+        binding = { kind: "object", objectId: object.id };
+        data = {};
+      }
       b.instances.push({
         id: randomUUID(),
         spaceId: v.spaceId,
         type,
-        objectId: op.objectId,
+        objectId: binding?.objectId || op.objectId,
+        ...(binding ? { binding } : {}),
         title: op.title,
         data: structuredClone(data),
         rect: op.rect || {
@@ -226,8 +274,11 @@ export class Spaces {
       });
       const created = b.instances[b.instances.length - 1];
       v.selection = [created.id];
-      b.selection = op.objectId ? [op.objectId] : [];
-      definitions.forEach(([type, title], index) => {
+      b.selection = binding
+        ? [binding.objectId]
+        : op.objectId
+          ? [op.objectId]
+          : [];      definitions.forEach(([type, title], index) => {
         const size = componentTypes.find((t) => t.type === type)!;
         b.instances.push({
           id: randomUUID(),
@@ -249,23 +300,52 @@ export class Spaces {
     }
     if (op.kind === "update") {
       const c = item(op.instanceId);
-      if (op.title !== undefined) {
-        c.title = op.title;
-        if (c.type === "board") {
-          const s = b.spaces.find((s) => s.id === c.data.spaceId);
-          if (s) s.title = op.title;
+      // 绑定了内容对象的组件：编辑改的是对象，不是这一张卡。
+      // 同一个对象在别处的展示会同步更新（内容共享、布局独立）。
+      const bound = c.binding?.kind === "object" ? c.binding.objectId : undefined;
+      if (bound) {
+        const object = b.contentObjects.find((o) => o.id === bound);
+        if (!object)
+          throw Error("这份内容已被删除；请重新选择或重新创建。");
+        if (op.title !== undefined && op.title !== object.title)
+          checkTitle(op.title);
+        if (op.data) {
+          if (c.type === "board" || c.type === "object")
+            throw Error("Use reference/whiteboard actions to change the target.");
+          checkData(c.type, op.data);
         }
+        this.store.updateContent(
+          b,
+          bound,
+          {
+            ...(op.title !== undefined ? { title: op.title } : {}),
+            ...(op.data ? { data: op.data } : {}),
+          },
+          op.expectedVersion ?? object.version,
+          author,
+          op.intentId,
+        );
+        c.updatedAt = Date.now();
+        c.author = author;
+      } else {
+        if (op.title !== undefined) {
+          c.title = op.title;
+          if (c.type === "board") {
+            const s = b.spaces.find((s) => s.id === c.data.spaceId);
+            if (s) s.title = op.title;
+          }
+        }
+        if (op.data) {
+          if (c.type === "board" || c.type === "object")
+            throw Error("Use reference/whiteboard actions to change the target.");
+          checkData(c.type, op.data);
+          if (c.type === "space-link") validSpace(String(op.data.spaceId));
+          c.data = structuredClone(op.data);
+        }
+        if (op.appearance) c.appearance = { ...c.appearance, ...op.appearance };
+        c.updatedAt = Date.now();
+        c.author = author;
       }
-      if (op.data) {
-        if (c.type === "board" || c.type === "object")
-          throw Error("Use reference/whiteboard actions to change the target.");
-        checkData(c.type, op.data);
-        if (c.type === "space-link") validSpace(String(op.data.spaceId));
-        c.data = structuredClone(op.data);
-      }
-      if (op.appearance) c.appearance = { ...c.appearance, ...op.appearance };
-      c.updatedAt = Date.now();
-      c.author = author;
     }
     if (op.kind === "place") {
       for (const change of op.items) {
@@ -379,6 +459,105 @@ export class Spaces {
       });
     }
     if (op.kind === "theme") b.theme = op.theme;
+    if (op.kind === "present") {
+      // 再放一份展示：同一个对象在指定（或当前）白板新增一个展示实例。
+      // 内容共享、布局独立；这与「复制出独立对象」是两件事。
+      const object = b.contentObjects.find((o) => o.id === op.objectId);
+      if (!object) throw Error("Unknown content object.");
+      if (b.instances.length >= 2200) throw Error("Component limit reached.");
+      const target = op.spaceId ? String(op.spaceId) : v.spaceId;
+      validSpace(target);
+      const type = op.type || object.type;
+      const config = componentTypes.find((c) => c.type === type);
+      const index = b.instances.filter((c) => c.spaceId === target).length;
+      const instance = {
+        id: randomUUID(),
+        spaceId: target,
+        type,
+        objectId: object.id,
+        binding: { kind: "object" as const, objectId: object.id },
+        title: object.title,
+        data: {},
+        rect: {
+          x: (index % 3) * 300,
+          y: Math.floor(index / 3) * 180,
+          width: config?.width || 280,
+          height: config?.height || 180,
+          pinned: false,
+        },
+        updatedAt: Date.now(),
+        author,
+      };
+      b.instances.push(instance);
+      v.selection = [instance.id];
+    }
+    if (op.kind === "copyObject") {
+      // 复制出独立对象：内容深拷贝、新 ID，与「再放一份展示」不同。
+      const c = item(op.instanceId);
+      const bound =
+        c.binding?.kind === "object" ? c.binding.objectId : undefined;
+      if (!bound) throw Error("This component has no independent content.");
+      if (b.instances.length >= 2200) throw Error("Component limit reached.");
+      const clone = this.store.cloneContent(b, bound, author, op.intentId);
+      const config = componentTypes.find((t) => t.type === c.type);
+      const index = b.instances.filter((x) => x.spaceId === v.spaceId).length;
+      const instance = {
+        id: randomUUID(),
+        spaceId: v.spaceId,
+        type: c.type,
+        objectId: clone.id,
+        binding: { kind: "object" as const, objectId: clone.id },
+        title: clone.title,
+        data: {},
+        rect: {
+          x: (index % 3) * 300,
+          y: Math.floor(index / 3) * 180,
+          width: config?.width || 280,
+          height: config?.height || 180,
+          pinned: false,
+        },
+        updatedAt: Date.now(),
+        author,
+      };
+      b.instances.push(instance);
+      v.selection = [instance.id];
+    }
+    if (op.kind === "deleteObject") {
+      // 删除对象与移除展示是两回事。仍被引用时默认拒绝。
+      this.store.deleteContent(
+        b,
+        op.objectId,
+        op.onReferenced || "refuse",
+        author,
+        op.intentId,
+      );
+    }
+    if (op.kind === "relate") {
+      // 语义关系：对象之间的语义，与布局无关，也不因位置相近自动建立。
+      const known = (oid: string) =>
+        b.contentObjects.some((o) => o.id === oid) ||
+        b.objects.some((o) => o.id === oid);
+      if (!known(op.source) || !known(op.target))
+        throw Error("Unknown object in relation.");
+      if (op.source === op.target)
+        throw Error("An object cannot relate to itself.");
+      this.store.relateContent(
+        b,
+        {
+          source: op.source,
+          target: op.target,
+          kind: op.relation,
+          ...(op.status ? { status: op.status } : {}),
+          ...(op.basis ? { basis: op.basis } : {}),
+        },
+        author,
+        op.intentId,
+      );
+    }
+    if (op.kind === "unlinkRelation")
+      this.store.unlinkContent(b, op.relationId, author, op.intentId);
+    if (op.kind === "undo") return this.store.undo(boardId, author).board;
+    if (op.kind === "redo") return this.store.redo(boardId, author).board;
     b.focusedViewId = viewId;
     v.updatedAt = Date.now();
     b.revision++;
@@ -407,6 +586,8 @@ const operation = z.discriminatedUnion("kind", [
     data: z.record(z.string(), z.unknown()).optional(),
     objectId: id.optional(),
     rect: rect.optional(),
+    /** 意图分组键：同一 intentId 的连续编辑合为一个撤销单位。 */
+    intentId: z.string().min(1).max(200).optional(),
   }),
   z.object({
     kind: z.literal("update"),
@@ -438,6 +619,9 @@ const operation = z.discriminatedUnion("kind", [
       .optional(),
     title: z.string().min(1).max(120).optional(),
     data: z.record(z.string(), z.unknown()).optional(),
+    /** 期望的对象版本；不匹配时拒绝写入，不静默覆盖。 */
+    expectedVersion: z.number().int().positive().optional(),
+    intentId: z.string().min(1).max(200).optional(),
   }),
   z.object({
     kind: z.literal("place"),
@@ -466,6 +650,41 @@ const operation = z.discriminatedUnion("kind", [
     title: z.string().min(1).max(80),
   }),
   z.object({ kind: z.literal("theme"), theme: theme.nullable() }),
+  z.object({
+    kind: z.literal("present"),
+    objectId: id,
+    type: z.string().min(1).max(80).optional(),
+    /** 放到哪块白板；不填表示当前白板。 */
+    spaceId: id.optional(),
+    intentId: z.string().min(1).max(200).optional(),
+  }),
+  z.object({
+    kind: z.literal("copyObject"),
+    instanceId: id,
+    intentId: z.string().min(1).max(200).optional(),
+  }),
+  z.object({
+    kind: z.literal("deleteObject"),
+    objectId: id,
+    onReferenced: z.enum(["refuse", "detach"]).optional(),
+    intentId: z.string().min(1).max(200).optional(),
+  }),
+  z.object({
+    kind: z.literal("relate"),
+    source: id,
+    target: id,
+    relation: z.string().min(1).max(60),
+    status: z.enum(["confirmed", "inferred"]).optional(),
+    basis: z.string().max(1000).optional(),
+    intentId: z.string().min(1).max(200).optional(),
+  }),
+  z.object({
+    kind: z.literal("unlinkRelation"),
+    relationId: id,
+    intentId: z.string().min(1).max(200).optional(),
+  }),
+  z.object({ kind: z.literal("undo") }),
+  z.object({ kind: z.literal("redo") }),
 ]);
 export function registerSpaceTools(tool: RegisterTool, spaces: Spaces) {
   tool(

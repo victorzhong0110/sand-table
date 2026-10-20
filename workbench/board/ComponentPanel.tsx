@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import type { Board } from "../core/model.ts";
 import type { ComponentInstance, ThemeConfig } from "../core/spaces.ts";
 import { Icon } from "./Icon.tsx";
 import { componentTypes, defaultData, componentIcons } from "../core/spaces.ts";
+import { resolveContent } from "../core/content.ts";
 export function ComponentPanel({
   board: b,
   viewId,
@@ -171,6 +172,31 @@ export function ComponentPanel({
               >
                 复制展示
               </button>
+              {c.binding?.kind === "object" && (
+                <>
+                  <button
+                    disabled={busy}
+                    title="同一个对象在当前白板再放一份：内容共享，布局独立"
+                    onClick={() =>
+                      void operate({
+                        kind: "present",
+                        objectId: c.binding!.objectId,
+                      })
+                    }
+                  >
+                    再放一份
+                  </button>
+                  <button
+                    disabled={busy}
+                    title="复制出独立对象：内容深拷贝，此后互不影响"
+                    onClick={() =>
+                      void operate({ kind: "copyObject", instanceId: c.id })
+                    }
+                  >
+                    复制出独立对象
+                  </button>
+                </>
+              )}
               <button
                 disabled={busy}
                 onClick={() =>
@@ -220,6 +246,7 @@ export function ComponentPanel({
         <ComponentEditor
           key={selected[0].id}
           instance={selected[0]}
+          board={b}
           busy={busy}
           operate={operate}
           action={action}
@@ -298,24 +325,38 @@ export function ComponentPanel({
 }
 function ComponentEditor({
   instance: c,
+  board,
   busy,
   operate,
   action,
 }: {
   instance: ComponentInstance;
+  board: Board;
   busy: boolean;
   operate: (op: any) => Promise<any>;
   action: (name: string, args?: Record<string, unknown>) => Promise<any>;
 }) {
-  const [title, setTitle] = useState(c.title),
-    [data, setData] = useState<Record<string, any>>(c.data),
-    [json, setJson] = useState(JSON.stringify(c.data, null, 2)),
+  // 绑定了内容对象的组件：编辑的是对象，同一对象在别处的展示一起变。
+  const resolved = resolveContent(c, board.contentObjects);
+  const bound = c.binding?.kind === "object" ? c.binding.objectId : undefined;
+  const object = bound
+    ? board.contentObjects.find((o) => o.id === bound)
+    : undefined;
+  const [title, setTitle] = useState(resolved.title),
+    [data, setData] = useState<Record<string, any>>(resolved.data),
+    [json, setJson] = useState(JSON.stringify(resolved.data, null, 2)),
     [error, setError] = useState("");
+  // 同一次编辑会话里的连续保存算一个撤销单位。
+  const intentId = useMemo(
+    () => `ui-${c.id}-${Date.now().toString(36)}`,
+    [c.id],
+  );
   useEffect(() => {
-    setData(c.data);
-    setJson(JSON.stringify(c.data, null, 2));
-    setTitle(c.title);
-  }, [c.updatedAt]);
+    const current = resolveContent(c, board.contentObjects);
+    setData(current.data);
+    setJson(JSON.stringify(current.data, null, 2));
+    setTitle(current.title);
+  }, [c.updatedAt, object?.updatedAt]);
   const field = (key: string, label: string, multiline = false) => (
     <label key={key}>
       {label}
@@ -332,7 +373,15 @@ function ComponentEditor({
       )}
     </label>
   );
-  const save = () => operate({ kind: "update", instanceId: c.id, title, data });
+  const save = () =>
+    operate({
+      kind: "update",
+      instanceId: c.id,
+      title,
+      data,
+      ...(object ? { expectedVersion: object.version } : {}),
+      intentId,
+    });
   return (
     <section className="component-editor">
       <h3>配置这个组件</h3>

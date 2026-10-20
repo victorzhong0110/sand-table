@@ -15,6 +15,10 @@ export async function startLocal(options: {
   sessionFile: string;
   port?: number;
   preset?: "blank" | "code";
+  /** 工作空间存储目录。作品落在这里，重启后仍在。 */
+  workspaceDir?: string;
+  /** 工作空间 ID。 */
+  workspaceId?: string;
 }) {
   if (existsSync(options.sessionFile)) {
     const previous = readConnection(options.sessionFile);
@@ -48,6 +52,8 @@ export async function startLocal(options: {
         "--experimental-strip-types",
         fileURLToPath(new URL("../server/main.ts", import.meta.url)),
         ...options.workspaces.flatMap((w) => ["--workspace", w]),
+        ...(options.workspaceDir ? ["--workspace-dir", options.workspaceDir] : []),
+        ...(options.workspaceId ? ["--workspace-id", options.workspaceId] : []),
       ],
     }),
   );
