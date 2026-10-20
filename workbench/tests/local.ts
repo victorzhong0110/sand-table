@@ -15,6 +15,10 @@ if (!external)
   throw Error("Set SAND_EXTERNAL_REPO to a checkout of lukeed/clsx.");
 const dir = mkdtempSync(join(tmpdir(), "sand-local-")),
   sessionFile = join(dir, "connection.json");
+// A fixed port, the way the documentation tells people to run it: the
+// address stays the same across restarts, so a restart rotates only the
+// credential and the tab has to pick the new one up.
+const port = 45000 + Math.floor(Math.random() * 3000);
 let service: ReturnType<typeof spawn> | undefined,
   browser,
   client: Client | undefined;
@@ -26,6 +30,8 @@ async function launch() {
       "../scripts/start-workbench.mjs",
       "--no-open",
       "--code-board",
+      "--port",
+      String(port),
       "--session-file",
       sessionFile,
       "--workspace",
@@ -216,6 +222,34 @@ try {
     arguments: { boardId: browserId },
   });
   assert.equal(old.isError, true);
+  /* #6-A: the address stayed the same, the credential did not. The tab
+     still holds the old one, so every request comes back unauthorized —
+     until the new link is pasted into it. Pasting changes only the
+     fragment, so the page is never reloaded and has to read the new
+     credential from there; otherwise the tab stays broken until it is
+     reloaded by hand. */
+  await page.waitForFunction(
+    () =>
+      Boolean(
+        document.getElementById("connection")?.textContent?.includes("断开"),
+      ),
+    undefined,
+    { timeout: 20000 },
+  );
+  await page.evaluate((token) => {
+    location.hash = "#session=" + token;
+  }, connection.token);
+  await page.waitForFunction(
+    () =>
+      !document
+        .getElementById("connection")
+        ?.textContent?.includes("断开"),
+    undefined,
+    { timeout: 20000 },
+  );
+  await frame()
+    .getByRole("heading", { name: "项目总览", exact: true })
+    .waitFor({ timeout: 20000 });
   assert.deepEqual(errors, []);
   console.log(
     "Local workbench passed: real launcher, generated MCP config, independent stdio client, shared selection/guide, reload, auth, clean shutdown, token rotation and bridge reconnect.",

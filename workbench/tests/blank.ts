@@ -655,6 +655,70 @@ try {
   const preset = b.instances.find((i: any) => i.title === "目标与验收条件");
   assert.equal(preset.type, "task", "The preset fills in a type that exists.");
   assert.deepEqual(preset.data.items, [], "The preset uses the type's own data.");
+  /* #10: in the "icon + title" level a long title must not push the card's
+     own level toggle out of the card. A flex item's automatic minimum size
+     is its content size, so the title used to refuse to shrink: the
+     ellipsis never applied and the button was pushed hundreds of pixels
+     past the card's edge — it looked like the button had vanished. */
+  const longTitle =
+    "为输出增加 label 前缀并保持原有参数转换规则与边界条件不变以便回归比对";
+  const beforeCount = b.instances.length;
+  await frame
+    .getByRole("button", { name: "便签", exact: true })
+    .dragTo(frame.locator(".canvas"), { targetPosition: { x: 700, y: 300 } });
+  b = await until((b) => b.instances.length > beforeCount);
+  const longCard = frame.locator(
+    '[data-instance-id="' + b.instances[b.instances.length - 1].id + '"]',
+  );
+  await longCard.waitFor();
+  await frame.getByRole("textbox", { name: "编辑组件名称" }).fill(longTitle);
+  await page.waitForTimeout(900); // the content field saves on stop
+  await longCard.hover();
+  await longCard.locator(".detail-toggle").click();
+  await page.waitForTimeout(400);
+  const labelState = await longCard.evaluate((el) => {
+    const title = el.querySelector(".collapsed-title") as HTMLElement | null;
+    const btn = el.querySelector(".detail-toggle") as HTMLElement | null;
+    if (!title || !btn) return null;
+    const card = el.getBoundingClientRect();
+    const b = btn.getBoundingClientRect();
+    return {
+      titleClientW: title.clientWidth,
+      titleScrollW: title.scrollWidth,
+      truncated: title.scrollWidth > title.clientWidth + 1,
+      toggleInsideCard: card.right >= b.right - 1,
+      cardRight: Math.round(card.right),
+      toggleRight: Math.round(b.right),
+    };
+  });
+  assert.ok(labelState, "The card should be in the icon + title level.");
+  assert.ok(
+    labelState.truncated,
+    "A long title is truncated with an ellipsis (title " +
+      labelState.titleClientW +
+      "px shown, " +
+      labelState.titleScrollW +
+      "px of text).",
+  );
+  assert.ok(
+    labelState.toggleInsideCard,
+    "The level toggle stays inside the card (card right " +
+      labelState.cardRight +
+      "px, toggle right " +
+      labelState.toggleRight +
+      "px).",
+  );
+  /* The zoom bar has to stay usable even when a card sits on top of it. */
+  const longBox = (await longCard.boundingBox())!;
+  await page.mouse.move(
+    longBox.x + longBox.width / 2,
+    longBox.y + longBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(80, 880, { steps: 12 });
+  await page.mouse.up();
+  await page.waitForTimeout(600);
+  await assertZoomBarUsable("a card with a long title over the zoom bar");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: "artifacts/blank-mobile.png", fullPage: true });
   assert.ok(

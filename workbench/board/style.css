@@ -304,6 +304,10 @@ button[aria-pressed="true"] {
      of letting the panel sit on the bar's edge (issue #10). */
   bottom: 8px;
   left: 16px;
+  /* The bar must stay usable no matter what the canvas holds: a card's
+     content can be wider than the card itself, and .world is a stacking
+     context, so the bar is put above the content layer on purpose. */
+  z-index: 5;
   display: flex;
   gap: 10px;
   align-items: center;
@@ -1642,7 +1646,16 @@ main.canvas-app {
 .detail-icon .component-chrome {
   margin: 0;
 }
-.collapsed-title {
+/* A flex item's automatic minimum size is its content size, so a long title
+   used to refuse to shrink: the ellipsis never applied and the title
+   pushed the level toggle clean out of the card. min-width: 0 lets the
+   title shrink so the ellipsis works and the button stays put. The
+   selector has to out-specify ".component-card strong { flex-shrink: 0 }"
+   above, which is there to keep the full-level title from being squeezed
+   vertically. */
+.component-card .collapsed-title {
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -233,6 +233,17 @@ async function connect(force = false) {
 element("setup").onclick = () => showSetup(true);
 element("close-setup").onclick = () => showSetup(false);
 element("retry").onclick = () => void connect(true).catch(showError);
+// Pasting a new link into an open tab changes only the fragment, so the
+// document is never reloaded and the new credential would be ignored: the
+// page would keep using the old one and every request would come back
+// unauthorized. Adopt the credential from the hash and reconnect. If it is
+// stale, connect() falls back to the live one the service hands out.
+window.addEventListener("hashchange", () => {
+  const fresh = new URLSearchParams(location.hash.slice(1)).get("session");
+  if (!fresh || !TOKEN_PATTERN.test(fresh) || fresh === currentToken) return;
+  rememberToken(fresh);
+  void connect(false).catch(showError);
+});
 element("new-board").onclick = () => {
   void connect().catch(showError);
 };
