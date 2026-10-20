@@ -70,4 +70,5 @@
 ## 验证口径
 
 - 每个包：`npm run typecheck` + `npm run build` 通过；受影响的既有测试（`test:blank`、`test:browser`、`test:local`、`npm test`）通过；新增断言要实跑并留下输出。
-- 合并后跑全量，CI 绿，再逐个 issue 写解决说明并关闭。**不合并 PR**（合并权在 Vic）。
+- 合并后跑全量，CI 绿，再逐个 issue 写解决说明并关闭。
+- **合并的时机与顺序不由这份计划决定。** 早先这里写的「不合并 PR（合并权在 Vic）」是上一版工作方式的遗留写法，现在只保留事实：PR #12 叠在 #5 之上（base 是 `feat/quiet-settings`，所以 diff 只含本次改动），它与新架构方向（#11）的文件重叠面见 `workbench/docs/ARCHITECTURE-HANDOVER.md`。**什么时候合、先合哪个，由新架构那一侧判断**；本仓库这边不代为合并，也不把顺序写成硬性要求。
