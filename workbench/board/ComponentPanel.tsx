@@ -110,7 +110,7 @@ export function ComponentPanel({
                   <button
                     className="icon-button"
                     title={`复制 ${c.title}`}
-                    aria-label={`复制 ${c.title}`}
+                    aria-label="复制"
                     disabled={busy}
                     onClick={() =>
                       void operate({ kind: "duplicate", instanceId: c.id })
@@ -120,10 +120,10 @@ export function ComponentPanel({
                   </button>
                   <button
                     className="icon-button"
-                    title={c.rect.pinned ? `取消固定 ${c.title}` : `固定 ${c.title}`}
-                    aria-label={
-                      c.rect.pinned ? `取消固定 ${c.title}` : `固定 ${c.title}`
+                    title={
+                      c.rect.pinned ? `取消固定 ${c.title}` : `固定位置 ${c.title}`
                     }
+                    aria-label={c.rect.pinned ? "取消固定" : "固定位置"}
                     aria-pressed={c.rect.pinned}
                     disabled={busy}
                     onClick={() =>
