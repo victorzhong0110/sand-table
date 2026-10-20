@@ -199,3 +199,24 @@ test("space activity works without code roots, validates instance location and b
   assert.equal(store.read(b.id).spaceActivities?.[0].stale, true);
   assert.equal(store.context(b.id).spaceActivities?.[0].stale, true);
 });
+
+test("appearance levels preserve source identity, expanded geometry and component data", () => {
+  const store = new BoardStore();
+  let b = store.open(p, "appearance");
+  openView(store.get(b.id), "appearance-view");
+  const spaces = new Spaces(store);
+  const original = structuredClone(b.instances[0]);
+  for (const detail of ["label", "icon", "full"]) {
+    b = spaces.update(b.id, store.get(b.id).revision, "appearance-view", {
+      kind: "update",
+      instanceId: original.id,
+      appearance: { detail, icon: "task" },
+    });
+    const c = b.instances.find((c) => c.id === original.id)!;
+    assert.deepEqual(c.rect, original.rect);
+    assert.deepEqual(c.data, original.data);
+    assert.equal(c.objectId, original.objectId);
+    assert.equal(c.appearance?.detail, detail);
+    assert.equal(c.appearance?.icon, "task");
+  }
+});

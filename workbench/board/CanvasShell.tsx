@@ -30,6 +30,7 @@ export function CanvasShell({
   sendMessage: (text: string) => Promise<void>;
 }) {
   const [mode, setMode] = useState("browse"),
+    [toolsOpen, setToolsOpen] = useState(true),
     [panel, setPanel] = useState(""),
     [query, setQuery] = useState(""),
     [arrows, setArrows] = useState(false),
@@ -133,6 +134,49 @@ export function CanvasShell({
       }
       style={style}
     >
+      <nav className="app-rail" aria-label="主导航">
+        <span className="rail-brand" title="Sand Table">
+          S
+        </span>
+        <button
+          aria-label="画板与工具"
+          aria-pressed={toolsOpen}
+          onClick={() => setToolsOpen(!toolsOpen)}
+        >
+          <Icon name="board" />
+        </button>
+        <button
+          aria-label="浏览模式"
+          aria-pressed={mode === "browse"}
+          onClick={() => setMode("browse")}
+        >
+          <Icon name="browse" />
+        </button>
+        <button
+          aria-label="编排模式"
+          aria-pressed={mode === "arrange"}
+          onClick={() => setMode("arrange")}
+        >
+          <Icon name="arrange" />
+        </button>
+        <button
+          aria-label="AI 编排"
+          aria-pressed={panel === "ai"}
+          onClick={() => {
+            setMode("ai");
+            setPanel("ai");
+          }}
+        >
+          <Icon name="ai" />
+        </button>
+        <button
+          className="rail-settings"
+          aria-label="外观设置"
+          onClick={() => setPanel("theme")}
+        >
+          <Icon name="comparison" />
+        </button>
+      </nav>
       <header className="canvas-topbar">
         <span className="canvas-brand">
           S<span>Sand Table</span>
@@ -182,16 +226,30 @@ export function CanvasShell({
         </div>
       )}
       <div className={"studio-layout " + (panel ? "has-inspector" : "")}>
-        <Toolbox
-          board={b}
-          viewId={viewId}
-          mode={mode}
-          busy={busy}
-          setMode={setMode}
-          create={create}
-          action={action}
-          showPanel={setPanel}
-        />
+        <button
+          className="floating-tool-toggle"
+          aria-label="切换工具箱"
+          aria-expanded={toolsOpen}
+          onClick={() => setToolsOpen(!toolsOpen)}
+        >
+          <Icon name="board" size={18} /> 工具与画板
+        </button>
+        <div className={"floating-tool-wrap " + (toolsOpen ? "" : "is-hidden")}>
+          <Toolbox
+            navigate={(spaceId) => {
+              setQuery("");
+              void operate({ kind: "navigate", spaceId });
+            }}
+            board={b}
+            viewId={viewId}
+            mode={mode}
+            busy={busy}
+            setMode={setMode}
+            create={create}
+            action={action}
+            showPanel={setPanel}
+          />
+        </div>
         <section className="studio-stage" aria-label="白板工作区">
           <div className="stage-search">
             <input

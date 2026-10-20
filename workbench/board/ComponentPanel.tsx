@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import type { Board } from "../core/model.ts";
 import type { ComponentInstance, ThemeConfig } from "../core/spaces.ts";
-import { componentTypes, defaultData } from "../core/spaces.ts";
+import { Icon } from "./Icon.tsx";
+import { componentTypes, defaultData, componentIcons } from "../core/spaces.ts";
 export function ComponentPanel({
   board: b,
   viewId,
@@ -101,6 +102,60 @@ export function ComponentPanel({
             Agent 配置。
           </p>
         </>
+      )}
+      {selected.length > 0 && (
+        <section className="appearance-controls">
+          <h3>显示方式</h3>
+          <div className="detail-options">
+            {[
+              ["full", "完整界面"],
+              ["label", "图标＋标题"],
+              ["icon", "仅图标"],
+            ].map(([detail, label]) => (
+              <button
+                key={detail}
+                aria-pressed={selected.every(
+                  (c) => (c.appearance?.detail || "full") === detail,
+                )}
+                onClick={async () => {
+                  for (const c of selected)
+                    await operate({
+                      kind: "update",
+                      instanceId: c.id,
+                      appearance: { detail },
+                    });
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <h3>图标库</h3>
+          <div className="icon-library">
+            {componentIcons.map((icon) => (
+              <button
+                key={icon}
+                aria-label={`使用 ${icon} 图标`}
+                title={
+                  componentTypes.find((t) => t.type === icon)?.title || icon
+                }
+                aria-pressed={selected.every(
+                  (c) => (c.appearance?.icon || c.type) === icon,
+                )}
+                onClick={async () => {
+                  for (const c of selected)
+                    await operate({
+                      kind: "update",
+                      instanceId: c.id,
+                      appearance: { icon },
+                    });
+                }}
+              >
+                <Icon name={icon} />
+              </button>
+            ))}
+          </div>
+        </section>
       )}
       {selected.length > 0 && (
         <>

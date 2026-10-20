@@ -81,7 +81,9 @@ export function ComponentRenderer({
       <span className="card-type">
         {componentTypes.find((t) => t.type === c.type)?.title || "未知组件"}
       </span>
-      <strong>{c.title}</strong>
+      {!componentTypes.some((t) => t.title === c.title) && (
+        <strong>{c.title}</strong>
+      )}
     </>
   );
   switch (c.type) {

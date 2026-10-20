@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Board } from "../core/model.ts";
-import { componentTypes } from "../core/spaces.ts";
+import { Icon } from "./Icon.tsx";
+import { componentTypes, displayRect, material } from "../core/spaces.ts";
 import type { Camera, ComponentInstance, Rect } from "../core/spaces.ts";
 import { ComponentRenderer } from "./ComponentRenderer.tsx";
 type Props = {
@@ -80,8 +81,12 @@ export function SpaceCanvas({
     if (!instances.length || !canvas.current) return;
     const x = Math.min(...instances.map((c) => c.rect.x)),
       y = Math.min(...instances.map((c) => c.rect.y)),
-      right = Math.max(...instances.map((c) => c.rect.x + c.rect.width)),
-      bottom = Math.max(...instances.map((c) => c.rect.y + c.rect.height));
+      right = Math.max(
+        ...instances.map((c) => c.rect.x + displayRect(c).width),
+      ),
+      bottom = Math.max(
+        ...instances.map((c) => c.rect.y + displayRect(c).height),
+      );
     const w = canvas.current.clientWidth,
       h = canvas.current.clientHeight;
     const zoom = Math.min(
@@ -124,7 +129,7 @@ export function SpaceCanvas({
     );
     if (!selected.length) return;
     const c = selected.at(-1)!,
-      r = c.rect,
+      r = displayRect(c),
       w = canvas.current.clientWidth,
       h = canvas.current.clientHeight;
     if (
@@ -146,7 +151,7 @@ export function SpaceCanvas({
       </section>
     );
   const visible = filtered.filter((c) => {
-    const r = draft[c.id] || c.rect;
+    const r = displayRect(c, draft[c.id] || c.rect);
     const w = canvas.current?.clientWidth || 900,
       h = canvas.current?.clientHeight || 660;
     return (
@@ -316,7 +321,7 @@ export function SpaceCanvas({
           } else if (d?.lasso && lasso) {
             const l = lasso;
             const picked = filtered.filter((c) => {
-              const r = c.rect;
+              const r = displayRect(c);
               const x = r.x * camera.zoom + camera.x,
                 y = r.y * camera.zoom + camera.y + 36;
               return (
@@ -360,19 +365,31 @@ export function SpaceCanvas({
             );
             if (!members.length) return null;
             const left =
-                Math.min(...members.map((c) => (draft[c.id] || c.rect).x)) - 12,
+                Math.min(
+                  ...members.map(
+                    (c) => displayRect(c, draft[c.id] || c.rect).x,
+                  ),
+                ) - 12,
               top =
-                Math.min(...members.map((c) => (draft[c.id] || c.rect).y)) - 28,
+                Math.min(
+                  ...members.map(
+                    (c) => displayRect(c, draft[c.id] || c.rect).y,
+                  ),
+                ) - 28,
               right =
                 Math.max(
                   ...members.map(
-                    (c) => (draft[c.id] || c.rect).x + c.rect.width,
+                    (c) =>
+                      displayRect(c, draft[c.id] || c.rect).x +
+                      displayRect(c).width,
                   ),
                 ) + 12,
               bottom =
                 Math.max(
                   ...members.map(
-                    (c) => (draft[c.id] || c.rect).y + c.rect.height,
+                    (c) =>
+                      displayRect(c, draft[c.id] || c.rect).y +
+                      displayRect(c).height,
                   ),
                 ) + 12;
             return (
@@ -403,10 +420,10 @@ export function SpaceCanvas({
               {links.slice(0, 500).map((link, index) => {
                 const a =
                     draft[link.source] ||
-                    b.instances.find((c) => c.id === link.source)!.rect,
+                    displayRect(b.instances.find((c) => c.id === link.source)!),
                   z =
                     draft[link.target] ||
-                    b.instances.find((c) => c.id === link.target)!.rect;
+                    displayRect(b.instances.find((c) => c.id === link.target)!);
                 const ax = a.x + a.width / 2,
                   ay = a.y + a.height / 2,
                   bx = z.x + z.width / 2,
@@ -442,7 +459,7 @@ export function SpaceCanvas({
             </svg>
           )}
           {visible.map((c) => {
-            const r = draft[c.id] || c.rect;
+            const r = displayRect(c, draft[c.id] || c.rect);
             return (
               <article
                 key={c.id}
@@ -451,7 +468,9 @@ export function SpaceCanvas({
                 aria-label={c.title}
                 title={[
                   c.title,
-                  c.type,
+                  componentTypes.find((t) => t.type === c.type)?.title ||
+                    c.type,
+                  String(c.data.text || c.data.description || "").slice(0, 200),
                   c.objectId
                     ? b.objects.find((o) => o.id === c.objectId)?.source?.path
                     : "",
@@ -461,7 +480,7 @@ export function SpaceCanvas({
                   .join(" · ")}
                 data-object-id={c.objectId}
                 data-instance-id={c.id}
-                className={`card component-card ${view.selection.includes(c.id) ? "selected" : ""} ${focusedGuide && c.objectId && !routeIds.has(c.objectId) ? "dimmed" : ""}`}
+                className={`card component-card material-${material(c.type)} detail-${c.appearance?.detail || "full"} ${view.selection.includes(c.id) ? "selected" : ""} ${focusedGuide && c.objectId && !routeIds.has(c.objectId) ? "dimmed" : ""}`}
                 style={{
                   left: r.x,
                   top: r.y,
@@ -500,10 +519,10 @@ export function SpaceCanvas({
                           {
                             id: c.id,
                             rect: {
-                              ...r,
+                              ...c.rect,
                               width: Math.max(
                                 120,
-                                r.width +
+                                c.rect.width +
                                   (e.key === "ArrowLeft"
                                     ? -d
                                     : e.key === "ArrowRight"
@@ -512,7 +531,7 @@ export function SpaceCanvas({
                               ),
                               height: Math.max(
                                 70,
-                                r.height +
+                                c.rect.height +
                                   (e.key === "ArrowUp"
                                     ? -d
                                     : e.key === "ArrowDown"
@@ -530,7 +549,7 @@ export function SpaceCanvas({
                           {
                             id: c.id,
                             rect: {
-                              ...r,
+                              ...c.rect,
                               x:
                                 r.x +
                                 (e.key === "ArrowLeft"
@@ -564,7 +583,7 @@ export function SpaceCanvas({
                       id: c.id,
                       x: e.clientX,
                       y: e.clientY,
-                      rect: r,
+                      rect: draft[c.id] || c.rect,
                       base: camera,
                     };
                     e.currentTarget.setPointerCapture(e.pointerId);
@@ -602,33 +621,71 @@ export function SpaceCanvas({
                       .join("、")}
                   </span>
                 )}
-                <ComponentRenderer
-                  instance={c}
-                  board={b}
-                  call={call}
-                  onNavigate={(spaceId) => void navigate(spaceId)}
-                  onOpenLink={onOpenLink}
-                />
-                {mode === "arrange" && (
+                <div className="component-chrome">
+                  <span
+                    className="component-symbol"
+                    title={componentTypes.find((t) => t.type === c.type)?.title}
+                  >
+                    <Icon name={c.appearance?.icon || c.type} size={20} />
+                  </span>
+                  {c.appearance?.detail &&
+                    c.appearance.detail !== "full" &&
+                    c.appearance.detail !== "icon" && (
+                      <strong className="collapsed-title">{c.title}</strong>
+                    )}
                   <button
-                    className="resize-handle"
-                    aria-label={`调整 ${c.title} 大小`}
-                    onPointerDown={(e) => {
+                    className="detail-toggle"
+                    aria-label={`切换 ${c.title} 展开层级`}
+                    title="完整界面 → 图标和标题 → 仅图标"
+                    onClick={(e) => {
                       e.stopPropagation();
-                      drag.current = {
-                        id: c.id,
-                        resize: true,
-                        x: e.clientX,
-                        y: e.clientY,
-                        rect: r,
-                        base: camera,
-                      };
-                      e.currentTarget.setPointerCapture(e.pointerId);
+                      void operate({
+                        kind: "update",
+                        instanceId: c.id,
+                        appearance: {
+                          detail:
+                            c.appearance?.detail === "icon"
+                              ? "full"
+                              : c.appearance?.detail === "label"
+                                ? "icon"
+                                : "label",
+                        },
+                      });
                     }}
                   >
-                    ↘
+                    <Icon name="board" size={14} />
                   </button>
+                </div>
+                {(!c.appearance?.detail || c.appearance.detail === "full") && (
+                  <ComponentRenderer
+                    instance={c}
+                    board={b}
+                    call={call}
+                    onNavigate={(spaceId) => void navigate(spaceId)}
+                    onOpenLink={onOpenLink}
+                  />
                 )}
+                {mode === "arrange" &&
+                  (!c.appearance?.detail || c.appearance.detail === "full") && (
+                    <button
+                      className="resize-handle"
+                      aria-label={`调整 ${c.title} 大小`}
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        drag.current = {
+                          id: c.id,
+                          resize: true,
+                          x: e.clientX,
+                          y: e.clientY,
+                          rect: draft[c.id] || c.rect,
+                          base: camera,
+                        };
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                      }}
+                    >
+                      ↘
+                    </button>
+                  )}
               </article>
             );
           })}
