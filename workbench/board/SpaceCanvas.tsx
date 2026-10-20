@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Board } from "../core/model.ts";
 import { Icon } from "./Icon.tsx";
 import { componentTypes, displayRect, material } from "../core/spaces.ts";
+import { peekContent } from "../core/content.ts";
 import type { Camera, ComponentInstance, Rect } from "../core/spaces.ts";
 import { centerCamera, easeCamera, edgeVelocity } from "./camera-motion.ts";
 import { ComponentRenderer } from "./ComponentRenderer.tsx";
@@ -247,7 +248,9 @@ export function SpaceCanvas({
      A component with a body (text/heading/code) edits the body; everything
      else edits the title. */
   const startEdit = (c: ComponentInstance) => {
-    const field = ["text", "heading", "code"].includes(c.type) ? "text" : "title";
+    const field = ["text", "heading", "code"].includes(c.type)
+      ? "text"
+      : "title";
     setEditing({
       id: c.id,
       field,
@@ -742,17 +745,22 @@ export function SpaceCanvas({
           )}
           {visible.map((c) => {
             const r = displayRect(c, draft[c.id] || c.rect);
+            // 标题与正文一律从对象解析：改名后折叠态、提示与无障碍名称
+            // 要和展开态一致（#19 的根因修复，决策 D4）。
+            const resolved = peekContent(c, b.contentObjects);
             return (
               <article
                 key={c.id}
                 tabIndex={0}
                 role="button"
-                aria-label={c.title}
+                aria-label={resolved.title}
                 title={[
-                  c.title,
+                  resolved.title,
                   componentTypes.find((t) => t.type === c.type)?.title ||
                     c.type,
-                  String(c.data.text || c.data.description || "").slice(0, 200),
+                  String(
+                    resolved.data.text || resolved.data.description || "",
+                  ).slice(0, 200),
                   c.objectId
                     ? b.objects.find((o) => o.id === c.objectId)?.source?.path
                     : "",
@@ -874,8 +882,7 @@ export function SpaceCanvas({
                       base: camera,
                       wasPinned: c.rect.pinned,
                     };
-                    if (c.rect.pinned)
-                      showNotice("移动已固定的组件会解除固定");
+                    if (c.rect.pinned) showNotice("移动已固定的组件会解除固定");
                     e.currentTarget.setPointerCapture(e.pointerId);
                   }
                 }}
@@ -930,11 +937,13 @@ export function SpaceCanvas({
                   {c.appearance?.detail &&
                     c.appearance.detail !== "full" &&
                     c.appearance.detail !== "icon" && (
-                      <strong className="collapsed-title">{c.title}</strong>
+                      <strong className="collapsed-title">
+                        {resolved.title}
+                      </strong>
                     )}
                   <button
                     className="detail-toggle"
-                    aria-label={`切换 ${c.title} 展开层级`}
+                    aria-label={`切换 ${resolved.title} 展开层级`}
                     title="完整界面 → 图标和标题 → 仅图标"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -967,10 +976,13 @@ export function SpaceCanvas({
                 {editing?.id === c.id && (
                   <textarea
                     className={
-                      "inline-edit" + (editing.field === "title" ? " is-title" : "")
+                      "inline-edit" +
+                      (editing.field === "title" ? " is-title" : "")
                     }
                     aria-label={
-                      editing.field === "title" ? "就地编辑标题" : "就地编辑内容"
+                      editing.field === "title"
+                        ? "就地编辑标题"
+                        : "就地编辑内容"
                     }
                     value={editing.value}
                     autoFocus
@@ -996,7 +1008,7 @@ export function SpaceCanvas({
                   (!c.appearance?.detail || c.appearance.detail === "full") && (
                     <button
                       className="resize-handle"
-                      aria-label={`调整 ${c.title} 大小`}
+                      aria-label={`调整 ${resolved.title} 大小`}
                       onPointerDown={(e) => {
                         e.stopPropagation();
                         drag.current = {

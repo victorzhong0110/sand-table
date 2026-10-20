@@ -90,6 +90,8 @@ const operation = z.discriminatedUnion("kind", [
      * 并对「同一字段被别人改过」报冲突（集成契约 D5）。
      */
     baseData: z.record(z.string(), z.unknown()).optional(),
+    /** 同上：客户端看到的旧标题。标题冲突要能指出来。 */
+    baseTitle: z.string().max(120).optional(),
   }),
   z.object({
     kind: z.literal("place"),
@@ -239,9 +241,24 @@ export class Spaces {
             return null;
           return { id, before: was, after: now };
         })
-        .filter((c): c is { id: string; before: ComponentInstance | null; after: ComponentInstance | null } => c !== null);
+        .filter(
+          (
+            c,
+          ): c is {
+            id: string;
+            before: ComponentInstance | null;
+            after: ComponentInstance | null;
+          } => c !== null,
+        );
       if (changes.length)
-        this.store.recordPresentations(b, changes, author, intentKey, kind, label);
+        this.store.recordPresentations(
+          b,
+          changes,
+          author,
+          intentKey,
+          kind,
+          label,
+        );
     };
     /** 记录板级内容的变化（嵌套白板、关系、分组、布局锚点、主题、组件包）。 */
     const recordBoard = (
@@ -308,6 +325,8 @@ export class Spaces {
     }
     if (op.kind === "create") {
       if (b.instances.length >= 2200) throw Error("Component limit reached.");
+      // 建白板会多出一块嵌套白板：板级内容也要记进撤销栈。
+      const spacesBefore = structuredClone(b.spaces);
       const type = op.type;
       const preset = type === "board" ? op.data?.preset : undefined;
       const definitions =
@@ -473,6 +492,12 @@ export class Spaces {
         "create-presentation",
         `新建「${op.title}」`,
       );
+      recordBoard(
+        "spaces",
+        spacesBefore,
+        "create-board",
+        `新建「${op.title}」`,
+      );
     }
     if (op.kind === "update") {
       const c = item(op.instanceId);
@@ -490,17 +515,54 @@ export class Spaces {
             throw Error(
               "Use reference/whiteboard actions to change the target.",
             );
-          checkComponentData(c.type, op.data);
         }
+        // 版本对得上：直接整份写入，没有并发，不用做字段级合并。
+        // 版本对不上：只有带了基线（baseData/baseTitle）才能安全地只写真正改动的字段——
+        // 否则别人改过的内容会被这次写入悄悄抹掉。
+        const versionMatches =
+          op.expectedVersion === undefined ||
+          op.expectedVersion === object.version;
+        let nextData = op.data;
+        if (op.data && op.baseData) {
+          const current = object.data || {};
+          const changed: Record<string, unknown> = {};
+          const keys = new Set([
+            ...Object.keys(op.baseData),
+            ...Object.keys(op.data),
+          ]);
+          for (const key of keys) {
+            const was = op.baseData[key];
+            const now = op.data![key];
+            if (JSON.stringify(was) === JSON.stringify(now)) continue;
+            // 这个字段我改了，但当前值已经不是我的基线：有人同时改了同一个字段。
+            if (JSON.stringify(current[key]) !== JSON.stringify(was))
+              throw Error(`字段「${key}」已被其他修改改动，请重新载入后再试。`);
+            changed[key] = now;
+          }
+          nextData = { ...current, ...changed };
+        } else if (!versionMatches) {
+          throw Error(
+            "过期版本写入被拒绝：内容已被其他修改改动，请重新载入后再试。",
+          );
+        }
+        if (op.title !== undefined && op.baseTitle !== undefined) {
+          if (op.baseTitle !== object.title)
+            throw Error("标题已被其他修改改动，请重新载入后再试。");
+        } else if (op.title !== undefined && !versionMatches) {
+          throw Error(
+            "过期版本写入被拒绝：标题已被其他修改改动，请重新载入后再试。",
+          );
+        }
+        if (nextData) checkComponentData(c.type, nextData);
         // 标题与内容属于对象；外观属于这一次展示。
         // 两者要分开落地：外观被内容分支吞掉的话，绑定了对象的卡片就没法改显示方式。
-        if (op.title !== undefined || op.data) {
+        if (op.title !== undefined || nextData) {
           this.store.updateContent(
             b,
             bound,
             {
               ...(op.title !== undefined ? { title: op.title } : {}),
-              ...(op.data ? { data: op.data } : {}),
+              ...(nextData ? { data: nextData } : {}),
             },
             op.expectedVersion ?? object.version,
             author,
@@ -534,7 +596,8 @@ export class Spaces {
     }
     if (op.kind === "place") {
       const placeBefore = new Map<string, ComponentInstance | null>();
-      for (const change of op.items) placeBefore.set(change.id, snapshotOf(change.id));
+      for (const change of op.items)
+        placeBefore.set(change.id, snapshotOf(change.id));
       const placementsBefore = structuredClone(b.placements);
       for (const change of op.items) {
         const c = item(change.id),
@@ -811,21 +874,13 @@ export class Spaces {
   }
   /** Board-level undo. It pushes a new reversible record instead of
    * popping a stack, so an undo can itself be undone. */
-  undo(
-    boardId: string,
-    revision: number | undefined,
-    author = "human",
-  ) {
+  undo(boardId: string, revision: number | undefined, author = "human") {
     const b = this.store.get(boardId);
     if (revision !== undefined && b.revision !== revision)
       throw Error("Board changed. Read current board and retry.");
     return this.store.undo(boardId, author).board;
   }
-  redo(
-    boardId: string,
-    revision: number | undefined,
-    author = "human",
-  ) {
+  redo(boardId: string, revision: number | undefined, author = "human") {
     const b = this.store.get(boardId);
     if (revision !== undefined && b.revision !== revision)
       throw Error("Board changed. Read current board and retry.");

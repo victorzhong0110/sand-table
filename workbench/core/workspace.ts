@@ -393,7 +393,6 @@ const normalizeBoard = (raw: unknown): PersistedBoard => {
     groups: asArray(r.groups),
     spaceLinks: asArray(r.spaceLinks),
     assets: asArray(r.assets),
-    componentPacks: asArray(r.componentPacks),
     activities: asArray(r.activities),
     guides: asArray(r.guides),
     intents: asArray(r.intents),
@@ -404,6 +403,8 @@ const normalizeBoard = (raw: unknown): PersistedBoard => {
     board.focusedViewId = r.focusedViewId;
   if (Array.isArray(r.spaceActivities))
     board.spaceActivities = r.spaceActivities;
+  // 组件包是可选字段：文件里没有就不写进去，往返才不会多出空数组。
+  if (Array.isArray(r.componentPacks)) board.componentPacks = r.componentPacks;
   if (r.theme !== undefined) board.theme = r.theme;
   return board;
 };

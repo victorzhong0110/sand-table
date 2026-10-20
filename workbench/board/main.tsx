@@ -337,6 +337,7 @@ function Workbench() {
         onUndo={() => void flip("undo")}
         onRedo={() => void flip("redo")}
         onJump={(recordId) => void jump(recordId)}
+        aiMode={app ? "host" : "mcp"}
         sendMessage={async (text) => {
           if (!app) throw Error("Not connected");
           const result = await app.sendMessage({

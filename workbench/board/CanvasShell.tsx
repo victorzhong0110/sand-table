@@ -23,6 +23,7 @@ export function CanvasShell({
   onUndo,
   onRedo,
   onJump,
+  aiMode = "mcp",
 }: {
   board: Board;
   viewId: string;
@@ -38,6 +39,13 @@ export function CanvasShell({
   onUndo?: () => void;
   onRedo?: () => void;
   onJump?: (recordId: string) => void;
+  /**
+   * AI 接入方式：
+   * "host" = 宿主提供了消息桥接，能真的把任务发出去并收到响应；
+   * "mcp"  = 只有 MCP，AI 在你自己的客户端里。
+   * 只有真能发能收时才显示直接对话入口（决策 D7）。
+   */
+  aiMode?: "host" | "mcp";
 }) {
   const [mode, setMode] = useState("browse"),
     [focusRevision, setFocusRevision] = useState(0),
@@ -143,16 +151,15 @@ export function CanvasShell({
       "。使用 sand_edit_space 维护白板，用 sand_report_space_activity 如实报告你在这个空间做什么；不得把编排请求当作修改源码授权。需要源码修改时先读取明确意图并提交具体提案，等待我确认。";
     try {
       await sendMessage(message);
+      setHandoff("已交给宿主，等它的回应。");
+    } catch (e) {
+      // 发送失败就说发送失败。不要退回到「复制这段提示词」——
+      // 那是把「交给 AI」伪装成复制粘贴，日常用起来只会让人以为 AI 在干活。
       setHandoff(
-        "已交给宿主；本地模式请在接入面板复制后，到自己的 AI 客户端发送。",
+        "宿主没有接受这条消息（" +
+          ((e as Error)?.message || "未知原因") +
+          "）。你的 AI 仍然可以用 MCP 工具直接操作这张白板。",
       );
-    } catch {
-      setPrompt(message);
-      setHandoff(
-        "宿主未提供消息接入。请复制下面已准备的文字到你的 AI 客户端。",
-      );
-      field.current?.focus();
-      field.current?.select();
     }
   }
   return (
@@ -405,21 +412,37 @@ export function CanvasShell({
               />
             ) : panel === "ai" ? (
               <section className="ai-composer">
-                <h2>你想怎么搭？</h2>
-                <textarea
-                  ref={field}
-                  aria-label="给 AI 的编排请求"
-                  placeholder="例如：给我搭一个比较两个方案的白板，留出证据、图表和结论…"
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  maxLength={8000}
-                />
-                <button
-                  disabled={!prompt.trim()}
-                  onClick={() => void handToAI()}
-                >
-                  交给我的 AI
-                </button>
+                {aiMode === "host" ? (
+                  <>
+                    <h2>你想怎么搭？</h2>
+                    <textarea
+                      ref={field}
+                      aria-label="给 AI 的编排请求"
+                      placeholder="例如：给我搭一个比较两个方案的白板，留出证据、图表和结论…"
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      maxLength={8000}
+                    />
+                    <button
+                      disabled={!prompt.trim()}
+                      onClick={() => void handToAI()}
+                    >
+                      交给我的 AI
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <h2>你的 AI 怎么接入</h2>
+                    <p>
+                      这张白板通过 <b>MCP</b> 接入：你的 AI
+                      用沙盘工具直接读写这里， 你在它那边说话，它在这里动手。
+                    </p>
+                    <p>
+                      这里不放对话框——只有真能把任务发出去并收到回应时，
+                      才值得在这里直接说话。接入方式见「接入设置」。
+                    </p>
+                  </>
+                )}
                 {handoff && <p role="status">{handoff}</p>}
                 {(b.spaceActivities?.length || 0) > 0 && (
                   <>

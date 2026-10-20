@@ -233,14 +233,12 @@ export function createServer(
         total: matches.length,
         objects: matches.slice(a.offset, a.offset + a.limit),
         instanceTotal: instances.length,
-        instances: instances
-          .slice(a.offset, a.offset + a.limit)
-          .map((i) => ({
-            id: i.id,
-            spaceId: i.spaceId,
-            type: i.type,
-            title: i.title,
-          })),
+        instances: instances.slice(a.offset, a.offset + a.limit).map((i) => ({
+          id: i.id,
+          spaceId: i.spaceId,
+          type: i.type,
+          title: i.title,
+        })),
         nextOffset:
           a.offset + a.limit < matches.length ? a.offset + a.limit : null,
         instanceNextOffset:

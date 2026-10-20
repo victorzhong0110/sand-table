@@ -510,10 +510,12 @@ export class History {
    * 跳转会同时动两个栈，因此插入位置必须按时间序算，不能随手 push——
    * 否则重做时会把新的改动先应用出去，板面状态会串。
    */
-  jumpTo(entryId: string): {
-    undone: HistoryEntry[];
-    redone: HistoryEntry[];
-  } | undefined {
+  jumpTo(entryId: string):
+    | {
+        undone: HistoryEntry[];
+        redone: HistoryEntry[];
+      }
+    | undefined {
     const at = this.undoStack.findIndex((e) => e.id === entryId);
     if (at >= 0) {
       const undone: HistoryEntry[] = [];

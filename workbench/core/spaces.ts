@@ -138,7 +138,10 @@ export function defaultData(type: string): Record<string, unknown> {
  * Agent's tools and an imported component pack all use this one function, so
  * there is a single set of rules rather than several that drift apart.
  */
-export function checkComponentData(type: string, data: Record<string, unknown>) {
+export function checkComponentData(
+  type: string,
+  data: Record<string, unknown>,
+) {
   if (JSON.stringify(data).length > 40000)
     throw Error("Component data exceeds 40 KB.");
   if (data.url && !safeUrl(data.url))
@@ -147,28 +150,59 @@ export function checkComponentData(type: string, data: Record<string, unknown>) 
     throw Error("Source URL must use HTTP(S).");
   if (type === "chart") {
     const p = data.points;
-    if (!Array.isArray(p)) throw Error("Chart needs up to 100 finite labeled values: points must be an array.");
-    if (p.length > 100) throw Error("Chart needs up to 100 finite labeled values: at most 100 points.");
+    if (!Array.isArray(p))
+      throw Error(
+        "Chart needs up to 100 finite labeled values: points must be an array.",
+      );
+    if (p.length > 100)
+      throw Error(
+        "Chart needs up to 100 finite labeled values: at most 100 points.",
+      );
     p.forEach((v: any, index: number) => {
-      if (!v || typeof v !== "object") throw Error(`Chart needs up to 100 finite labeled values: points[${index}] must be an object.`);
+      if (!v || typeof v !== "object")
+        throw Error(
+          `Chart needs up to 100 finite labeled values: points[${index}] must be an object.`,
+        );
       if (typeof v.label !== "string")
-        throw Error(`Chart needs up to 100 finite labeled values: points[${index}].label must be a string.`);
+        throw Error(
+          `Chart needs up to 100 finite labeled values: points[${index}].label must be a string.`,
+        );
       if (v.label.length > 100)
-        throw Error(`Chart needs up to 100 finite labeled values: points[${index}].label is longer than 100 characters.`);
+        throw Error(
+          `Chart needs up to 100 finite labeled values: points[${index}].label is longer than 100 characters.`,
+        );
       if (!Number.isFinite(v.value))
-        throw Error(`Chart needs up to 100 finite labeled values: points[${index}].value must be a finite number.`);
+        throw Error(
+          `Chart needs up to 100 finite labeled values: points[${index}].value must be a finite number.`,
+        );
     });
   }
   if (type === "table") {
-    if (!Array.isArray(data.columns)) throw Error("Table dimensions or values are invalid: columns must be an array.");
-    if (data.columns.length > 20) throw Error("Table dimensions or values are invalid: at most 20 columns.");
+    if (!Array.isArray(data.columns))
+      throw Error(
+        "Table dimensions or values are invalid: columns must be an array.",
+      );
+    if (data.columns.length > 20)
+      throw Error(
+        "Table dimensions or values are invalid: at most 20 columns.",
+      );
     data.columns.forEach((v, index) => {
-      if (typeof v !== "string") throw Error(`Table dimensions or values are invalid: columns[${index}] must be a string.`);
+      if (typeof v !== "string")
+        throw Error(
+          `Table dimensions or values are invalid: columns[${index}] must be a string.`,
+        );
     });
-    if (!Array.isArray(data.rows)) throw Error("Table dimensions or values are invalid: rows must be an array.");
-    if (data.rows.length > 200) throw Error("Table dimensions or values are invalid: at most 200 rows.");
+    if (!Array.isArray(data.rows))
+      throw Error(
+        "Table dimensions or values are invalid: rows must be an array.",
+      );
+    if (data.rows.length > 200)
+      throw Error("Table dimensions or values are invalid: at most 200 rows.");
     data.rows.forEach((row, rowIndex) => {
-      if (!Array.isArray(row)) throw Error(`Table dimensions or values are invalid: rows[${rowIndex}] must be an array.`);
+      if (!Array.isArray(row))
+        throw Error(
+          `Table dimensions or values are invalid: rows[${rowIndex}] must be an array.`,
+        );
       const columns = data.columns as unknown[];
       if (row.length !== columns.length)
         throw Error(
@@ -184,20 +218,30 @@ export function checkComponentData(type: string, data: Record<string, unknown>) 
   }
   if (type === "task") {
     // 报错要能指到具体位置：items[1].done 应为 boolean，而不是一句"清单值不合法"。
-    if (!Array.isArray(data.items)) throw Error("Checklist values are invalid: items must be an array.");
-    if (data.items.length > 100) throw Error("Checklist values are invalid: at most 100 items.");
+    if (!Array.isArray(data.items))
+      throw Error("Checklist values are invalid: items must be an array.");
+    if (data.items.length > 100)
+      throw Error("Checklist values are invalid: at most 100 items.");
     data.items.forEach((item: any, index: number) => {
       if (!item || typeof item !== "object")
-        throw Error(`Checklist values are invalid: items[${index}] must be an object.`);
+        throw Error(
+          `Checklist values are invalid: items[${index}] must be an object.`,
+        );
       if (typeof item.text !== "string")
-        throw Error(`Checklist values are invalid: items[${index}].text must be a string.`);
+        throw Error(
+          `Checklist values are invalid: items[${index}].text must be a string.`,
+        );
       if (typeof item.done !== "boolean")
-        throw Error(`Checklist values are invalid: items[${index}].done must be a boolean.`);
+        throw Error(
+          `Checklist values are invalid: items[${index}].done must be a boolean.`,
+        );
     });
   }
   if (type === "events") {
-    if (!Array.isArray(data.events)) throw Error("At most 100 current events: events must be an array.");
-    if (data.events.length > 100) throw Error("At most 100 current events: at most 100 events.");
+    if (!Array.isArray(data.events))
+      throw Error("At most 100 current events: events must be an array.");
+    if (data.events.length > 100)
+      throw Error("At most 100 current events: at most 100 events.");
   }
 }
 export function safeUrl(value: unknown) {

@@ -16,10 +16,7 @@ import {
   presentationsFor,
 } from "./content.ts";
 import { History, appendAudit } from "./history.ts";
-import type {
-  HistoryRecord,
-  HistorySnapshot,
-} from "./history.ts";
+import type { HistoryRecord, HistorySnapshot } from "./history.ts";
 import type {
   AuditEntry,
   BoardStateKey,
@@ -694,9 +691,7 @@ export class BoardStore {
       const value = snapshot.value;
       if (value === null) delete (b as unknown as Record<string, unknown>)[key];
       else
-        (b as unknown as Record<string, unknown>)[key] = structuredClone(
-          value,
-        );
+        (b as unknown as Record<string, unknown>)[key] = structuredClone(value);
       return;
     }
     if (snapshot.target === "object") {
@@ -1202,8 +1197,7 @@ export class BoardStore {
       ],
       canUndo: h.canUndo,
       canRedo: h.canRedo,
-      note:
-        "撤销按你的意图分组：一次连续输入、一次拖动算一步。审计日志与撤销导航分开，外部效果（已发布的改动、已运行的任务）不在撤销栈里。",
+      note: "撤销按你的意图分组：一次连续输入、一次拖动算一步。审计日志与撤销导航分开，外部效果（已发布的改动、已运行的任务）不在撤销栈里。",
     };
   }
 
