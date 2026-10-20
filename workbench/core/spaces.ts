@@ -94,19 +94,18 @@ export const nativeContentTypes = [
  * 不能一律用默认的 280×180 —— 那是「领域语义进了内核」的反面。
  */
 export function findComponentSpec(type: string) {
-  const builtin = componentTypes.find((c) => c.type === type);
-  if (builtin) return builtin;
+  /* 领域声明优先：它更具体（有图标与材质），内置清单只是兜底。 */
   const domain = findComponentType(type);
-  return domain
-    ? {
-        type: domain.type,
-        title: domain.title,
-        width: 280,
-        height: 180,
-        ...(domain.icon ? { icon: domain.icon } : {}),
-        ...(domain.material ? { material: domain.material } : {}),
-      }
-    : undefined;
+  const builtin = componentTypes.find((c) => c.type === type);
+  if (!domain) return builtin;
+  return {
+    type: domain.type,
+    title: domain.title,
+    width: builtin?.width ?? 280,
+    height: builtin?.height ?? 180,
+    ...(domain.icon ? { icon: domain.icon } : {}),
+    ...(domain.material ? { material: domain.material } : {}),
+  };
 }
 
 /** 指向外部资源的类型：内容是引用，失效必须可识别。 */

@@ -23,6 +23,8 @@ import {
   registerAllDomains,
   registerCodeDomainSync,
 } from "../domains/index.ts";
+import { registerConnectorTools } from "../connectors/tools.ts";
+import { folderConnector } from "../connectors/folder.ts";
 import { boardSummary } from "../core/results.ts";
 import { BoardStore } from "../core/store.ts";
 import { WorkspaceStore } from "../core/workspace.ts";
@@ -556,6 +558,10 @@ export function createServer(
   registerChangeTools(tool, changes);
   registerSpaceTools(tool, spaces);
   registerPackTools(tool, store);
+  /* 连接器的读工具：工具名与描述都来自能力声明，
+     声明里没有的种类，调用时会被拒绝并说明原因。
+     只注册只读的 folder 连接器——Git 的写入走既有确认链路，不在这里开口子。 */
+  registerConnectorTools(tool, [folderConnector]);
   /* 多工作空间：只有配置了工作空间根目录才有意义（否则无处可列）。 */
   if (options?.workspaceRoot) {
     const manager = createWorkspaceManager(

@@ -409,6 +409,7 @@ test("D11 MCP 工具清单没有静默变化", async () => {
       "sand_read_board",
       "sand_read_component",
       "sand_read_context",
+      "sand_read_folder",
       "sand_read_intent_arrangement",
       "sand_read_intents",
       "sand_read_object",

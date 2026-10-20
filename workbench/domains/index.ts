@@ -24,11 +24,15 @@ export const builtinPack: DomainPack = {
   version: 1,
   description: "便签、标题、指标、状态、图表、表格等通用内容类型。",
   objectTypes: [
-    ...(nativeContentTypes as readonly string[]).map((type) => ({
-      type,
-      title: componentTypes.find((c) => c.type === type)?.title ?? type,
-      defaultData: defaultData(type),
-    })),
+    /* 「code」由代码领域包认领：注册表按注册顺序取先注册者，
+       内置包先注册的话，代码片段的领域规则就永远不触发。 */
+    ...(nativeContentTypes as readonly string[])
+      .filter((type) => type !== "code")
+      .map((type) => ({
+        type,
+        title: componentTypes.find((c) => c.type === type)?.title ?? type,
+        defaultData: defaultData(type),
+      })),
     ...(referenceContentTypes as readonly string[]).map((type) => ({
       type,
       title: componentTypes.find((c) => c.type === type)?.title ?? type,
