@@ -9,6 +9,7 @@ export function initializeSpaces(b: Board) {
   syncSourceInstances(b);
 }
 export function syncSourceInstances(b: Board) {
+  if (b.autoProjectSources === false) return;
   const previous = new Set(
     b.instances.filter((c) => c.objectId).map((c) => c.objectId),
   );

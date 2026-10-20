@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Board } from "../core/model.ts";
+import { componentTypes } from "../core/spaces.ts";
 import type { Camera, ComponentInstance, Rect } from "../core/spaces.ts";
 import { ComponentRenderer } from "./ComponentRenderer.tsx";
 type Props = {
@@ -221,6 +222,42 @@ export function SpaceCanvas({
         ref={canvas}
         className="canvas"
         aria-label="项目白板"
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("application/x-sand-component")) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          }
+        }}
+        onDrop={(e) => {
+          const raw = e.dataTransfer.getData("application/x-sand-component");
+          if (!raw) return;
+          e.preventDefault();
+          try {
+            const item = JSON.parse(raw);
+            if (typeof item.type !== "string" || typeof item.title !== "string")
+              return;
+            const size = componentTypes.find((c) => c.type === item.type);
+            const box = e.currentTarget.getBoundingClientRect();
+            const worldTop =
+              (e.currentTarget.querySelector(".world") as HTMLElement)
+                ?.offsetTop || 0;
+            void operate({
+              kind: "create",
+              type: item.type,
+              title: item.title,
+              data: item.data || {},
+              ...(item.objectId ? { objectId: item.objectId } : {}),
+              rect: {
+                x: (e.clientX - box.left - camera.x) / camera.zoom,
+                y: (e.clientY - box.top - worldTop - camera.y) / camera.zoom,
+                width: size?.width || 280,
+                height: size?.height || 180,
+                pinned: false,
+              },
+            });
+            clearFilters();
+          } catch {}
+        }}
         onPointerDown={(e) => {
           if (e.target !== e.currentTarget) return;
           drag.current = {
@@ -291,8 +328,15 @@ export function SpaceCanvas({
             });
             void operate({ kind: "select", ids: picked.map((c) => c.id) });
             setLasso(undefined);
-          } else if (d)
-            void operate({ kind: "camera", camera: live.current.camera });
+          } else if (d) {
+            if (
+              Math.abs(live.current.camera.x - d.base.x) +
+                Math.abs(live.current.camera.y - d.base.y) <
+              4
+            )
+              void operate({ kind: "select", ids: [] });
+            else void operate({ kind: "camera", camera: live.current.camera });
+          }
         }}
       >
         <div className="canvas-hint">
@@ -425,8 +469,7 @@ export function SpaceCanvas({
                   height: r.height,
                 }}
                 onClick={(e) => {
-                  if (mode !== "arrange" && !busy)
-                    void select(c.id, e.shiftKey);
+                  if (mode !== "arrange") void select(c.id, e.shiftKey);
                 }}
                 onDoubleClick={() => {
                   if (c.type === "board" || c.type === "space-link")
@@ -528,6 +571,26 @@ export function SpaceCanvas({
                   }
                 }}
               >
+                {b.spaceActivities
+                  ?.filter((a) => a.instanceIds.includes(c.id))
+                  .slice(0, 1)
+                  .map((a) => (
+                    <span
+                      className="spatial-activity"
+                      key={a.agentId}
+                      title={a.task + " · " + a.action + " · Agent 自报"}
+                    >
+                      ●{" "}
+                      {a.stale
+                        ? "最后已知"
+                        : a.state === "running"
+                          ? "处理中"
+                          : a.state === "done"
+                            ? "已完成"
+                            : "等待"}{" "}
+                      · {a.agentId}
+                    </span>
+                  ))}
                 {r.pinned && <span className="pin-badge">已固定</span>}
                 {focusedGuide && c.objectId && routeIds.has(c.objectId) && (
                   <span className="step-badge">
@@ -570,11 +633,12 @@ export function SpaceCanvas({
             );
           })}
         </div>
-        {!filtered.length && (
-          <p className="empty">
-            没有匹配对象。尝试切换到文件或清除筛选，或从组件面板添加内容。
-          </p>
-        )}
+        {!filtered.length &&
+          (query || b.instances.some((c) => c.spaceId === view.spaceId)) && (
+            <p className="empty">
+              没有匹配对象。尝试切换到文件或清除筛选，或从组件面板添加内容。
+            </p>
+          )}
         {lasso && (
           <div
             className="lasso"

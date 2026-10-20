@@ -10,5 +10,5 @@ for (let i = 0; i < args.length; i++) {
     );
   roots.push(args[++i]);
 }
-const { server } = createServer(bind(roots));
+const { server } = createServer(roots.length ? bind(roots) : []);
 await server.connect(new StdioServerTransport());

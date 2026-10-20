@@ -18,7 +18,8 @@
     "test:full": "npm run package:mcpb && node --experimental-strip-types tests/full.ts",
     "acceptance": "node --experimental-strip-types acceptance/kit.ts",
     "package:mcpb": "node --experimental-strip-types scripts/package-mcpb.ts",
-    "test:performance": "node --experimental-strip-types tests/performance.ts"
+    "test:performance": "node --experimental-strip-types tests/performance.ts",
+    "test:blank": "node --experimental-strip-types tests/blank.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.0.0",

@@ -88,16 +88,29 @@ export type Group = {
   objectIds: string[];
   instanceIds?: string[];
 };
+export type SpaceActivity = {
+  agentId: string;
+  spaceId: string;
+  instanceIds: string[];
+  task: string;
+  action: string;
+  state: "running" | "waiting" | "done" | "unknown";
+  reportedAt: number;
+  stale?: boolean;
+};
 export type Board = Projection & {
   id: string;
   revision: number;
   title: string;
   expiresAt: number;
+  presentation?: "canvas" | "code";
+  autoProjectSources?: boolean;
   selection: string[];
   placements: Record<string, Placement>;
   notes: Record<string, string>;
   groups: Group[];
   activities: Activity[];
+  spaceActivities?: SpaceActivity[];
   explanations: Explanation[];
   guides: Guide[];
   spaces: Space[];

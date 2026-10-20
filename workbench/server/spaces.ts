@@ -459,6 +459,46 @@ export function registerSpaceTools(tool: RegisterTool, spaces: Spaces) {
     true,
   );
   tool(
+    "sand_report_space_activity",
+    "Report actual last-known Agent work in a whiteboard space without requiring a code workspace. This is an Agent self-report, not live process observation.",
+    {
+      ...board,
+      agentId: id,
+      spaceId: id,
+      instanceIds: z.array(id).max(30),
+      task: z.string().min(1).max(1000),
+      action: z.string().min(1).max(300),
+      state: z.enum(["running", "waiting", "done", "unknown"]),
+    },
+    (a) => {
+      const b = spaces.store.get(a.boardId);
+      if (
+        !b.spaces.some((s) => s.id === a.spaceId) ||
+        a.instanceIds.some(
+          (id) =>
+            !b.instances.some((i) => i.id === id && i.spaceId === a.spaceId),
+        )
+      )
+        throw Error("Activity must match actual space and instance IDs.");
+      b.spaceActivities = (b.spaceActivities || []).filter(
+        (r) => r.agentId !== a.agentId,
+      );
+      if (b.spaceActivities.length >= 24)
+        throw Error("Agent report limit reached.");
+      b.spaceActivities.push({
+        agentId: a.agentId,
+        spaceId: a.spaceId,
+        instanceIds: a.instanceIds,
+        task: a.task,
+        action: a.action,
+        state: a.state,
+        reportedAt: Date.now(),
+      });
+      b.revision++;
+      return spaces.store.read(b.id);
+    },
+  );
+  tool(
     "sand_open_view",
     "Open an ephemeral independent view of the shared board.",
     { ...board, viewId: id },

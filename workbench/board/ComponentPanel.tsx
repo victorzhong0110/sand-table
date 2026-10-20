@@ -9,8 +9,10 @@ export function ComponentPanel({
   operate,
   action,
   selectNew,
+  detailsOnly = false,
 }: {
   board: Board;
+  detailsOnly?: boolean;
   viewId: string;
   busy: boolean;
   operate: (op: any) => Promise<any>;
@@ -36,66 +38,70 @@ export function ComponentPanel({
   }
   return (
     <section>
-      <span className="eyebrow">COMPOSE YOUR SPACE</span>
-      <h2>组件与编排</h2>
-      <label>
-        组件类型
-        <select
-          aria-label="组件类型"
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-        >
-          {componentTypes
-            .filter((t) => !["object", "space-link"].includes(t.type))
-            .map((t) => (
-              <option key={t.type} value={t.type}>
-                {t.title}
-              </option>
-            ))}
-        </select>
-      </label>
-      <label>
-        组件名称
-        <input
-          aria-label="组件名称"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-      </label>
-      <button disabled={busy || !view} onClick={() => void create()}>
-        添加组件
-      </button>
-      <h3>场景入口</h3>
-      <button
-        disabled={busy}
-        onClick={() =>
-          void operate({
-            kind: "create",
-            type: "board",
-            title: "Bug 修复工作区",
-            data: { preset: "bug" },
-          }).then(selectNew)
-        }
-      >
-        添加 Bug 修复白板
-      </button>
-      <button
-        disabled={busy}
-        onClick={() =>
-          void operate({
-            kind: "create",
-            type: "board",
-            title: "研究比较白板",
-            data: { preset: "research" },
-          }).then(selectNew)
-        }
-      >
-        添加研究比较白板
-      </button>
-      <p className="muted">
-        进入子白板后可加入任务、行为约定、对比、图表或文件引用。组件也可由你的
-        Agent 配置。
-      </p>
+      {!detailsOnly && (
+        <>
+          <span className="eyebrow">COMPOSE YOUR SPACE</span>
+          <h2>组件与编排</h2>
+          <label>
+            组件类型
+            <select
+              aria-label="组件类型"
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+            >
+              {componentTypes
+                .filter((t) => !["object", "space-link"].includes(t.type))
+                .map((t) => (
+                  <option key={t.type} value={t.type}>
+                    {t.title}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label>
+            组件名称
+            <input
+              aria-label="组件名称"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </label>
+          <button disabled={busy || !view} onClick={() => void create()}>
+            添加组件
+          </button>
+          <h3>场景入口</h3>
+          <button
+            disabled={busy}
+            onClick={() =>
+              void operate({
+                kind: "create",
+                type: "board",
+                title: "Bug 修复工作区",
+                data: { preset: "bug" },
+              }).then(selectNew)
+            }
+          >
+            添加 Bug 修复白板
+          </button>
+          <button
+            disabled={busy}
+            onClick={() =>
+              void operate({
+                kind: "create",
+                type: "board",
+                title: "研究比较白板",
+                data: { preset: "research" },
+              }).then(selectNew)
+            }
+          >
+            添加研究比较白板
+          </button>
+          <p className="muted">
+            进入子白板后可加入任务、行为约定、对比、图表或文件引用。组件也可由你的
+            Agent 配置。
+          </p>
+        </>
+      )}
       {selected.length > 0 && (
         <>
           <h3>选中的展示实例</h3>
