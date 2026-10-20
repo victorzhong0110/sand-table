@@ -190,8 +190,12 @@ test("插件结果按种类映射到组件，认不出的走通用降级", async
     source: "DSH 插件：文献检索",
   });
   assert.equal(paper.type, "evidence");
-  assert.equal(paper.data.citation.uri, "file:///papers/a.pdf");
-  assert.equal((paper.data.citation as { fragment?: string }).fragment, "p.42");
+  const citation = paper.data.citation as {
+    uri: string;
+    fragment?: string;
+  };
+  assert.equal(citation.uri, "file:///papers/a.pdf");
+  assert.equal(citation.fragment, "p.42");
   assert.equal(paper.source, "DSH 插件：文献检索");
 
   const data = mapHostResult({
