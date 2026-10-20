@@ -174,10 +174,25 @@ try {
   await frame()
     .getByRole("button", { name: /转换每个值/ })
     .click();
-  assert.equal(
-    (await call("sand_read_context", { boardId: browserId })).objects[0].title,
-    "toVal",
-  );
+  const afterStep = await call("sand_read_context", { boardId: browserId });
+  if (afterStep.objects[0]?.title !== "toVal") {
+    const b2 = await call("sand_read_board", { boardId: browserId });
+    console.log("DIAG guide:", JSON.stringify(b2.guides));
+    console.log("DIAG selection:", JSON.stringify(b2.selection));
+    console.log(
+      "DIAG board objects:",
+      JSON.stringify(b2.objects.map((o: any) => o.title)),
+    );
+    console.log(
+      "DIAG frame error:",
+      await frame()
+        .locator('[role="alert"]')
+        .first()
+        .innerText()
+        .catch(() => "(none)"),
+    );
+  }
+  assert.equal(afterStep.objects[0]?.title, "toVal");
   await page.reload();
   await frame()
     .getByRole("heading", { name: "项目总览", exact: true })
