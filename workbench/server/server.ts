@@ -323,49 +323,8 @@ export function createServer(
       throw Error("Unknown object.");
     },
   );
-  tool(
-    "sand_undo",
-    "Undo the last user intent on this board. Edits are grouped by intent; external effects (published changes, executed tasks) are not undone by this.",
-    board,
-    (a) => {
-      const r = store.undo(a.boardId, "agent", "agent");
-      return {
-        boardId: a.boardId,
-        undone: r.undone,
-        label: r.entry?.label,
-        board: r.board,
-      };
-    },
-  );
-  tool(
-    "sand_redo",
-    "Redo the last undone user intent on this board.",
-    board,
-    (a) => {
-      const r = store.redo(a.boardId, "agent", "agent");
-      return {
-        boardId: a.boardId,
-        redone: r.redone,
-        label: r.entry?.label,
-        board: r.board,
-      };
-    },
-  );
-  tool(
-    "sand_history",
-    "The board's reversible history: what can be undone, what can be redone, and one readable record per step. Records are grouped by intent; external effects (published changes, executed tasks) are never on it.",
-    board,
-    (a) => store.history(a.boardId),
-  );
-  tool(
-    "sand_undo_to",
-    "Jump the board to a recorded history step: the board returns to the content that step produced. Pass a recordId from sand_history.",
-    { ...board, recordId: z.string().min(1).max(200) },
-    (a) => {
-      const r = store.jumpTo(a.boardId, a.recordId, "agent", "agent");
-      return { boardId: a.boardId, recordId: a.recordId, board: r.board };
-    },
-  );
+  /* 历史工具（sand_undo / sand_redo / sand_history / sand_undo_to）注册在
+     server/spaces.ts —— 同一个名字注册两遍会让 MCP server 起不来。 */
   tool(
     "sand_workspace_status",
     "Report whether the workspace is persisted, where it is stored, and the last save error if any. A failed save is never reported as saved.",

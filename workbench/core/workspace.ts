@@ -522,6 +522,10 @@ const normalizeHistoryEntry = (raw: unknown): HistoryEntry => {
     author: asString(r.author, "unknown"),
     // kind 是 I12 的判别字段：丢了它，存一次盘之后这条动作就再也说不清是不是外部效果。
     ...(typeof r.kind === "string" && r.kind ? { kind: r.kind } : {}),
+    // authorKind 决定面板上这条是人做的还是 Agent 做的：同样不能丢。
+    ...(r.authorKind === "agent" || r.authorKind === "human"
+      ? { authorKind: r.authorKind }
+      : {}),
     patch: {
       target: normalizePatchTarget(patch.target),
       id: asString(patch.id, ""),

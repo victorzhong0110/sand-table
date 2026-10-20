@@ -177,6 +177,11 @@ export type HistoryEntry = {
    * 缺失时按未知处理：白板撤销宁可漏撤销，也不得冒充外部回滚。
    */
   kind?: string;
+  /**
+   * 谁做的：人还是 Agent。面板要能一眼分开两类记录，
+   * 所以这一项要跟着条目落盘，不能在读回时猜。
+   */
+  authorKind?: "human" | "agent";
   patch: Patch;
 };
 

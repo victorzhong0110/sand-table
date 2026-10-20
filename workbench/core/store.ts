@@ -642,6 +642,7 @@ export class BoardStore {
       at: this.now(),
       author: entry.author,
       kind: entry.kind,
+      ...(entry.authorKind ? { authorKind: entry.authorKind } : {}),
       patch: entry.patch,
     });
     b.history = h.state;
@@ -857,6 +858,7 @@ export class BoardStore {
     objectId: string,
     author: string,
     intentId: string = randomUUID(),
+    authorKind: "human" | "agent" = "human",
   ) {
     const clone = cloneWorkspaceObject(
       b.contentObjects,
@@ -872,6 +874,7 @@ export class BoardStore {
       kind: "duplicate",
       label: `复制出「${clone.title}」`,
       author,
+      authorKind,
       patch: {
         target: "batch",
         id: clone.id,
@@ -899,6 +902,7 @@ export class BoardStore {
     onReferenced: "refuse" | "detach",
     author: string,
     intentId: string = randomUUID(),
+    authorKind: "human" | "agent" = "human",
   ) {
     // 撤销快照要在删除**之前**取：删完再取就只剩「已不存在」，
     // 撤销时无法把对象、引用它的展示和关系放回去。
@@ -952,6 +956,7 @@ export class BoardStore {
       after.push({ target: "relation", id, value: null });
     this.record(b, {
       intentId,
+      authorKind,
       kind: "delete-object",
       label: "删除内容对象",
       author,
@@ -974,6 +979,7 @@ export class BoardStore {
     },
     author: string,
     intentId: string = randomUUID(),
+    authorKind: "human" | "agent" = "human",
   ) {
     const created = relateObjects(b.objectRelations, {
       id: randomUUID(),
@@ -991,6 +997,7 @@ export class BoardStore {
     b.contentRevision++;
     this.record(b, {
       intentId,
+      authorKind,
       kind: "create-relation",
       label: `建立关系「${input.kind}」`,
       author,
@@ -1017,6 +1024,7 @@ export class BoardStore {
     relationId: string,
     author: string,
     intentId: string = randomUUID(),
+    authorKind: "human" | "agent" = "human",
   ) {
     const before = b.objectRelations.find((r) => r.id === relationId);
     if (!before) throw Error(`未知关系：${relationId}`);
@@ -1027,6 +1035,7 @@ export class BoardStore {
       kind: "delete-relation",
       label: "移除关系",
       author,
+      authorKind,
       patch: {
         target: "batch",
         id: relationId,
@@ -1183,7 +1192,8 @@ export class BoardStore {
       label: entry.label,
       at: entry.at,
       author: entry.author,
-      authorKind: "human",
+      // 缺这一项时按人处理：读回旧文件不因为少一个字段就崩。
+      authorKind: entry.authorKind === "agent" ? "agent" : "human",
       kind,
       intentId: entry.intentId,
     });

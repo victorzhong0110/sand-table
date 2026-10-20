@@ -328,6 +328,8 @@ const copyEntry = (entry: HistoryEntry): HistoryEntry => {
     },
   };
   if (entry.kind !== undefined) copied.kind = entry.kind;
+  // authorKind 决定面板上这条是人做的还是 Agent 做的：复制时不能丢。
+  if (entry.authorKind !== undefined) copied.authorKind = entry.authorKind;
   return copied;
 };
 
@@ -352,6 +354,7 @@ const copyEntryStructure = (entry: HistoryEntry): HistoryEntry => {
     },
   };
   if (entry.kind !== undefined) copied.kind = entry.kind;
+  if (entry.authorKind !== undefined) copied.authorKind = entry.authorKind;
   return copied;
 };
 

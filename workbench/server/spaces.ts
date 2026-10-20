@@ -226,6 +226,9 @@ export class Spaces {
       "intentId" in op && typeof op.intentId === "string"
         ? op.intentId
         : randomUUID();
+    /* 作者就是 Agent 时，历史记录要标成 agent：面板上人做的和 Agent 做的要分得开。 */
+    const authorKind: "human" | "agent" =
+      author === "agent" ? "agent" : "human";
     /** 记录展示实例的变化：只记录真正变了的（值为 null 表示该侧不存在）。 */
     const recordInstances = (
       ids: string[],
@@ -398,6 +401,7 @@ export class Spaces {
           { type, title: op.title, data },
           author,
           intentKey,
+          authorKind,
         );
         binding = { kind: "object", objectId: object.id };
         data = {};
@@ -420,6 +424,7 @@ export class Spaces {
           },
           author,
           intentKey,
+          authorKind,
         );
         binding = { kind: "object", objectId: object.id };
         data = {};
@@ -463,6 +468,7 @@ export class Spaces {
                 { type, title, data: defaultData(type) },
                 "preset",
                 intentKey,
+                authorKind,
               )
             : undefined;
         b.instances.push({
@@ -567,6 +573,7 @@ export class Spaces {
             op.expectedVersion ?? object.version,
             author,
             intentKey,
+            authorKind,
           );
         }
         applyAppearance(c);
@@ -802,7 +809,13 @@ export class Spaces {
         c.binding?.kind === "object" ? c.binding.objectId : undefined;
       if (!bound) throw Error("This component has no independent content.");
       if (b.instances.length >= 2200) throw Error("Component limit reached.");
-      const clone = this.store.cloneContent(b, bound, author, intentKey);
+      const clone = this.store.cloneContent(
+        b,
+        bound,
+        author,
+        intentKey,
+        authorKind,
+      );
       const config = componentTypes.find((t) => t.type === c.type);
       const index = b.instances.filter((x) => x.spaceId === v.spaceId).length;
       const instance = {
@@ -840,6 +853,7 @@ export class Spaces {
         op.onReferenced || "refuse",
         author,
         intentKey,
+        authorKind,
       );
     }
     if (op.kind === "relate") {
@@ -865,7 +879,7 @@ export class Spaces {
       );
     }
     if (op.kind === "unlinkRelation")
-      this.store.unlinkContent(b, op.relationId, author, intentKey);
+      this.store.unlinkContent(b, op.relationId, author, intentKey, authorKind);
 
     b.focusedViewId = viewId;
     v.updatedAt = Date.now();
@@ -1070,13 +1084,13 @@ export function registerSpaceTools(tool: RegisterTool, spaces: Spaces) {
   );
   tool(
     "sand_history",
-    "List the board's reversible content history. Undo pushes a new record instead of popping a stack, so undoing an undo brings the change back. Scope is board content only — intents, proposals and files are never reverted.",
+    "The board's reversible history: what can be undone, what can be redone, and one readable record per step. Edits are grouped by intent (one continuous typing or one drag is one step); external effects (published changes, executed tasks) are never on it. Scope is board content only — intents, proposals and files are never reverted.",
     { ...board },
     (a) => spaces.history(a.boardId),
   );
   tool(
     "sand_undo",
-    "Revert the newest board content change by pushing a new reversible record (not by popping a stack). Undo it again to bring the change back. Omit revision to act on the server's current board.",
+    "Undo the last user intent on this board. Edits are grouped by intent, so one continuous typing or one drag goes back in one step. Omit revision to act on the server's current board.",
     {
       ...board,
       revision: z.number().int().optional(),
@@ -1086,7 +1100,7 @@ export function registerSpaceTools(tool: RegisterTool, spaces: Spaces) {
   );
   tool(
     "sand_redo",
-    "Re-apply the change that the newest undo record reverted. Only available when the newest record is an undo or redo.",
+    "Redo the last undone user intent on this board.",
     {
       ...board,
       revision: z.number().int().optional(),
@@ -1096,7 +1110,7 @@ export function registerSpaceTools(tool: RegisterTool, spaces: Spaces) {
   );
   tool(
     "sand_undo_to",
-    "Jump the board content back to a recorded step. The jump is itself a new reversible record.",
+    "Jump the board to a recorded history step: the board returns to the content that step produced. Pass a recordId from sand_history.",
     {
       ...board,
       revision: z.number().int().optional(),

@@ -336,6 +336,32 @@ test("板级内容也能撤销：嵌套白板、主题、组件包", () => {
   assert.equal(b3.spaces.length, spacesBefore, "嵌套白板也可以被撤销");
 });
 
+test("历史记录分得清是人改的还是 Agent 改的", () => {
+  const { op, store, boardId, spaces } = setup();
+  op({ kind: "create", type: "text", title: "人写的", data: { text: "一" } });
+  const instance = store.get(boardId).instances[0];
+  // 同一条链路，但作者是 Agent。
+  spaces.update(
+    boardId,
+    store.get(boardId).revision,
+    "view-a",
+    {
+      kind: "update",
+      instanceId: instance.id,
+      data: { text: "二" },
+      baseData: { text: "一" },
+    },
+    "agent",
+  );
+  const history = store.history(boardId);
+  const agentRecord = history.records.find((r) => r.authorKind === "agent");
+  assert.ok(agentRecord, "Agent 的记录标成了 agent");
+  assert.ok(
+    history.records.some((r) => r.authorKind === "human"),
+    "人做的记录标成了 human",
+  );
+});
+
 test("保存后重开：内容、关系、展示、嵌套与历史都回来", () => {
   const root = mkdtempSync(join(tmpdir(), "sand-integration-"));
   try {
