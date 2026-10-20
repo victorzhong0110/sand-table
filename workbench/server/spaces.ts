@@ -330,17 +330,22 @@ export class Spaces {
             );
           checkData(c.type, op.data);
         }
-        this.store.updateContent(
-          b,
-          bound,
-          {
-            ...(op.title !== undefined ? { title: op.title } : {}),
-            ...(op.data ? { data: op.data } : {}),
-          },
-          op.expectedVersion ?? object.version,
-          author,
-          op.intentId,
-        );
+        // 标题与内容属于对象；外观属于这一次展示。
+        // 两者要分开落地：外观被内容分支吞掉的话，绑定了对象的卡片就没法改显示方式。
+        if (op.title !== undefined || op.data) {
+          this.store.updateContent(
+            b,
+            bound,
+            {
+              ...(op.title !== undefined ? { title: op.title } : {}),
+              ...(op.data ? { data: op.data } : {}),
+            },
+            op.expectedVersion ?? object.version,
+            author,
+            op.intentId,
+          );
+        }
+        if (op.appearance) c.appearance = { ...c.appearance, ...op.appearance };
         c.updatedAt = Date.now();
         c.author = author;
       } else {

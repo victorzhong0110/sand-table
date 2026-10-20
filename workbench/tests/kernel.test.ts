@@ -262,10 +262,7 @@ test("审计日志与撤销栈是两个概念", () => {
   op({ kind: "undo" });
   const after = store.get(boardId);
   assert.equal(after.history.undo.length, undoDepth - 1, "撤销栈少了一项");
-  assert.ok(
-    after.audit.length > auditBefore,
-    "撤销本身也进审计日志（只追加）",
-  );
+  assert.ok(after.audit.length > auditBefore, "撤销本身也进审计日志（只追加）");
   assert.ok(
     after.audit.some((a) => a.via === "undo"),
     "审计记录标注了这是撤销触发的",
@@ -329,15 +326,15 @@ test("工作空间落盘后重开仍在：重启不该清空作品", () => {
 
     // 换一个新的 store 实例，模拟重启
     const restarted = new BoardStore();
-    restarted.attachPersistence(workspacePort(new WorkspaceStore(root)), "default");
+    restarted.attachPersistence(
+      workspacePort(new WorkspaceStore(root)),
+      "default",
+    );
     const reopened = restarted.open(empty, "空白工作区");
     const restored = restarted.get(reopened.id);
     assert.equal(restored.contentObjects.length, 1, "重启后内容还在");
     assert.equal(restored.contentObjects[0].title, "林澈");
-    assert.equal(
-      restored.contentObjects[0].data!.text,
-      "在港口长大",
-    );
+    assert.equal(restored.contentObjects[0].data!.text, "在港口长大");
     assert.equal(
       restored.instances.filter((i) => i.binding?.kind === "object").length,
       1,
@@ -387,7 +384,10 @@ test("删除对象后撤销能把它连同引用一起放回来", () => {
   const b2 = store.get(boardId);
   assert.equal(b2.contentObjects.filter((o) => o.id === objectId).length, 0);
   assert.equal(b2.objectRelations.length, 0, "引用一并移除");
-  assert.equal(b2.instances.filter((i) => i.binding?.objectId === objectId).length, 0);
+  assert.equal(
+    b2.instances.filter((i) => i.binding?.objectId === objectId).length,
+    0,
+  );
 
   op({ kind: "undo" });
   const b3 = store.get(boardId);
@@ -489,4 +489,60 @@ test("每个可撤销的动作都声明了种类；外部效果进不了撤销�
   });
   assert.equal(external.canUndo, false, "外部效果不进入白板撤销栈");
   assert.equal(external.refused.length, 1);
+});
+
+test("绑定了内容的卡片：改外观落在这一次展示上，不动对象", () => {
+  const { store, op, boardId } = setup();
+  op({
+    kind: "create",
+    type: "text",
+    title: "人物：林澈",
+    data: { text: "在港口长大，怕水。" },
+  });
+  const created = store.get(boardId);
+  const instance = created.instances.find((i) => i.binding?.kind === "object")!;
+  const objectId = instance.binding!.objectId;
+  const version = created.contentObjects.find(
+    (o) => o.id === objectId,
+  )!.version;
+
+  // 外观是展示层属性：只改这一次展示的图标与显示方式。
+  op({
+    kind: "update",
+    instanceId: instance.id,
+    appearance: { detail: "icon", icon: "task" },
+  });
+
+  const b = store.get(boardId);
+  const after = b.instances.find((i) => i.id === instance.id)!;
+  assert.equal(after.appearance?.detail, "icon");
+  assert.equal(after.appearance?.icon, "task");
+  // 对象内容没有被外观改动波及，也没有被写脏版本。
+  const object = b.contentObjects.find((o) => o.id === objectId)!;
+  assert.equal(object.version, version, "改外观不算改内容");
+  assert.equal(object.data?.text, "在港口长大，怕水。");
+});
+
+test("预设里的原生内容同样是一等对象，不是卡在实例上的数据", () => {
+  const { store, op, boardId } = setup();
+  op({
+    kind: "create",
+    type: "board",
+    title: "研究比较白板",
+    data: { preset: "research" },
+  });
+  const b = store.get(boardId);
+  const chart = b.instances.find((i) => i.type === "chart");
+  assert.ok(chart, "预设里有图表");
+  assert.equal(chart!.binding?.kind, "object", "图表绑定到内容对象");
+  const object = b.contentObjects.find(
+    (o) => o.id === chart!.binding!.objectId,
+  );
+  assert.ok(object, "图表有对应的内容对象");
+  assert.equal(object!.type, "chart");
+  assert.deepEqual(chart!.data, {}, "实例不再自带内容副本");
+  assert.ok(
+    resolveContent(chart!, b.contentObjects).data.points,
+    "内容从对象读回",
+  );
 });
