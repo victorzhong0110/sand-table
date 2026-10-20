@@ -539,18 +539,11 @@ export class History {
     }
     const redoAt = this.redoStack.findIndex((e) => e.id === entryId);
     if (redoAt >= 0) {
-      const undone: HistoryEntry[] = [];
       const redone: HistoryEntry[] = [];
-      // 目标已经被撤销过：先把当前已应用的全部撤销，再重做到目标为止。
-      const moved: HistoryEntry[] = [];
-      while (this.undoStack.length) {
-        const entry = this.undoStack.pop();
-        if (!entry) break;
-        moved.push(entry);
-        undone.push(copyEntry(entry));
-      }
-      if (moved.length) this.redoStack.unshift(...moved.reverse());
-      // 重做栈栈顶是最旧的：依次弹出直到目标为止（含目标）。
+      /* 目标已经被撤销过：把它重做回来。
+         注意**不要**先把撤销栈全部撤掉——那会把这条记录之前的内容也一起撤掉，
+         「跳到这条记录刚发生时的样子」就变成了「回到起点」。
+         重做栈栈顶是最旧的，依次弹出直到目标为止（含目标）。 */
       while (this.redoStack.length) {
         const entry = this.redoStack.pop();
         if (!entry) break;
@@ -559,7 +552,7 @@ export class History {
         if (entry.id === entryId) break;
       }
       this.mergeable = false;
-      return { undone, redone };
+      return { undone: [], redone };
     }
     return undefined;
   }
