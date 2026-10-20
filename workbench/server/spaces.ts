@@ -278,14 +278,28 @@ export class Spaces {
         ? [binding.objectId]
         : op.objectId
           ? [op.objectId]
-          : [];      definitions.forEach(([type, title], index) => {
+          : [];
+      definitions.forEach(([type, title], index) => {
         const size = componentTypes.find((t) => t.type === type)!;
+        // 预设里的原生内容同样是一等对象：内容进对象，实例只管位置。
+        const content =
+          isNativeContent(type) || isReferenceContent(type)
+            ? this.store.createContent(
+                b,
+                { type, title, data: defaultData(type) },
+                "preset",
+                op.intentId,
+              )
+            : undefined;
         b.instances.push({
           id: randomUUID(),
           spaceId: String(data.spaceId),
           type,
           title,
-          data: defaultData(type),
+          data: content ? {} : defaultData(type),
+          ...(content
+            ? { binding: { kind: "object", objectId: content.id } }
+            : {}),
           rect: {
             x: (index % 2) * 380,
             y: Math.floor(index / 2) * 270,
@@ -302,16 +316,18 @@ export class Spaces {
       const c = item(op.instanceId);
       // 绑定了内容对象的组件：编辑改的是对象，不是这一张卡。
       // 同一个对象在别处的展示会同步更新（内容共享、布局独立）。
-      const bound = c.binding?.kind === "object" ? c.binding.objectId : undefined;
+      const bound =
+        c.binding?.kind === "object" ? c.binding.objectId : undefined;
       if (bound) {
         const object = b.contentObjects.find((o) => o.id === bound);
-        if (!object)
-          throw Error("这份内容已被删除；请重新选择或重新创建。");
+        if (!object) throw Error("这份内容已被删除；请重新选择或重新创建。");
         if (op.title !== undefined && op.title !== object.title)
           checkTitle(op.title);
         if (op.data) {
           if (c.type === "board" || c.type === "object")
-            throw Error("Use reference/whiteboard actions to change the target.");
+            throw Error(
+              "Use reference/whiteboard actions to change the target.",
+            );
           checkData(c.type, op.data);
         }
         this.store.updateContent(
@@ -337,7 +353,9 @@ export class Spaces {
         }
         if (op.data) {
           if (c.type === "board" || c.type === "object")
-            throw Error("Use reference/whiteboard actions to change the target.");
+            throw Error(
+              "Use reference/whiteboard actions to change the target.",
+            );
           checkData(c.type, op.data);
           if (c.type === "space-link") validSpace(String(op.data.spaceId));
           c.data = structuredClone(op.data);

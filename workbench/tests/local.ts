@@ -31,7 +31,11 @@ async function launch() {
       "--workspace",
       `clsx=${external}`,
     ],
-    { stdio: ["ignore", "pipe", "pipe"] },
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+      // 测试之间互不干扰，也不碰用户真实的工作空间
+      env: { ...process.env, SAND_WORKSPACE_DIR: join(dir, "workspaces") },
+    },
   );
   let output = "";
   await new Promise<void>((resolve, reject) => {

@@ -20,7 +20,11 @@ const service = spawn(
     "--session-file",
     sessionFile,
   ],
-  { stdio: ["ignore", "pipe", "pipe"] },
+  {
+    stdio: ["ignore", "pipe", "pipe"],
+    // 测试之间互不干扰，也不碰用户真实的工作空间
+    env: { ...process.env, SAND_WORKSPACE_DIR: join(root, "workspaces") },
+  },
 );
 let logs = "",
   browser,
@@ -115,7 +119,17 @@ try {
     .getByRole("textbox", { name: "内容", exact: true })
     .fill("先收集证据，再比较方案");
   await frame.getByRole("button", { name: "保存组件", exact: true }).click();
-  b = await until((b) => b.instances[0].data.text === "先收集证据，再比较方案");
+  // 内容在对象里，实例只是展示（P2 的对象/展示分离）。
+  const contentOf = (b: any, instance: any) =>
+    b.contentObjects.find(
+      (o: any) =>
+        o.id === (instance.binding || {}).objectId ||
+        o.id === instance.objectId,
+    );
+  b = await until(
+    (b) =>
+      contentOf(b, b.instances[0])?.data?.text === "先收集证据，再比较方案",
+  );
   const noteId = b.instances[0].id;
   const expandedRect = { ...b.instances[0].rect };
   await frame.getByRole("button", { name: "图标＋标题", exact: true }).click();
@@ -137,7 +151,10 @@ try {
   await frame.getByRole("button", { name: "完整界面", exact: true }).click();
   b = await until((b) => b.instances[0].appearance?.detail === "full");
   assert.deepEqual(b.instances[0].rect, expandedRect);
-  assert.equal(b.instances[0].data.text, "先收集证据，再比较方案");
+  assert.equal(
+    contentOf(b, b.instances[0])?.data?.text,
+    "先收集证据，再比较方案",
+  );
   await page.screenshot({
     path: "artifacts/material-note.png",
     fullPage: true,

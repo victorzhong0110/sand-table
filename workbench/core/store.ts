@@ -106,11 +106,7 @@ export class BoardStore {
     );
     return b;
   }
-  open(
-    p: Projection,
-    title: string,
-    options?: { preset?: "blank" | "code" },
-  ) {
+  open(p: Projection, title: string, options?: { preset?: "blank" | "code" }) {
     this.sweep();
     const preset = options?.preset;
     const applyPreset = (b: Board) => {
@@ -675,11 +671,14 @@ export class BoardStore {
   }
 
   /** 应用一个实体快照：value 为 null 表示删除该实体，否则写入。 */
-  private applySnapshot(b: Board, snapshot: {
-    target: "object" | "presentation" | "relation";
-    id: string;
-    value: unknown;
-  }) {
+  private applySnapshot(
+    b: Board,
+    snapshot: {
+      target: "object" | "presentation" | "relation";
+      id: string;
+      value: unknown;
+    },
+  ) {
     if (snapshot.target === "object") {
       if (snapshot.value === null)
         b.contentObjects = b.contentObjects.filter((o) => o.id !== snapshot.id);
@@ -695,7 +694,9 @@ export class BoardStore {
       if (snapshot.value === null)
         b.instances = b.instances.filter((i) => i.id !== snapshot.id);
       else {
-        const instance = structuredClone(snapshot.value) as (typeof b.instances)[number];
+        const instance = structuredClone(
+          snapshot.value,
+        ) as (typeof b.instances)[number];
         const at = b.instances.findIndex((i) => i.id === instance.id);
         if (at >= 0) b.instances[at] = instance;
         else b.instances.push(instance);
@@ -715,7 +716,11 @@ export class BoardStore {
   /** 应用一次撤销/重做。 */
   private applyPatch(b: Board, patch: Patch, side: "before" | "after") {
     const value = (side === "before" ? patch.before : patch.after) as
-      | { target: "object" | "presentation" | "relation"; id: string; value: unknown }[]
+      | {
+          target: "object" | "presentation" | "relation";
+          id: string;
+          value: unknown;
+        }[]
       | null;
     if (!Array.isArray(value)) return;
     for (const snapshot of value) this.applySnapshot(b, snapshot);
@@ -1024,7 +1029,11 @@ export class BoardStore {
   }
 
   /** 撤销一步。返回被撤销的意图；没有可撤销项时返回 undefined。 */
-  undo(boardId: string, author: string, authorKind: "human" | "agent" = "human") {
+  undo(
+    boardId: string,
+    author: string,
+    authorKind: "human" | "agent" = "human",
+  ) {
     const b = this.get(boardId);
     const h = this.historyFor(b);
     const entry = h.undo();
@@ -1045,7 +1054,11 @@ export class BoardStore {
   }
 
   /** 重做一步。 */
-  redo(boardId: string, author: string, authorKind: "human" | "agent" = "human") {
+  redo(
+    boardId: string,
+    author: string,
+    authorKind: "human" | "agent" = "human",
+  ) {
     const b = this.get(boardId);
     const h = this.historyFor(b);
     const entry = h.redo();
@@ -1115,10 +1128,14 @@ export class BoardStore {
     const all = [...native, ...code];
     const text = query.text?.trim().toLowerCase();
     const filtered = all.filter(
-      (o) => (!query.kind || o.kind === query.kind) && (!text || o.haystack.includes(text)),
+      (o) =>
+        (!query.kind || o.kind === query.kind) &&
+        (!text || o.haystack.includes(text)),
     );
     return {
-      objects: filtered.slice(0, query.limit || 200).map(({ haystack, ...rest }) => rest),
+      objects: filtered
+        .slice(0, query.limit || 200)
+        .map(({ haystack, ...rest }) => rest),
       total: filtered.length,
       counts: {
         native: native.length,

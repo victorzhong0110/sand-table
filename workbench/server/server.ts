@@ -274,7 +274,9 @@ export function createServer(
           object,
           presentations: b.instances
             .filter(
-              (i) => i.binding?.kind === "object" && i.binding.objectId === object.id,
+              (i) =>
+                i.binding?.kind === "object" &&
+                i.binding.objectId === object.id,
             )
             .map((i) => ({
               instanceId: i.id,
@@ -358,7 +360,11 @@ export function createServer(
         refused: store
           .historyRefusals(a.boardId)
           .slice(-10)
-          .map((r) => ({ label: r.entry.label, kind: r.entry.kind, reason: r.reason })),
+          .map((r) => ({
+            label: r.entry.label,
+            kind: r.entry.kind,
+            reason: r.reason,
+          })),
       };
     },
   );
