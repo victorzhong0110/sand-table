@@ -43,7 +43,25 @@
 
 ## 生命周期和资源边界
 
-白板最多 8 个，闲置期限 30 分钟，显式结束／进程退出清空；视图最多 16 个。单板最多 80 空间、2,200 实例、500 人工关系；组件数据 40 KB，图表 100 点，表格 20 列／200 行。媒体每份 2 MB、每板 12 MB。没有状态数据库、事件历史或会话恢复。
+白板最多 8 个，闲置期限 30 分钟；已落盘工作空间的白板不因闲置回收，作品始终在文件里。视图最多 16 个。单板最多 80 空间、2,200 实例、500 人工关系；组件数据 40 KB，图表 100 点，表格 20 列／200 行。媒体每份 2 MB、每板 12 MB。
+
+## 通用工作空间内核（issue #11）
+
+契约与迁移映射：[工作空间内核契约](../../docs/architecture/workspace-kernel.zh-CN.md)。
+
+| 范围 | 实现 | 可重复证据 |
+|---|---|---|
+| 工作空间落盘 | `core/workspace.ts`：原子写、备份回退、版本迁移、导出／导入；`core/persistence.ts` 接线 | workspace、kernel |
+| 原生内容一等公民 | `core/content.ts`：对象／展示实例分离、版本冲突、引用策略、语义关系 | content、kernel |
+| 撤销与审计 | `core/history.ts`：按意图分组的撤销栈、只追加的审计日志、外部效果边界 | history、kernel |
+| 统一读回 | `sand_list_objects` / `sand_read_object`：原生内容与代码对象一起返回，用 `kind` 区分 | kernel、protocol |
+| 保存可观察 | 保存失败与读取失败都进入 `sand_workspace_status`，不显示虚假的「已保存」 | kernel |
+
+工作空间默认落在 `~/.sand-table/workspaces/<ID>/workspace.json`（`--workspace-dir` / `--workspace-id` 可改）。
+去掉 Git、源码索引和 AI 连接后，白板仍可创建内容、编辑、保存、重开。
+
+尚未完成：工作空间选择器与多工作空间管理、导出／导入的界面入口、领域包与连接器（issue #13）、
+小说／科研场景（issue #14）、真人验收（issue #15）。
 
 完整 App 数据置于 _meta.data，模型端整板调用只获摘要。空间分页与选区结果有数量限制，大组件按 ID 单独读取。intentDiff 只比较上次读取快照，不积累历史。
 
@@ -82,6 +100,25 @@
 
 16 项自动测试通过且无跳过，另完成浏览器回归、根启动器／重连、独立 MCPB 完整改动链路和固定大图场景。MCPB 按官方 v0.3 JSON Schema 校验通过。完整路径的页面截图与性能 JSON 随 CI 构建产物提供。测试与开发仓库均不冒充封存真人评估。
 
+
+## 集成轮（issue #20，2026-10-20）
+
+把 #5（交互基线）、#12（交互与接入）、#16（通用工作空间内核）、#19（新架构下的标题与层级修复）
+合成一个可用版本。规格与逐条裁决见
+[集成契约](../../docs/architecture/integration-2026-10.zh-CN.md)。
+
+| 范围 | 实现 | 可重复证据 |
+|---|---|---|
+| 一套历史 | 按意图分组 + 实体快照（object/presentation/relation/board 键）；审计只追加 | `tests/history.test.ts`、`tests/integration.test.ts` |
+| 板级内容可撤销 | 嵌套白板、分组、主题、组件包、布局锚点按键记录 | `tests/integration.test.ts` |
+| 自动保存与并发 | 600ms 防抖；只提交真正改动的字段；同字段冲突明确报错并保留草稿 | `tests/integration.test.ts` |
+| 校验唯一入口 | `core/spaces.ts` 的 `checkComponentData`，报错带下标路径 | `tests/spaces.test.ts`、`tests/packs.test.ts` |
+| 组件包 | 数据型预设包；导入可撤销、随白板落盘；未知类型保留并给提示 | `tests/packs.test.ts` |
+| 标题同源 | 折叠/展开/图标态、无障碍名称、属性栏、搜索都从对象解析 | `tests/blank.ts`、`tests/kernel.test.ts` |
+| AI 入口 | 只有宿主能发能收才显示直接对话；只有 MCP 时只留接入状态与外部路径 | 人工验收（浏览器） |
+
+**本轮没有做的**：多工作空间管理器、跨进程文件锁、领域包（#13）、
+小说/科研纵向验证（#14）、DSH 宿主集成（#18）、发布与真人验收（#15）。
 
 ## 空白画布修正（2026-10-20）
 

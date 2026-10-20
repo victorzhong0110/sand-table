@@ -1,0 +1,749 @@
+// 通用工作空间内核的集成测试：内容共享、布局独立、撤销分组、持久化往返。
+// 契约见 docs/architecture/workspace-kernel.zh-CN.md 第 4 节的 I1–I15。
+// 这些用例不依赖 Git 仓库，也不依赖 AI：原生内容本身就是一等数据。
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { BoardStore } from "../core/store.ts";
+import { Spaces } from "../server/spaces.ts";
+import { openView } from "../core/space-state.ts";
+import { resolveContent } from "../core/content.ts";
+import { History } from "../core/history.ts";
+import {
+  WorkspaceStore,
+  readObjectState,
+  writeObjectState,
+} from "../core/workspace.ts";
+import { workspacePort } from "../core/persistence.ts";
+import type { Projection } from "../core/model.ts";
+
+const empty: Projection = { workspaces: [], objects: [], relations: [] };
+
+const setup = () => {
+  const store = new BoardStore();
+  const spaces = new Spaces(store);
+  let board = store.open(empty, "空白工作区");
+  openView(store.get(board.id), "view-a");
+  const op = (operation: any) => {
+    board = spaces.update(
+      board.id,
+      store.get(board.id).revision,
+      "view-a",
+      operation,
+    );
+    return board;
+  };
+  return { store, spaces, op, boardId: board.id, current: () => board };
+};
+
+test("原生内容是一等数据：没有仓库也能创建、搜索、读回", () => {
+  const { store, op, boardId } = setup();
+  op({
+    kind: "create",
+    type: "text",
+    title: "人物：林澈",
+    data: { text: "在港口长大，怕水。" },
+  });
+  const b = store.get(boardId);
+  assert.equal(b.contentObjects.length, 1, "内容进入对象，不是留在卡片里");
+  const object = b.contentObjects[0];
+  assert.equal(object.kind, "native");
+  assert.equal(object.title, "人物：林澈");
+  assert.equal(object.version, 1);
+  assert.equal(object.source?.origin, "human");
+  // 卡片只保留呈现，内容来自对象
+  const instance = b.instances.find((i) => i.binding?.kind === "object");
+  assert.ok(instance, "组件绑定到内容对象");
+  assert.deepEqual(instance!.data, {}, "实例不再自带内容副本");
+  const resolved = resolveContent(instance!, b.contentObjects);
+  assert.equal(resolved.title, "人物：林澈");
+  assert.equal(resolved.data.text, "在港口长大，怕水。");
+
+  // 统一读回：原生内容能被搜索到
+  const listed = store.listObjects(boardId, { text: "港口" });
+  assert.equal(listed.objects.length, 1);
+  assert.equal(listed.objects[0].kind, "native");
+  assert.equal(listed.counts.native, 1);
+});
+
+test("同一对象在两块白板各有一份展示：内容共享，布局独立", () => {
+  const { store, op, boardId } = setup();
+  op({ kind: "create", type: "text", title: "林澈", data: { text: "第一稿" } });
+  const b0 = store.get(boardId);
+  const objectId = b0.contentObjects[0].id;
+
+  // 新建第二块白板，并在上面再放一份展示
+  op({ kind: "create", type: "board", title: "第三章" });
+  const b1 = store.get(boardId);
+  const spaceId = b1.spaces.at(-1)!.id;
+  op({ kind: "present", objectId, spaceId: spaceId } as any);
+  const b2 = store.get(boardId);
+  const presentations = b2.instances.filter(
+    (i) => i.binding?.kind === "object" && i.binding.objectId === objectId,
+  );
+  assert.equal(presentations.length, 2, "同一个对象有两处展示");
+  assert.equal(
+    new Set(presentations.map((i) => i.spaceId)).size,
+    2,
+    "两处展示在不同白板上",
+  );
+
+  // 改内容 → 两处都变
+  const object = b2.contentObjects.find((o) => o.id === objectId)!;
+  op({
+    kind: "update",
+    instanceId: presentations[0].id,
+    data: { text: "第二稿" },
+    expectedVersion: object.version,
+  });
+  const b3 = store.get(boardId);
+  for (const p of b3.instances.filter(
+    (i) => i.binding?.kind === "object" && i.binding.objectId === objectId,
+  ))
+    assert.equal(
+      resolveContent(p, b3.contentObjects).data.text,
+      "第二稿",
+      "内容共享：两处展示一起更新",
+    );
+
+  // 移动其中一处 → 另一处不动
+  const before = b3.instances
+    .filter((i) => i.binding?.objectId === objectId)
+    .map((i) => i.rect.x);
+  op({
+    kind: "place",
+    items: [
+      {
+        id: presentations[0].id,
+        rect: { ...presentations[0].rect, x: 777 },
+      },
+    ],
+  });
+  const b4 = store.get(boardId);
+  const after = b4.instances
+    .filter((i) => i.binding?.objectId === objectId)
+    .map((i) => i.rect.x);
+  assert.ok(after.includes(777), "被移动的展示确实移动了");
+  assert.ok(after.includes(before[1] ?? before[0]), "另一处布局不受影响");
+});
+
+test("「再放一份展示」与「复制出独立对象」是两件事", () => {
+  const { store, op, boardId } = setup();
+  op({ kind: "create", type: "text", title: "林澈", data: { text: "原文" } });
+  const b0 = store.get(boardId);
+  const objectId = b0.contentObjects[0].id;
+  const instance = b0.instances.find((i) => i.binding?.objectId === objectId)!;
+
+  op({ kind: "copyObject", instanceId: instance.id });
+  const b1 = store.get(boardId);
+  assert.equal(b1.contentObjects.length, 2, "复制出独立对象");
+  const clone = b1.contentObjects.find((o) => o.id !== objectId)!;
+  assert.equal(clone.version, 1, "副本是新的对象，版本从头开始");
+
+  // 改副本不影响原对象
+  op({
+    kind: "update",
+    instanceId: b1.instances.find((i) => i.binding?.objectId === clone.id)!.id,
+    data: { text: "改过的副本" },
+    expectedVersion: clone.version,
+  });
+  const b2 = store.get(boardId);
+  assert.equal(
+    b2.contentObjects.find((o) => o.id === objectId)!.data!.text,
+    "原文",
+    "副本与原对象互不影响",
+  );
+});
+
+test("移除展示不等于删除对象；删除被引用的对象必须显式策略", () => {
+  const { store, op, boardId } = setup();
+  op({ kind: "create", type: "text", title: "林澈", data: { text: "原文" } });
+  const b0 = store.get(boardId);
+  const objectId = b0.contentObjects[0].id;
+  const instance = b0.instances.find((i) => i.binding?.objectId === objectId)!;
+
+  op({ kind: "remove", instanceId: instance.id });
+  const b1 = store.get(boardId);
+  assert.equal(
+    b1.contentObjects.filter((o) => o.id === objectId).length,
+    1,
+    "移除展示不删除对象",
+  );
+
+  // 仍然被引用时默认拒绝删除
+  op({ kind: "present", objectId });
+  assert.throws(
+    () => op({ kind: "deleteObject", objectId, onReferenced: "refuse" }),
+    /引用/,
+    "被引用的对象不能静默删除",
+  );
+  op({ kind: "deleteObject", objectId, onReferenced: "detach" });
+  const b2 = store.get(boardId);
+  assert.equal(b2.contentObjects.filter((o) => o.id === objectId).length, 0);
+  assert.equal(
+    b2.instances.filter((i) => i.binding?.objectId === objectId).length,
+    0,
+    "detach 明确移除了引用",
+  );
+});
+
+test("版本冲突被检出，不静默覆盖", () => {
+  const { store, op, boardId } = setup();
+  op({ kind: "create", type: "text", title: "林澈", data: { text: "一稿" } });
+  const b0 = store.get(boardId);
+  const object = b0.contentObjects[0];
+  const instance = b0.instances.find((i) => i.binding?.objectId === object.id)!;
+  assert.throws(
+    () =>
+      op({
+        kind: "update",
+        instanceId: instance.id,
+        data: { text: "抢写" },
+        expectedVersion: object.version + 5,
+      }),
+    /版本/,
+    "过期版本写入被拒绝",
+  );
+  assert.equal(
+    store.get(boardId).contentObjects[0].data!.text,
+    "一稿",
+    "被拒绝的写入没有生效",
+  );
+});
+
+test("撤销按用户意图分组；连续撤销与重做不震荡", () => {
+  const { store, op, boardId } = setup();
+  op({ kind: "create", type: "text", title: "林澈", data: { text: "一稿" } });
+  const b0 = store.get(boardId);
+  const objectId = b0.contentObjects[0].id;
+  const instance = b0.instances.find((i) => i.binding?.objectId === objectId)!;
+
+  // 同一意图的连续编辑算一个撤销单位
+  op({
+    kind: "update",
+    instanceId: instance.id,
+    data: { text: "二稿" },
+    expectedVersion: 1,
+    intentId: "intent-1",
+  });
+  op({
+    kind: "update",
+    instanceId: instance.id,
+    data: { text: "三稿" },
+    expectedVersion: 2,
+    intentId: "intent-1",
+  });
+  assert.equal(store.get(boardId).contentObjects[0].data!.text, "三稿");
+
+  op({ kind: "undo" });
+  assert.equal(
+    store.get(boardId).contentObjects[0].data!.text,
+    "一稿",
+    "一次撤销回到该意图的最开始",
+  );
+  op({ kind: "redo" });
+  assert.equal(store.get(boardId).contentObjects[0].data!.text, "三稿");
+  op({ kind: "undo" });
+  assert.equal(
+    store.get(boardId).contentObjects[0].data!.text,
+    "一稿",
+    "重做之后还能再次撤销，不会震荡",
+  );
+});
+
+test("审计日志与撤销栈是两个概念", () => {
+  const { store, op, boardId } = setup();
+  op({ kind: "create", type: "text", title: "林澈", data: { text: "一稿" } });
+  const before = store.get(boardId);
+  const auditBefore = before.audit.length;
+  const undoDepth = before.history.undo.length;
+  assert.ok(undoDepth > 0, "新建内容进入撤销栈");
+  assert.ok(auditBefore > 0, "新建内容也进审计");
+
+  op({ kind: "undo" });
+  const after = store.get(boardId);
+  assert.equal(after.history.undo.length, undoDepth - 1, "撤销栈少了一项");
+  assert.ok(after.audit.length > auditBefore, "撤销本身也进审计日志（只追加）");
+  assert.ok(
+    after.audit.some((a) => a.via === "undo"),
+    "审计记录标注了这是撤销触发的",
+  );
+  assert.equal(
+    after.history.redo.length,
+    1,
+    "被撤销的条目在重做栈里，不在撤销栈里",
+  );
+});
+
+test("语义关系与展示关系分离", () => {
+  const { store, op, boardId } = setup();
+  op({ kind: "create", type: "text", title: "林澈", data: { text: "一稿" } });
+  op({ kind: "create", type: "text", title: "港口", data: { text: "场景" } });
+  const b0 = store.get(boardId);
+  const [a, c] = b0.contentObjects;
+  const layoutBefore = b0.instances.map((i) => i.rect);
+
+  op({ kind: "relate", source: a.id, target: c.id, relation: "先于" });
+  const b1 = store.get(boardId);
+  assert.equal(b1.objectRelations.length, 1);
+  assert.equal(b1.objectRelations[0].status, "confirmed");
+  assert.equal(b1.objectRelations[0].kind, "先于");
+  assert.deepEqual(
+    b1.instances.map((i) => i.rect),
+    layoutBefore,
+    "建关系不改布局",
+  );
+
+  // 推测性关系必须显式标注
+  op({
+    kind: "relate",
+    source: c.id,
+    target: a.id,
+    relation: "可能导致",
+    status: "inferred",
+  });
+  const b2 = store.get(boardId);
+  assert.equal(b2.objectRelations[1].status, "inferred");
+});
+
+test("工作空间落盘后重开仍在：重启不该清空作品", () => {
+  const root = mkdtempSync(join(tmpdir(), "sand-kernel-"));
+  try {
+    const workspaces = new WorkspaceStore(root);
+    const port = workspacePort(workspaces);
+    const store = new BoardStore();
+    store.attachPersistence(port, "default");
+    const spaces = new Spaces(store);
+    let board = store.open(empty, "空白工作区");
+    openView(store.get(board.id), "view-a");
+    spaces.update(board.id, store.get(board.id).revision, "view-a", {
+      kind: "create",
+      type: "text",
+      title: "林澈",
+      data: { text: "在港口长大" },
+    });
+    store.flushSave();
+    assert.ok(!store.lastSaveError, "保存没有失败");
+
+    // 换一个新的 store 实例，模拟重启
+    const restarted = new BoardStore();
+    restarted.attachPersistence(
+      workspacePort(new WorkspaceStore(root)),
+      "default",
+    );
+    const reopened = restarted.open(empty, "空白工作区");
+    const restored = restarted.get(reopened.id);
+    assert.equal(restored.contentObjects.length, 1, "重启后内容还在");
+    assert.equal(restored.contentObjects[0].title, "林澈");
+    assert.equal(restored.contentObjects[0].data!.text, "在港口长大");
+    assert.equal(
+      restored.instances.filter((i) => i.binding?.kind === "object").length,
+      1,
+      "展示实例也恢复了",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("保存失败必须可观察，不能显示虚假的「已保存」", () => {
+  const store = new BoardStore();
+  store.attachPersistence(
+    {
+      save() {
+        throw Error("disk is full");
+      },
+      load() {
+        return undefined;
+      },
+    },
+    "default",
+  );
+  const board = store.open(empty, "空白工作区");
+  store.createContent(
+    store.get(board.id),
+    { type: "text", title: "林澈" },
+    "human",
+  );
+  store.flushSave();
+  assert.equal(store.lastSaveError, "disk is full");
+  assert.ok(!store.lastSaveError === false, "失败原因被保留");
+});
+
+test("删除对象后撤销能把它连同引用一起放回来", () => {
+  const { store, op, boardId } = setup();
+  op({ kind: "create", type: "text", title: "林澈", data: { text: "原文" } });
+  const b0 = store.get(boardId);
+  const objectId = b0.contentObjects[0].id;
+  const instance = b0.instances.find((i) => i.binding?.objectId === objectId)!;
+  op({ kind: "create", type: "text", title: "港口", data: { text: "场景" } });
+  const b1 = store.get(boardId);
+  const other = b1.contentObjects.find((o) => o.id !== objectId)!;
+  op({ kind: "relate", source: objectId, target: other.id, relation: "参与" });
+
+  op({ kind: "deleteObject", objectId, onReferenced: "detach" });
+  const b2 = store.get(boardId);
+  assert.equal(b2.contentObjects.filter((o) => o.id === objectId).length, 0);
+  assert.equal(b2.objectRelations.length, 0, "引用一并移除");
+  assert.equal(
+    b2.instances.filter((i) => i.binding?.objectId === objectId).length,
+    0,
+  );
+
+  op({ kind: "undo" });
+  const b3 = store.get(boardId);
+  assert.equal(
+    b3.contentObjects.filter((o) => o.id === objectId).length,
+    1,
+    "撤销后对象回来了",
+  );
+  assert.equal(
+    b3.contentObjects.find((o) => o.id === objectId)!.data!.text,
+    "原文",
+    "内容也是删除前的",
+  );
+  assert.equal(
+    b3.instances.filter((i) => i.binding?.objectId === objectId).length,
+    1,
+    "引用它的展示也回来了",
+  );
+  assert.equal(b3.objectRelations.length, 1, "关系也回来了");
+});
+
+test("空白预设不会抹掉已保存的作品：恢复的白板带着用户自己的内容", () => {
+  const root = mkdtempSync(join(tmpdir(), "sand-kernel-preset-"));
+  try {
+    const store = new BoardStore();
+    store.attachPersistence(workspacePort(new WorkspaceStore(root)), "default");
+    const spaces = new Spaces(store);
+    let board = store.open(empty, "空白工作区", { preset: "blank" });
+    openView(store.get(board.id), "view-a");
+    spaces.update(board.id, store.get(board.id).revision, "view-a", {
+      kind: "create",
+      type: "text",
+      title: "林澈",
+      data: { text: "在港口长大" },
+    });
+    store.flushSave();
+
+    // 重开：空白预设下，恢复出来的卡片必须还在
+    const restarted = new BoardStore();
+    restarted.attachPersistence(
+      workspacePort(new WorkspaceStore(root)),
+      "default",
+    );
+    const reopened = restarted.open(empty, "空白工作区", { preset: "blank" });
+    const restored = restarted.get(reopened.id);
+    assert.equal(
+      restored.instances.filter((i) => i.binding?.kind === "object").length,
+      1,
+      "空白预设只对新建的白板生效，不能抹掉已保存的展示",
+    );
+    assert.equal(restored.contentObjects.length, 1, "内容对象也在");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("每个可撤销的动作都声明了种类；外部效果进不了撤销栈", () => {
+  const { store, op, boardId } = setup();
+  op({ kind: "create", type: "text", title: "林澈", data: { text: "一稿" } });
+  op({
+    kind: "create",
+    type: "text",
+    title: "港口",
+    data: { text: "场景" },
+    intentId: "同一个意图",
+  });
+  const b = store.get(boardId);
+  assert.ok(b.history.undo.length > 0, "有可撤销的意图");
+  for (const entry of b.history.undo)
+    assert.ok(entry.kind, "每个撤销条目都声明了动作种类");
+  assert.ok(
+    b.history.undo.every((e) => e.kind !== "publish"),
+    "外部效果不在撤销栈里",
+  );
+  // 未声明种类的条目不进撤销栈：白板撤销宁可漏撤销，也不得冒充外部回滚。
+  const history = new History(undefined, { requireKind: true });
+  history.record({
+    id: "x",
+    intentId: "i",
+    label: "未声明种类",
+    at: 1,
+    author: "agent",
+    patch: { target: "object", id: "o", before: null, after: null },
+  });
+  assert.equal(history.canUndo, false, "被拒绝的条目没有进撤销栈");
+  assert.equal(history.refused.length, 1, "拒绝有记录，不是静默丢弃");
+  assert.match(history.refused[0].reason, /种类/);
+
+  // 外部效果同样不进撤销栈
+  const external = new History(undefined, { requireKind: true });
+  external.record({
+    id: "y",
+    intentId: "j",
+    label: "发布 PR",
+    at: 1,
+    author: "agent",
+    kind: "publish",
+    patch: { target: "object", id: "o", before: null, after: null },
+  });
+  assert.equal(external.canUndo, false, "外部效果不进入白板撤销栈");
+  assert.equal(external.refused.length, 1);
+});
+
+test("绑定了内容的卡片：改外观落在这一次展示上，不动对象", () => {
+  const { store, op, boardId } = setup();
+  op({
+    kind: "create",
+    type: "text",
+    title: "人物：林澈",
+    data: { text: "在港口长大，怕水。" },
+  });
+  const created = store.get(boardId);
+  const instance = created.instances.find((i) => i.binding?.kind === "object")!;
+  const objectId = instance.binding!.objectId;
+  const version = created.contentObjects.find(
+    (o) => o.id === objectId,
+  )!.version;
+
+  // 外观是展示层属性：只改这一次展示的图标与显示方式。
+  op({
+    kind: "update",
+    instanceId: instance.id,
+    appearance: { detail: "icon", icon: "task" },
+  });
+
+  const b = store.get(boardId);
+  const after = b.instances.find((i) => i.id === instance.id)!;
+  assert.equal(after.appearance?.detail, "icon");
+  // 类型图标在创建时定下，之后不能改：内置类型用固定图标（#5 的决定，不倒退）。
+  assert.equal(after.appearance?.icon, undefined);
+  // 对象内容没有被外观改动波及，也没有被写脏版本。
+  const object = b.contentObjects.find((o) => o.id === objectId)!;
+  assert.equal(object.version, version, "改外观不算改内容");
+  assert.equal(object.data?.text, "在港口长大，怕水。");
+});
+
+test("预设里的原生内容同样是一等对象，不是卡在实例上的数据", () => {
+  const { store, op, boardId } = setup();
+  op({
+    kind: "create",
+    type: "board",
+    title: "研究比较白板",
+    data: { preset: "research" },
+  });
+  const b = store.get(boardId);
+  const chart = b.instances.find((i) => i.type === "chart");
+  assert.ok(chart, "预设里有图表");
+  assert.equal(chart!.binding?.kind, "object", "图表绑定到内容对象");
+  const object = b.contentObjects.find(
+    (o) => o.id === chart!.binding!.objectId,
+  );
+  assert.ok(object, "图表有对应的内容对象");
+  assert.equal(object!.type, "chart");
+  assert.deepEqual(chart!.data, {}, "实例不再自带内容副本");
+  assert.ok(
+    resolveContent(chart!, b.contentObjects).data.points,
+    "内容从对象读回",
+  );
+});
+
+test("动作种类（kind）落盘往返不丢：重启后撤销依然可用", () => {
+  const root = mkdtempSync(join(tmpdir(), "sand-kernel-kind-"));
+  try {
+    const store = new BoardStore();
+    store.attachPersistence(workspacePort(new WorkspaceStore(root)), "default");
+    const spaces = new Spaces(store);
+    let board = store.open(empty, "空白工作区");
+    openView(store.get(board.id), "view-a");
+    spaces.update(board.id, store.get(board.id).revision, "view-a", {
+      kind: "create",
+      type: "text",
+      title: "林澈",
+      data: { text: "在港口长大" },
+    });
+    store.flushSave();
+
+    const file = JSON.parse(
+      readFileSync(join(root, "default", "workspace.json"), "utf8"),
+    );
+    const entry = file.history.undo[0];
+    assert.ok(entry, "落盘文件里要有撤销条目");
+    assert.equal(entry.kind, "create-object", "kind 不能在写盘时丢掉");
+
+    // 重启：撤销栈从文件读回，kind 还在，撤销照常工作。
+    const restarted = new BoardStore();
+    restarted.attachPersistence(
+      workspacePort(new WorkspaceStore(root)),
+      "default",
+    );
+    const reopened = restarted.open(empty, "空白工作区");
+    assert.equal(
+      restarted.get(reopened.id).contentObjects.length,
+      1,
+      "重启后内容还在",
+    );
+    const undone = restarted.undo(reopened.id, "human");
+    assert.equal(undone.undone, true, "重启后仍可撤销");
+    assert.equal(
+      restarted.get(reopened.id).contentObjects.length,
+      0,
+      "撤销真的把内容撤掉了",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("同一意图里连续改同一个对象：一次撤销真的回退（不是只报成功）", () => {
+  const { store, op, boardId } = setup();
+  op({
+    kind: "create",
+    type: "text",
+    title: "人物：林澈",
+    data: { text: "第一版" },
+    intentId: "intent-create",
+  });
+  const instanceId = store.get(boardId).instances[0].id;
+  op({
+    kind: "update",
+    instanceId,
+    data: { text: "第二版" },
+    intentId: "intent-typing",
+  });
+  op({
+    kind: "update",
+    instanceId,
+    data: { text: "第三版" },
+    intentId: "intent-typing",
+  });
+  assert.equal(
+    store.get(boardId).contentObjects[0].data?.text,
+    "第三版",
+    "两次编辑落在同一个对象上",
+  );
+  const undone = store.undo(boardId, "human");
+  assert.equal(undone.undone, true);
+  assert.equal(
+    store.get(boardId).contentObjects[0].data?.text,
+    "第一版",
+    "一次撤销回到该意图的最早状态（只报成功、实际没回退是缺陷）",
+  );
+});
+
+test("合并撤销不会把对象快照写进语义关系", () => {
+  const { store, op, boardId } = setup();
+  op({
+    kind: "create",
+    type: "text",
+    title: "人物：林澈",
+    data: { text: "第一版" },
+    intentId: "intent-one",
+  });
+  op({
+    kind: "create",
+    type: "text",
+    title: "地点：港口",
+    data: { text: "雾很大" },
+    intentId: "intent-one",
+  });
+  op({
+    kind: "relate",
+    source: store.get(boardId).contentObjects[0].id,
+    target: store.get(boardId).contentObjects[1].id,
+    relation: "related",
+  });
+  assert.equal(
+    store.get(boardId).objectRelations.length,
+    1,
+    "先有一条语义关系",
+  );
+  // 撤销栈顶是「建立关系」，再撤一次才是「创建两个对象」。
+  store.undo(boardId, "human");
+  assert.equal(store.get(boardId).objectRelations.length, 0, "关系被撤销");
+  store.undo(boardId, "human");
+  const b = store.get(boardId);
+  assert.equal(b.contentObjects.length, 0, "两个对象都被撤掉了");
+  assert.equal(b.objectRelations.length, 0, "撤销对象创建不该留下任何关系");
+  assert.ok(
+    b.objectRelations.every(
+      (r) => typeof r.source === "string" && typeof r.target === "string",
+    ),
+    "关系表里不能混进对象快照",
+  );
+});
+
+test("对象状态与文件结构的对应是显式的：展示实例在 boards[0] 下", () => {
+  const file = {
+    schemaVersion: 1,
+    id: "ws1",
+    title: "工作空间",
+    createdAt: 0,
+    updatedAt: 0,
+    revision: 1,
+    contentRevision: 1,
+    boards: [
+      {
+        id: "b1",
+        title: "白板",
+        revision: 1,
+        contentRevision: 1,
+        spaces: [],
+        presentations: [
+          {
+            id: "p1",
+            spaceId: "overview",
+            type: "text",
+            title: "便签",
+            data: {},
+            rect: { x: 0, y: 0, width: 280, height: 180, pinned: false },
+            updatedAt: 0,
+            author: "human",
+          },
+        ],
+        views: {},
+        selection: [],
+        placements: {},
+        notes: {},
+        groups: [],
+        spaceLinks: [],
+        assets: [],
+        activities: [],
+        guides: [],
+        intents: [],
+        proposals: [],
+        validations: [],
+      },
+    ],
+    objects: [],
+    relations: [],
+    resources: [],
+    activities: [],
+    history: { undo: [], redo: [] },
+    audit: [],
+  };
+
+  const state = readObjectState(file);
+  assert.equal(state.presentations.length, 1, "展示实例从 boards[0] 读回");
+  assert.equal(state.objects.length, 0);
+
+  // 删掉展示实例后写回文件：它必须真的从 boards[0].presentations 里消失。
+  const next = writeObjectState(file, {
+    ...state,
+    presentations: [],
+  });
+  assert.equal(
+    next.boards[0].presentations.length,
+    0,
+    "被删的展示实例不会复活",
+  );
+  assert.equal(
+    (next as unknown as { presentations?: unknown }).presentations,
+    undefined,
+    "文件顶层不该多出 presentations 段",
+  );
+});

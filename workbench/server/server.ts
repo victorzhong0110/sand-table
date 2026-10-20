@@ -13,8 +13,11 @@ import {
 import { z } from "zod";
 import { Spaces, registerSpaceTools } from "./spaces.ts";
 import { Changes, registerChangeTools } from "./changes.ts";
+import { registerPackTools } from "./packs.ts";
 import { boardSummary } from "../core/results.ts";
 import { BoardStore } from "../core/store.ts";
+import { WorkspaceStore } from "../core/workspace.ts";
+import { workspacePort } from "../core/persistence.ts";
 import { scan, sourceFor, verifyEvidence, type Binding } from "./repository.ts";
 const uri = "ui://sand-table/overview.html";
 const id = z.string().min(1).max(500),
@@ -34,8 +37,25 @@ export type Forwarder = {
   ) => Promise<CallToolResult>;
   resource: () => Promise<ReadResourceResult>;
 };
-export function createServer(bindings: Binding[], forward?: Forwarder) {
+export type ServerOptions = {
+  /** 工作空间存储根目录。给了就会落盘，重启后作品仍在。 */
+  workspaceRoot?: string;
+  /** 工作空间 ID。默认 "default"。 */
+  workspaceId?: string;
+};
+export function createServer(
+  bindings: Binding[],
+  forward?: Forwarder,
+  options?: ServerOptions,
+) {
   const store = new BoardStore();
+  if (options?.workspaceRoot) {
+    const workspaces = new WorkspaceStore(options.workspaceRoot);
+    store.attachPersistence(
+      workspacePort(workspaces),
+      options.workspaceId || "default",
+    );
+  }
   const changes = new Changes(store, bindings);
   const server = new McpServer({ name: "sand-table", version: "0.3.0" });
   const timer = setInterval(() => store.sweep(), 60_000);
@@ -72,7 +92,7 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
       async (args) => {
         try {
           if (forward) return await forward.tool(name, args);
-          const data = fn(args);
+          const data = await fn(args);
           const isBoard = Boolean(
             data &&
             typeof data === "object" &&
@@ -128,12 +148,12 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
     },
     (a) => {
       if (a.boardId) return store.read(a.boardId);
-      const opened = store.open(scan(bindings), a.title),
-        b = store.get(opened.id);
-      b.presentation = a.preset === "code" ? "code" : "canvas";
-      b.autoProjectSources = a.preset === "code";
-      if (a.preset === "blank") b.instances = [];
-      return store.read(b.id);
+      // 空白／代码预设在存储层处理：只有**新建**的白板才会被清空，
+      // 恢复出来的工作空间带着用户自己的内容，不能被预设抹掉。
+      const opened = store.open(scan(bindings), a.title, {
+        preset: a.preset,
+      });
+      return store.read(opened.id);
     },
   );
   tool(
@@ -179,12 +199,13 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
   );
   tool(
     "sand_find_objects",
-    "Search a bounded page of indexed objects and source references without loading the entire map. Use query for names/paths or objectIds for known relation endpoints. Includes current revision for guide publishing.",
+    "Search a bounded page of indexed objects, source references and whiteboard components without loading the entire map. Use query for names/paths/titles or objectIds for known relation endpoints. Components you created are returned under instances; repository sources under objects. Includes current revision for guide publishing.",
     {
       ...board,
       query: z.string().max(300).default(""),
       objectIds: z.array(id).max(30).optional(),
       kind: z.enum(["workspace", "file", "symbol"]).optional(),
+      instanceType: z.string().max(60).optional(),
       workspaceId: id.optional(),
       offset: z.number().int().nonnegative().default(0),
       limit: z.number().int().min(1).max(30).default(20),
@@ -201,13 +222,139 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
           (!a.workspaceId || o.workspaceId === a.workspaceId) &&
           `${o.title} ${o.source?.path || ""}`.toLowerCase().includes(q),
       );
+      const instances = b.instances.filter(
+        (i) =>
+          (!a.instanceType || i.type === a.instanceType) &&
+          `${i.title} ${i.type}`.toLowerCase().includes(q),
+      );
       return {
         boardId: b.id,
         revision: b.revision,
         total: matches.length,
         objects: matches.slice(a.offset, a.offset + a.limit),
+        instanceTotal: instances.length,
+        instances: instances.slice(a.offset, a.offset + a.limit).map((i) => ({
+          id: i.id,
+          spaceId: i.spaceId,
+          type: i.type,
+          title: i.title,
+        })),
         nextOffset:
           a.offset + a.limit < matches.length ? a.offset + a.limit : null,
+        instanceNextOffset:
+          a.offset + a.limit < instances.length ? a.offset + a.limit : null,
+      };
+    },
+  );
+  tool(
+    "sand_list_objects",
+    "List workspace objects: native content and indexed code in one view, distinguished by kind. Native content exists without any repository. Returns stable ids, versions and the read-back path.",
+    {
+      ...board,
+      query: z.string().max(300).default(""),
+      kind: z.enum(["native", "code", "reference"]).optional(),
+      offset: z.number().int().nonnegative().default(0),
+      limit: z.number().int().min(1).max(50).default(20),
+    },
+    (a) => {
+      const b = store.get(a.boardId);
+      const listed = store.listObjects(a.boardId, {
+        text: a.query,
+        ...(a.kind ? { kind: a.kind } : {}),
+      });
+      return {
+        boardId: b.id,
+        revision: b.revision,
+        contentRevision: b.contentRevision,
+        total: listed.total,
+        objects: listed.objects.slice(a.offset, a.offset + a.limit),
+        nextOffset:
+          a.offset + a.limit < listed.total ? a.offset + a.limit : null,
+        counts: listed.counts,
+        readBack: "sand_read_object",
+        hint: "Native content is a first-class citizen: it is searchable, persistable and shareable across boards.",
+      };
+    },
+  );
+  tool(
+    "sand_read_object",
+    "Read one object by id: its content, source, version, the boards it appears on, and its semantic relations.",
+    { ...board, objectId: id },
+    (a) => {
+      const b = store.get(a.boardId);
+      const object = b.contentObjects.find((o) => o.id === a.objectId);
+      if (object)
+        return {
+          boardId: b.id,
+          contentRevision: b.contentRevision,
+          object,
+          presentations: b.instances
+            .filter(
+              (i) =>
+                i.binding?.kind === "object" &&
+                i.binding.objectId === object.id,
+            )
+            .map((i) => ({
+              instanceId: i.id,
+              spaceId: i.spaceId,
+              type: i.type,
+              rect: i.rect,
+            })),
+          relations: b.objectRelations.filter(
+            (r) => r.source === object.id || r.target === object.id,
+          ),
+        };
+      const code = b.objects.find((o) => o.id === a.objectId);
+      if (code)
+        return {
+          boardId: b.id,
+          revision: b.revision,
+          object: { ...code, kind: "code", typeVersion: 1, version: 1 },
+          presentations: b.instances
+            .filter((i) => i.objectId === code.id)
+            .map((i) => ({
+              instanceId: i.id,
+              spaceId: i.spaceId,
+              type: i.type,
+              rect: i.rect,
+            })),
+          relations: [],
+        };
+      throw Error("Unknown object.");
+    },
+  );
+  /* 历史工具（sand_undo / sand_redo / sand_history / sand_undo_to）注册在
+     server/spaces.ts —— 同一个名字注册两遍会让 MCP server 起不来。 */
+  tool(
+    "sand_workspace_status",
+    "Report whether the workspace is persisted, where it is stored, and the last save error if any. A failed save is never reported as saved.",
+    board,
+    (a) => {
+      const b = store.get(a.boardId);
+      return {
+        boardId: b.id,
+        workspaceId: store.workspaceId || null,
+        persisted: Boolean(store.persistence),
+        saved: store.persistence ? !store.lastSaveError : false,
+        lastSaveError: store.lastSaveError || null,
+        lastLoadError: store.lastLoadError || null,
+        revision: b.revision,
+        contentRevision: b.contentRevision,
+        canUndo: b.history.undo.length > 0,
+        canRedo: b.history.redo.length > 0,
+        auditCount: b.audit.length,
+        nativeObjectCount: b.contentObjects.length,
+        relationCount: b.objectRelations.length,
+        // 没能进入撤销栈的动作（外部效果等）：可见，不是静默丢弃。
+        refusedCount: store.historyRefusals(a.boardId).length,
+        refused: store
+          .historyRefusals(a.boardId)
+          .slice(-10)
+          .map((r) => ({
+            label: r.entry.label,
+            kind: r.entry.kind,
+            reason: r.reason,
+          })),
       };
     },
   );
@@ -392,6 +539,7 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
   registerRepositoryImport(tool, store, bindings);
   registerChangeTools(tool, changes);
   registerSpaceTools(tool, new Spaces(store));
+  registerPackTools(tool, store);
   registerAppResource(server, "Sand Table overview", uri, {}, async () =>
     forward
       ? forward.resource()
@@ -411,5 +559,13 @@ export function createServer(bindings: Binding[], forward?: Forwarder) {
           ],
         },
   );
-  return { server, store, dispose: () => clearInterval(timer) };
+  return {
+    server,
+    store,
+    dispose: () => {
+      clearInterval(timer);
+      // 进程退出前把作品落盘：被关掉不该丢掉最后一次改动。
+      store.flushSave();
+    },
+  };
 }

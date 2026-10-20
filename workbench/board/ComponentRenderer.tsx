@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Board } from "../core/model.ts";
 import type { ComponentInstance } from "../core/spaces.ts";
 import { componentTypes, safeUrl } from "../core/spaces.ts";
+import { peekContent } from "../core/content.ts";
 const text = (v: unknown) => (v === undefined || v === null ? "" : String(v));
 export function ComponentRenderer({
   instance: c,
@@ -16,7 +17,11 @@ export function ComponentRenderer({
   onNavigate: (spaceId: string) => void;
   onOpenLink: (url: string) => void;
 }) {
-  const d = c.data;
+  // 绑定了内容对象的组件：内容来自对象，不是这张卡自己的副本。
+  // 同一对象在别处的展示会同步更新（内容共享、布局独立）。
+  const resolved = peekContent(c, board.contentObjects);
+  const d = resolved.data;
+  const title = resolved.title;
   const object = board.objects.find((o) => o.id === c.objectId);
   const [asset, setAsset] = useState<any>();
   useEffect(() => {
@@ -81,20 +86,20 @@ export function ComponentRenderer({
       <span className="card-type">
         {componentTypes.find((t) => t.type === c.type)?.title || "未知组件"}
       </span>
-      {!componentTypes.some((t) => t.title === c.title) && (
-        <strong>{c.title}</strong>
+      {!componentTypes.some((t) => t.title === title) && (
+        <strong>{title}</strong>
       )}
     </>
   );
   switch (c.type) {
     case "heading":
-      return <h2 className="component-heading">{text(d.text) || c.title}</h2>;
+      return <h2 className="component-heading">{text(d.text) || title}</h2>;
     case "text":
       return (
         <>
           {header}
           <p className="component-text">
-            {text(d.text) || "添加说明、疑问或约束"}
+            {text(d.text) || "写点什么…"}
           </p>
         </>
       );

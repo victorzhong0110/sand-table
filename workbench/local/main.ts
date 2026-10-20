@@ -3,21 +3,36 @@ import { spawn } from "node:child_process";
 import { bind } from "../server/repository.ts";
 import { startLocal } from "./service.ts";
 import { defaultSessionFile } from "./session.ts";
-let open = true,
+let open = false,
   port = 0,
   sessionFile = defaultSessionFile,
+  workspaceDir: string | undefined = process.env.SAND_WORKSPACE_DIR
+    ? resolve(process.env.SAND_WORKSPACE_DIR)
+    : undefined,
+  workspaceId: string | undefined = process.env.SAND_WORKSPACE_ID,
   preset: "blank" | "code" = "blank";
 const roots: string[] = [];
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
   if (arg === "--code-board") preset = "code";
+  else if (arg === "--open") open = true;
   else if (arg === "--no-open") open = false;
-  else if (["--workspace", "--port", "--session-file"].includes(arg)) {
+  else if (
+    [
+      "--workspace",
+      "--port",
+      "--session-file",
+      "--workspace-dir",
+      "--workspace-id",
+    ].includes(arg)
+  ) {
     const value = args[++i];
     if (!value) throw Error(`Missing value for ${arg}`);
     if (arg === "--workspace") roots.push(value);
     else if (arg === "--session-file") sessionFile = resolve(value);
+    else if (arg === "--workspace-dir") workspaceDir = resolve(value);
+    else if (arg === "--workspace-id") workspaceId = value;
     else {
       port = Number(value);
       if (!Number.isInteger(port) || port < 0 || port > 65535)
@@ -42,9 +57,24 @@ try {
     sessionFile,
     port,
     preset,
+    workspaceDir,
+    workspaceId,
   });
   console.log(
-    `\nSand Table 已就绪：${local.url}\n在页面点击「连接我的 AI」安装 MCP 连接。保持这个终端运行；Ctrl+C 结束会话。\nREADY ${local.url}`,
+    [
+      "",
+      "Sand Table 已就绪：",
+      local.url,
+      "",
+      "复制上面这行完整链接到浏览器打开（#session= 片段是本机凭据，不要转发给别人）。",
+      open
+        ? "已按 --open 打开系统浏览器。"
+        : "默认不打开系统浏览器，避免打断你正在做的事。想让它自动打开：加 --open 重新启动，例：npm start -- --open /absolute/path/to/repository",
+      "兼容性：旧版本 npm start 会自动打开浏览器；现在默认不打开，需要时用 --open 恢复。",
+      "",
+      "在页面点击「连接我的 AI」安装 MCP 连接。保持这个终端运行；Ctrl+C 结束会话。",
+      `READY ${local.url}`,
+    ].join("\n"),
   );
   if (open) {
     const command =

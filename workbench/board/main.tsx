@@ -10,6 +10,8 @@ import { ComponentPanel, ThemePanel } from "./ComponentPanel.tsx";
 import { safeUrl } from "../core/spaces.ts";
 import { resultData } from "../core/results.ts";
 import { GuidePanel } from "./GuidePanel.tsx";
+import { HistoryPanel } from "./HistoryPanel.tsx";
+import type { HistorySnapshot } from "../core/history.ts";
 const relationLabels = {
   contains: "包含",
   imports: "导入",
@@ -85,11 +87,10 @@ function Workbench() {
   async function action(name: string, args: Record<string, unknown> = {}) {
     setBusy(true);
     if (name !== "sand_read_board") setError("");
-    try {
-      const data = await call(name, args);
+    const absorb = (data: any) => {
       if (
-        data.objects &&
-        data.spaces &&
+        data?.objects &&
+        data?.spaces &&
         (!boardRef.current ||
           data.id !== boardRef.current.id ||
           data.revision >= boardRef.current.revision)
@@ -98,8 +99,35 @@ function Workbench() {
         setBoard(data);
       }
       return data;
+    };
+    try {
+      return absorb(await call(name, args));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      /* A write refused because the board moved on is not something the
+         person can act on: the board changed under them, most likely because
+         an agent wrote to it. Read the current board and make the same write
+         once more against the fresh revision. The refused write was never
+         applied, so retrying it cannot apply it twice. */
+      if (/^Board changed\./.test(message) && args.revision !== undefined) {
+        try {
+          const fresh = absorb(await call("sand_read_board"));
+          return absorb(
+            await call(name, {
+              ...args,
+              revision: fresh?.revision ?? args.revision,
+            }),
+          );
+        } catch (retryError) {
+          setError(
+            retryError instanceof Error
+              ? retryError.message
+              : String(retryError),
+          );
+          return undefined;
+        }
+      }
+      setError(message);
       if (name !== "sand_read_board")
         try {
           setBoard(await call("sand_read_board"));
@@ -128,6 +156,52 @@ function Workbench() {
     operations.current = next.catch(() => undefined);
     return next;
   };
+  /* Board history: the newest record can always be flipped, and the flip is
+     itself recorded, so an undo can be undone. */
+  const [history, setHistory] = useState<HistorySnapshot>();
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  const flip = (kind: "undo" | "redo") =>
+    action("sand_" + kind, { author: "human" });
+  const jump = (recordId: string) =>
+    action("sand_undo_to", { recordId, author: "human" });
+  const flipRef = useRef(flip);
+  flipRef.current = flip;
+  useEffect(() => {
+    if (!board?.id || !isConnected) return;
+    let alive = true;
+    void call("sand_history")
+      .then((data) => {
+        if (alive && data?.records) setHistory(data as HistorySnapshot);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [board?.id, board?.revision, isConnected]);
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key !== "z" && key !== "y") return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      )
+        return;
+      const h = historyRef.current;
+      if (!h) return;
+      const redo = key === "y" || e.shiftKey;
+      if (redo ? !h.canRedo : !h.canUndo) return;
+      e.preventDefault();
+      void flipRef.current(redo ? "redo" : "undo");
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const clearFilters = () => {
     setQuery("");
     setKind("all");
@@ -259,6 +333,11 @@ function Workbench() {
         call={call}
         operate={operate}
         openLink={(url) => void app?.openLink({ url })}
+        history={history}
+        onUndo={() => void flip("undo")}
+        onRedo={() => void flip("redo")}
+        onJump={(recordId) => void jump(recordId)}
+        aiMode={app ? "host" : "mcp"}
         sendMessage={async (text) => {
           if (!app) throw Error("Not connected");
           const result = await app.sendMessage({

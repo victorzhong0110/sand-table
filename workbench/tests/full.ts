@@ -40,7 +40,11 @@ const service = spawn(
     "--workspace",
     "clsx=" + repo,
   ],
-  { stdio: ["ignore", "pipe", "pipe"] },
+  {
+    stdio: ["ignore", "pipe", "pipe"],
+    // 测试之间互不干扰，也不碰用户真实的工作空间
+    env: { ...process.env, SAND_WORKSPACE_DIR: join(root, "workspaces") },
+  },
 );
 let logs = "",
   browser,
@@ -145,8 +149,12 @@ try {
   await frame
     .getByRole("button", { name: "提交改动意图", exact: true })
     .click();
+  // The UI writes the intent asynchronously; give the board a moment to settle
+  // so the MCP read below does not race the write.
+  await untilBoard((b: any) => b.intents.length > 0);
   const intents = await call("sand_read_intents", { boardId }),
     intent = intents[0];
+  assert.ok(intent, "The UI-submitted intent should be readable through MCP.");
   assert.equal(intent.allowedFiles[0].path, "src/index.js");
   const file = intent.allowedFiles[0],
     before = readFileSync(join(repo, file.path), "utf8");
@@ -267,16 +275,30 @@ try {
     .getByRole("textbox", { name: /数据.*每行/ })
     .fill("基线,10\n实验,15");
   await frame.getByRole("button", { name: "保存组件", exact: true }).click();
+  // 内容在对象里，实例只是展示（P2 的对象/展示分离）。
+  const chartData = (b: any, instance: any) =>
+    b.contentObjects.find(
+      (o: any) =>
+        o.id === (instance.binding || {}).objectId ||
+        o.id === instance.objectId,
+    )?.data;
   b = await untilBoard(
     (b) =>
-      b.instances.find((c: any) => c.id === chart.id).data.points?.[1]
-        ?.value === 15,
+      chartData(
+        b,
+        b.instances.find((c: any) => c.id === chart.id),
+      )?.points?.[1]?.value === 15,
   );
   assert.equal(
-    b.instances.find((c: any) => c.id === chart.id).data.points[1].value,
+    chartData(
+      b,
+      b.instances.find((c: any) => c.id === chart.id),
+    )?.points[1].value,
     15,
   );
-  await frame.locator('[data-instance-id="' + chart.id + '"] svg.component-chart').waitFor();
+  await frame
+    .locator('[data-instance-id="' + chart.id + '"] svg.component-chart')
+    .waitFor();
   await frame.getByRole("button", { name: /编排/ }).first().click();
   const card = frame.locator('[data-instance-id="' + chart.id + '"]');
   await card.focus();

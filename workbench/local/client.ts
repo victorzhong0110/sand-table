@@ -12,17 +12,74 @@ declare global {
 }
 const element = <T extends HTMLElement>(id: string) =>
   document.getElementById(id) as T;
-const bootstrapToken = new URLSearchParams(window.location.hash.slice(1)).get(
-  "session",
+const TOKEN_PATTERN = /^\w{48}$/;
+const SESSION_KEY = "sand-session";
+const urlParams = new URLSearchParams(location.search);
+const hashParams = new URLSearchParams(location.hash.slice(1));
+// The fragment and the query parameter are equivalent entry points.
+const urlToken = [hashParams.get("session"), urlParams.get("session")].find(
+  (value): value is string => Boolean(value && TOKEN_PATTERN.test(value)),
 );
-if (bootstrapToken && /^\w{48}$/.test(bootstrapToken)) {
-  sessionStorage.setItem("sand-session", bootstrapToken);
-  history.replaceState(null, "", location.pathname);
+const hadUrlToken = Boolean(
+  hashParams.get("session") || urlParams.get("session"),
+);
+let currentToken = "",
+  bridge: AppBridge | undefined,
+  boardId = "",
+  connecting = false;
+function rememberToken(token: string) {
+  currentToken = token;
+  window.__sandToken = token;
+  sessionStorage.setItem(SESSION_KEY, token);
 }
-window.__sandToken =
-  bootstrapToken || sessionStorage.getItem("sand-session") || "";
-let bridge: AppBridge | undefined,
-  boardId = "";
+function storedToken() {
+  const stored = sessionStorage.getItem(SESSION_KEY);
+  return stored && TOKEN_PATTERN.test(stored) ? stored : "";
+}
+function scrubUrl() {
+  if (hadUrlToken) history.replaceState(null, "", location.pathname);
+}
+async function requestSessionToken() {
+  let response: Response;
+  try {
+    response = await fetch("/session", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+  } catch (e) {
+    throw Error(
+      "连不上本机工作台服务（" +
+        (e instanceof Error ? e.message : "网络错误") +
+        "）。请确认终端里的 Sand Table 实例还在运行，然后点「重新连接」。",
+    );
+  }
+  const data = await response.json().catch(() => ({} as any));
+  if (!response.ok)
+    throw Error(
+      "本机工作台拒绝了凭据请求（HTTP " +
+        response.status +
+        "）：" +
+        (data?.error || "未知原因") +
+        "。请确认打开的是本机工作台自己的地址。",
+    );
+  const token = typeof data?.token === "string" ? data.token : "";
+  if (!TOKEN_PATTERN.test(token))
+    throw Error("本机工作台返回的会话凭据格式不正确，无法使用。");
+  return token;
+}
+async function ensureToken(force: boolean) {
+  if (!force) {
+    if (currentToken) return currentToken;
+    if (urlToken) return urlToken;
+    const stored = storedToken();
+    if (stored) return stored;
+  }
+  return await requestSessionToken();
+}
+const isAuthError = (error: unknown) =>
+  (error as { status?: number } | null)?.status === 403;
 async function request(route: string, data: unknown = {}) {
   const response = await fetch(route, {
     method: "POST",
@@ -32,8 +89,14 @@ async function request(route: string, data: unknown = {}) {
     },
     body: JSON.stringify(data),
   });
-  const result = await response.json();
-  if (!response.ok) throw Error(result.error || "工作台请求失败");
+  const result = await response.json().catch(() => ({} as any));
+  if (!response.ok) {
+    const error = Error(
+      result?.error || "工作台请求失败（HTTP " + response.status + "）",
+    );
+    (error as Error & { status?: number }).status = response.status;
+    throw error;
+  }
   return result;
 }
 async function rpc(name: string, args: Record<string, unknown> = {}) {
@@ -46,7 +109,7 @@ async function rpc(name: string, args: Record<string, unknown> = {}) {
 }
 const showError = (error: unknown) => {
   element("error").hidden = false;
-  element("error").textContent =
+  element("error-text").textContent =
     error instanceof Error ? error.message : String(error);
 };
 function showSetup(show: boolean) {
@@ -146,11 +209,43 @@ async function copy(id: string) {
     element("setup-status").textContent = "请按系统复制快捷键，文本已选中。";
   }
 }
+async function connect(force = false) {
+  element("error").hidden = true;
+  connecting = true;
+  try {
+    const token = await ensureToken(force);
+    rememberToken(token);
+    scrubUrl();
+    try {
+      await mount();
+    } catch (e) {
+      // A rejected credential means the instance rotated its token: fetch a
+      // fresh one from the same origin instead of dying on a red bar.
+      if (!isAuthError(e)) throw e;
+      const fresh = await requestSessionToken();
+      rememberToken(fresh);
+      await mount();
+    }
+  } finally {
+    connecting = false;
+  }
+}
 element("setup").onclick = () => showSetup(true);
 element("close-setup").onclick = () => showSetup(false);
+element("retry").onclick = () => void connect(true).catch(showError);
+// Pasting a new link into an open tab changes only the fragment, so the
+// document is never reloaded and the new credential would be ignored: the
+// page would keep using the old one and every request would come back
+// unauthorized. Adopt the credential from the hash and reconnect. If it is
+// stale, connect() falls back to the live one the service hands out.
+window.addEventListener("hashchange", () => {
+  const fresh = new URLSearchParams(location.hash.slice(1)).get("session");
+  if (!fresh || !TOKEN_PATTERN.test(fresh) || fresh === currentToken) return;
+  rememberToken(fresh);
+  void connect(false).catch(showError);
+});
 element("new-board").onclick = () => {
-  if (window.__sandToken) void mount().catch(showError);
-  else showError("请使用终端打印的完整启动链接。");
+  void connect().catch(showError);
 };
 for (const button of document.querySelectorAll<HTMLButtonElement>(
   "[data-copy]",
@@ -171,18 +266,30 @@ element("ask").onclick = async () => {
     showError(e);
   }
 };
-if (window.__sandToken) void mount().catch(showError);
-else
+void connect().catch((e) =>
   showError(
-    "请使用启动终端中打印的完整链接打开工作台（链接包含 #session=…）。",
-  );
+    e instanceof Error && e.message
+      ? e
+      : Error(
+          "无法连接本地工作台。请使用启动终端里打印的完整链接（含 #session=…）打开本页，然后点「重新连接」。",
+        ),
+  ),
+);
 setInterval(
-  () =>
+  () => {
+    if (connecting || !window.__sandToken) return;
     void request("/status")
       .then(renderStatus)
-      .catch(() => {
-        element("connection").textContent =
-          "与本地工作台断开 · 请重新启动后刷新页面";
-      }),
+      .catch((e) => {
+        element("connection").textContent = "与本地工作台断开";
+        showError(
+          Error(
+            "与本地工作台断开：" +
+              (e instanceof Error ? e.message : String(e)) +
+              " 点「重新连接」可重新取凭据并重连；也可以在终端里重新启动实例。",
+          ),
+        );
+      });
+  },
   3000,
 );

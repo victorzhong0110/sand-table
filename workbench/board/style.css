@@ -91,6 +91,41 @@ select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  vertical-align: middle;
+}
+.icon-button[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+.report-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.report-head b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.report-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.report-actions .icon-button {
+  margin: 0;
+}
 .header-actions,
 .modes,
 .tools,
@@ -264,8 +299,17 @@ button[aria-pressed="true"] {
 }
 .zoom {
   position: absolute;
-  bottom: 15px;
+  /* 缩放条压在画布内容之上：卡片被拖到它上面时，缩放条仍然可点。 */
+  z-index: 2;
+  /* The floating tool panel ends just above the canvas bottom; keeping the
+     zoom bar a little lower leaves a visible gap between the two instead
+     of letting the panel sit on the bar's edge (issue #10). */
+  bottom: 8px;
   left: 16px;
+  /* The bar must stay usable no matter what the canvas holds: a card's
+     content can be wider than the card itself, and .world is a stacking
+     context, so the bar is put above the content layer on purpose. */
+  z-index: 5;
   display: flex;
   gap: 10px;
   align-items: center;
@@ -550,7 +594,9 @@ footer p {
   white-space: pre-wrap;
   user-select: text;
 }
-.component-card strong {
+/* 只保护卡片的直接子标题：行向 chrome 里的折叠标题要能收缩，
+   否则长标题把层级切换按钮推出卡片边界。 */
+.component-card > strong {
   flex-shrink: 0;
 }
 .component-card button {
@@ -814,6 +860,23 @@ legend {
 }
 .component-editor textarea {
   min-height: 90px;
+}
+/* 自动保存与草稿：没写进去要说清楚，草稿还在也要看得见。 */
+.component-editor .edit-failure {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #833c28;
+  background: #fbe7e1;
+  border-radius: 8px;
+}
+.component-editor .edit-failure p {
+  margin: 0 0 8px;
+}
+.component-editor .edit-status {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
 }
 @media (max-width: 850px) {
   .space-shell .canvas {
@@ -1604,7 +1667,17 @@ main.canvas-app {
 .detail-icon .component-chrome {
   margin: 0;
 }
-.collapsed-title {
+/* A flex item's automatic minimum size is its content size, so a long title
+   used to refuse to shrink: the ellipsis never applied and the title
+   pushed the level toggle clean out of the card. min-width: 0 lets the
+   title shrink so the ellipsis works and the button stays put. The
+   selector has to out-specify ".component-card > strong { flex-shrink: 0 }"
+   above, which is there to keep the full-level title from being squeezed
+   vertically; that rule is scoped to direct children so it no longer
+   reaches the row-direction chrome. */
+.component-chrome .collapsed-title {
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1761,17 +1834,233 @@ main.canvas-app {
     left: 52px;
   }
 }
-main.canvas-app { padding-left: 58px; }
-@media (max-width: 700px) { main.canvas-app { padding-left: 44px; } }
-.canvas-app .studio-layout, .canvas-app .studio-layout.has-inspector { width: auto; align-self: stretch; }
-.app-rail button[aria-pressed="true"], .appearance-controls button[aria-pressed="true"] { color: var(--ink); }
+main.canvas-app {
+  padding-left: 58px;
+}
 @media (max-width: 700px) {
- .canvas-app .canvas-topbar { display: grid; grid-template-columns: 24px minmax(0, 1fr); grid-template-rows: 24px 28px; height: 68px; min-height: 68px; gap: 2px 6px; padding: 6px 10px; flex-wrap: nowrap; }
- .canvas-app .board-title { width: 100%; font-size: 12px; padding: 2px; }
- .canvas-app .canvas-top-actions { grid-column: 1 / -1; margin: 0; justify-content: flex-end; }
- .canvas-app .canvas-top-actions button { padding: 3px 6px; }
- .canvas-app .floating-tool-toggle { top: 92px; font-size: 11px; padding: 8px; }
- .canvas-app .stage-search { top: 92px; width: 130px; }
- .canvas-app .agent-beacon { display: none; }
- .canvas-app .floating-tool-wrap, .canvas-app .studio-inspector { top: 138px; }
+  main.canvas-app {
+    padding-left: 44px;
+  }
+}
+.canvas-app .studio-layout,
+.canvas-app .studio-layout.has-inspector {
+  width: auto;
+  align-self: stretch;
+}
+.app-rail button[aria-pressed="true"],
+.appearance-controls button[aria-pressed="true"] {
+  color: var(--ink);
+}
+@media (max-width: 700px) {
+  .canvas-app .canvas-topbar {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr);
+    grid-template-rows: 24px 28px;
+    height: 68px;
+    min-height: 68px;
+    gap: 2px 6px;
+    padding: 6px 10px;
+    flex-wrap: nowrap;
+  }
+  .canvas-app .board-title {
+    width: 100%;
+    font-size: 12px;
+    padding: 2px;
+  }
+  .canvas-app .canvas-top-actions {
+    grid-column: 1 / -1;
+    margin: 0;
+    justify-content: flex-end;
+  }
+  .canvas-app .canvas-top-actions button {
+    padding: 3px 6px;
+  }
+  .canvas-app .floating-tool-toggle {
+    top: 92px;
+    font-size: 11px;
+    padding: 8px;
+  }
+  .canvas-app .stage-search {
+    top: 92px;
+    width: 130px;
+  }
+  .canvas-app .agent-beacon {
+    display: none;
+  }
+  .canvas-app .floating-tool-wrap,
+  .canvas-app .studio-inspector {
+    top: 138px;
+  }
+}
+/* Keep wheel, trackpad, touch and keyboard scrolling without visible tracks. */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #00000030;
+}
+.settings-dialog {
+  width: min(800px, 100%);
+  max-height: calc(100dvh - 48px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: 0 20px 80px #00000020;
+  overflow: hidden;
+}
+.settings-dialog > header {
+  padding: 18px 24px;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+.settings-dialog h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.settings-body {
+  overflow: auto;
+  padding: 24px;
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 32px;
+}
+.settings-body section {
+  padding: 0;
+}
+.settings-body label {
+  display: block;
+  margin: 12px 0;
+}
+.settings-body input:not([type="checkbox"]),
+.settings-body select {
+  max-width: 100%;
+}
+.settings-presets {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.settings-presets button[aria-pressed="true"] {
+  background: var(--soft);
+  color: var(--ink);
+  border-color: var(--accent);
+}
+@media (max-width: 650px) {
+  .settings-backdrop {
+    padding: 12px;
+  }
+  .settings-body {
+    grid-template-columns: 1fr;
+    padding: 18px;
+    gap: 20px;
+  }
+}
+.palette-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.palette-heading strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.palette-heading button {
+  border: 0;
+  background: transparent;
+  padding: 0 4px;
+}
+.canvas-app .studio-inspector.is-ai {
+  left: 16px;
+  right: auto;
+}
+.canvas-app .floating-tool-wrap {
+  top: 84px;
+}
+@media (max-width: 700px) {
+  .canvas-app .floating-tool-wrap,
+  .canvas-app .studio-inspector.is-ai {
+    top: 92px;
+    left: 8px;
+  }
+}
+.board-components {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.board-components button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+}
+.board-components button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.canvas-app .studio-inspector.is-context { left: 16px; right: auto; }
+@media(max-width:700px) { .canvas-app .studio-inspector.is-context { top: 92px; left: 8px; } }
+.canvas-app .component-card.detail-full .component-chrome { position: absolute; top: 8px; right: 8px; margin: 0; }
+.canvas-app .component-card.detail-full .component-symbol { display: none; }
+
+/* #9.3: editing a component where it sits. The editor covers the body of
+   the card, or the whole card when the title is being edited, and the card
+   itself is outlined so the state is unmistakable. */
+.canvas-app .component-card.editing {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.canvas-app .inline-edit {
+  position: absolute;
+  inset: 38px 8px 8px 8px;
+  z-index: 4;
+  min-height: 56px;
+  resize: none;
+  font: inherit;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 8px;
+  user-select: text;
+}
+.canvas-app .inline-edit.is-title {
+  inset: 8px;
+  min-height: 0;
+}
+.canvas-app .inline-edit:focus {
+  outline: none;
+}
+/* #9.2: what just happened on the canvas, said where it happened. */
+.canvas-notice {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  z-index: 5;
+  margin: 0;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  pointer-events: none;
 }

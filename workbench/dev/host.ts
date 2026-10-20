@@ -20,6 +20,14 @@ await client.connect(
     args: [
       "--experimental-strip-types",
       fileURLToPath(new URL("../server/main.ts", import.meta.url)),
+      // MCP 的 stdio 子进程只继承白名单环境变量：工作空间设置必须显式传过去，
+      // 否则服务端会落到默认目录，和别的进程共用同一块工作空间。
+      ...(process.env.SAND_WORKSPACE_DIR
+        ? ["--workspace-dir", process.env.SAND_WORKSPACE_DIR]
+        : []),
+      ...(process.env.SAND_WORKSPACE_ID
+        ? ["--workspace-id", process.env.SAND_WORKSPACE_ID]
+        : []),
       ...process.argv.slice(2),
     ],
   }),

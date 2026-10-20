@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
 import { readFileSync, existsSync, unlinkSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,10 @@ export async function startLocal(options: {
   sessionFile: string;
   port?: number;
   preset?: "blank" | "code";
+  /** 工作空间存储目录。作品落在这里，重启后仍在。 */
+  workspaceDir?: string;
+  /** 工作空间 ID。 */
+  workspaceId?: string;
 }) {
   if (existsSync(options.sessionFile)) {
     const previous = readConnection(options.sessionFile);
@@ -48,6 +52,10 @@ export async function startLocal(options: {
         "--experimental-strip-types",
         fileURLToPath(new URL("../server/main.ts", import.meta.url)),
         ...options.workspaces.flatMap((w) => ["--workspace", w]),
+        ...(options.workspaceDir
+          ? ["--workspace-dir", options.workspaceDir]
+          : []),
+        ...(options.workspaceId ? ["--workspace-id", options.workspaceId] : []),
       ],
     }),
   );
@@ -61,6 +69,10 @@ export async function startLocal(options: {
     { lastSeen: number; lastTool?: string }
   >();
   const config = connectionConfig(options.sessionFile);
+  // The browser always attaches Origin to same-origin POSTs, so the same
+  // comparison that guards /rpc also proves a request came from our own page.
+  const sameOrigin = (req: IncomingMessage) =>
+    req.headers.origin === origin;
   const dispatch = async (method: string, params: any) => {
     if (method === "tools/call") return client.callTool(params);
     if (method === "resources/read") return client.readResource(params);
@@ -116,28 +128,41 @@ export async function startLocal(options: {
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Referrer-Policy", "no-referrer");
       res.setHeader("Cache-Control", "no-store");
-      if (req.method === "GET" && req.url === "/") {
+      // Routes are matched on the path: a credential may arrive as a query
+      // parameter (?session=…), and the query must not change the route.
+      const path = (req.url || "/").split("?")[0];
+      if (req.method === "GET" && path === "/") {
         res.setHeader("Content-Type", "text/html; charset=utf-8");
         res.setHeader(
           "Content-Security-Policy",
           "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; frame-src 'self'; img-src 'self' data:; media-src data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
         );
         res.end(
-          `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sand Table · 本地工作台</title><style>${css}</style></head><body><nav><b>本地会话</b><span id="connection">正在连接工作台…</span><button id="setup">连接我的 AI</button><button id="new-board">重新打开白板</button></nav><section id="setup-panel" hidden><h1>和你自己的 AI 共用这张白板</h1><p>在本机 MCP 客户端中安装一次，然后在它的对话里提问。白板不自带模型，也不需要新的 API Key。</p><label>Codex CLI 安装命令<textarea id="codex" readonly></textarea></label><button data-copy="codex">复制命令</button><details><summary>通用 MCP JSON / Codex TOML</summary><label>JSON<textarea id="json" readonly></textarea></label><button data-copy="json">复制 JSON</button><label>TOML<textarea id="toml" readonly></textarea></label><button data-copy="toml">复制 TOML</button></details><label>安装后，在 AI 对话中发送<textarea id="prompt" readonly></textarea></label><button id="ask">复制当前选区提问</button><p id="setup-status" role="status"></p><p class="muted">这里显示 MCP 接入进程与工具通信，不代表 AI 正在思考。浏览器聊天网页不能直接读取本机 stdio 配置；请使用本机 MCP 客户端。无需把此服务暴露到公网。</p><button id="close-setup">返回白板</button></section><div id="error" role="alert" hidden></div><iframe title="Sand Table 白板" sandbox="allow-scripts"></iframe><script src="/host.js"></script></body></html>`,
+          `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sand Table · 本地工作台</title><style>${css}</style></head><body><nav><b>本地会话</b><span id="connection">正在连接工作台…</span><button id="setup">连接我的 AI</button><button id="new-board">重新打开白板</button></nav><section id="setup-panel" hidden><h1>和你自己的 AI 共用这张白板</h1><p>在本机 MCP 客户端中安装一次，然后在它的对话里提问。白板不自带模型，也不需要新的 API Key。</p><p class="muted">装一次就够：工作台重启后客户端无需改配置即可自动跟随（前提是 MCP 配置里的 --session-file 与本实例用的是同一份文件）。如果你的宿主是在会话进行中才注册 MCP，可能需要重开一次宿主会话才能看到新工具。浏览器与 MCP 客户端共享同一张板、同一份 revision 计数；Agent 侧的"读→写→读回"宜在同一次连接内完成。</p><label>Codex CLI 安装命令<textarea id="codex" readonly></textarea></label><button data-copy="codex">复制命令</button><details><summary>通用 MCP JSON / Codex TOML</summary><label>JSON<textarea id="json" readonly></textarea></label><button data-copy="json">复制 JSON</button><label>TOML<textarea id="toml" readonly></textarea></label><button data-copy="toml">复制 TOML</button></details><label>安装后，在 AI 对话中发送<textarea id="prompt" readonly></textarea></label><button id="ask">复制当前选区提问</button><p id="setup-status" role="status"></p><p class="muted">这里显示 MCP 接入进程与工具通信，不代表 AI 正在思考。浏览器聊天网页不能直接读取本机 stdio 配置；请使用本机 MCP 客户端。无需把此服务暴露到公网。</p><button id="close-setup">返回白板</button></section><div id="error" role="alert" hidden><span id="error-text"></span><button id="retry" type="button">重新连接</button></div><iframe title="Sand Table 白板" sandbox="allow-scripts"></iframe><script src="/host.js"></script></body></html>`,
         );
         return;
       }
-      if (req.method === "GET" && req.url === "/host.js") {
+      if (req.method === "GET" && path === "/host.js") {
         res
           .writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" })
           .end(hostScript);
+        return;
+      }
+      // Credential self-heal: only a request that our own page issued
+      // (same host + same origin) may ask for the current session token.
+      if (req.method === "POST" && path === "/session") {
+        if (!sameOrigin(req)) {
+          json({ error: "Origin rejected" }, 403);
+          return;
+        }
+        json({ token, url: origin + "/" });
         return;
       }
       if (req.headers["x-sand-token"] !== token) {
         json({ error: "Session authorization required." }, 403);
         return;
       }
-      if (req.method === "GET" && req.url === "/health") {
+      if (req.method === "GET" && path === "/health") {
         json({ ok: true });
         return;
       }
@@ -145,8 +170,7 @@ export async function startLocal(options: {
         json({ error: "Unsupported route" }, 404);
         return;
       }
-      const agentRoute =
-        req.url === "/agent/rpc" || req.url === "/agent/status";
+      const agentRoute = path === "/agent/rpc" || path === "/agent/status";
       if (
         agentRoute
           ? req.headers.origin !== undefined
@@ -177,7 +201,7 @@ export async function startLocal(options: {
           json({ error: "Invalid connection identity" }, 400);
           return;
         }
-        if (req.url === "/agent/status") {
+        if (path === "/agent/status") {
           if (data.state === "disconnected")
             connections.delete(data.connectionId);
           else
@@ -198,15 +222,15 @@ export async function startLocal(options: {
         json(await dispatch(data.method, data.params));
         return;
       }
-      if (req.url === "/bootstrap") {
+      if (path === "/bootstrap") {
         json({ boardResult: await primary(), config, status: status() });
         return;
       }
-      if (req.url === "/status") {
+      if (path === "/status") {
         json(status());
         return;
       }
-      if (req.url === "/rpc") {
+      if (path === "/rpc") {
         json(await dispatch(data.method, data.params));
         return;
       }
@@ -235,6 +259,7 @@ export async function startLocal(options: {
     writeConnection(options.sessionFile, {
       url: origin + "/",
       token,
+      link: origin + "/#session=" + token,
       pid: process.pid,
       startedAt,
     });
@@ -249,4 +274,4 @@ export async function startLocal(options: {
     sessionFile: options.sessionFile,
   };
 }
-const css = `*[hidden]{display:none!important}*{box-sizing:border-box}body{margin:0;background:#f6f1e6;color:#322f28;font:14px/1.6 system-ui,sans-serif}nav{display:flex;align-items:center;gap:16px;padding:10px 20px;background:#fffdf7;color:#322f28;border-bottom:1px solid #ddd5c4;min-height:44px}nav span{flex:1;font-size:12px}button{cursor:pointer;border:1px solid #d9d0be;border-radius:6px;padding:7px 12px;background:#fffdf7;color:#322f28;font:inherit}button:focus-visible,textarea:focus-visible{outline:2px solid #b67547;outline-offset:3px}iframe{border:0;width:100%;height:calc(100vh - 44px);display:block}section{padding:28px;max-width:900px;margin:auto}textarea{display:block;width:100%;min-height:84px;padding:12px;border:1px solid #ddd5c4;border-radius:8px;background:#fffdf7;font:12px/1.6 ui-monospace,monospace;color:inherit;resize:vertical;margin:6px 0 10px}label{display:block;margin-top:18px}details{margin-top:20px}summary{cursor:pointer}.muted{color:#777366;font-size:12px}#error{padding:16px;background:#fbe7e1;color:#833c28}#setup-status{min-height:24px}h1{font-weight:500;font-size:28px}@media(max-width:600px){nav{flex-wrap:wrap;gap:8px}nav span{flex-basis:70%}iframe{height:calc(100vh - 90px)}section{padding:18px}}`;
+const css = `html{scrollbar-width:none}html::-webkit-scrollbar{display:none}body{height:100dvh;overflow:hidden;display:flex;flex-direction:column}body>nav{flex-shrink:0}body>iframe{flex:1;min-height:0;height:auto}#setup-panel{overflow:auto;scrollbar-width:none}#setup-panel::-webkit-scrollbar{display:none}*[hidden]{display:none!important}*{box-sizing:border-box}body{margin:0;background:#f6f1e6;color:#322f28;font:14px/1.6 system-ui,sans-serif}nav{display:flex;align-items:center;gap:16px;padding:10px 20px;background:#fffdf7;color:#322f28;border-bottom:1px solid #ddd5c4;min-height:44px}nav span{flex:1;font-size:12px}button{cursor:pointer;border:1px solid #d9d0be;border-radius:6px;padding:7px 12px;background:#fffdf7;color:#322f28;font:inherit}button:focus-visible,textarea:focus-visible{outline:2px solid #b67547;outline-offset:3px}iframe{border:0;width:100%;height:calc(100vh - 44px);display:block}section{padding:28px;max-width:900px;margin:auto}textarea{display:block;width:100%;min-height:84px;padding:12px;border:1px solid #ddd5c4;border-radius:8px;background:#fffdf7;font:12px/1.6 ui-monospace,monospace;color:inherit;resize:vertical;margin:6px 0 10px}label{display:block;margin-top:18px}details{margin-top:20px}summary{cursor:pointer}.muted{color:#777366;font-size:12px}#error{padding:16px;background:#fbe7e1;color:#833c28;display:flex;gap:12px;align-items:center;flex-wrap:wrap}#error-text{flex:1;white-space:pre-wrap}#setup-status{min-height:24px}h1{font-weight:500;font-size:28px}@media(max-width:600px){nav{flex-wrap:wrap;gap:8px}nav span{flex-basis:70%}iframe{height:calc(100vh - 90px)}section{padding:18px}}`;
