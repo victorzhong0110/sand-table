@@ -51,7 +51,15 @@ export function SpaceCanvas({
     [draft, setDraft] = useState<Record<string, Rect>>({}),
     /* #9.3: the component being edited on the canvas itself. */
     [editing, setEditing] = useState<
-      { id: string; field: "title" | "text"; value: string } | undefined
+      | {
+          id: string;
+          field: "title" | "text";
+          value: string;
+          /** 编辑开始时看到的那份内容：提交时作为基线，冲突才认得出来。 */
+          baseTitle: string;
+          baseData: Record<string, unknown>;
+        }
+      | undefined
     >(),
     /* Short-lived feedback about what just happened on the canvas. */
     [notice, setNotice] = useState("");
@@ -251,10 +259,14 @@ export function SpaceCanvas({
     const field = ["text", "heading", "code"].includes(c.type)
       ? "text"
       : "title";
+    // 基线取自内容模型：绑定了内容对象的组件，标题与正文都在对象上。
+    const resolved = peekContent(c, b.contentObjects);
     setEditing({
       id: c.id,
       field,
-      value: field === "text" ? String(c.data.text ?? "") : c.title,
+      value: field === "text" ? String(resolved.data.text ?? "") : resolved.title,
+      baseTitle: resolved.title,
+      baseData: resolved.data,
     });
     if (!view?.selection.includes(c.id))
       void operate({ kind: "select", ids: [c.id] });
@@ -267,25 +279,29 @@ export function SpaceCanvas({
     if (!c) return;
     const unchanged =
       edit.field === "title"
-        ? edit.value === c.title
-        : edit.value === String(c.data.text ?? "");
+        ? edit.value === edit.baseTitle
+        : edit.value === String(edit.baseData.text ?? "");
     if (unchanged) {
       endEditSession(c.id);
       return;
     }
+    // 写回的是内容对象：带基线，服务端只应用真正改动的那个字段，
+    // 别人同时改过的字段不会被这一笔盖掉。
     const op =
       edit.field === "title"
         ? {
             kind: "update",
             instanceId: c.id,
             title: edit.value.slice(0, 120),
-            intent: editIntent(c.id),
+            baseTitle: edit.baseTitle,
+            intentId: editIntent(c.id),
           }
         : {
             kind: "update",
             instanceId: c.id,
-            data: { ...c.data, text: edit.value },
-            intent: editIntent(c.id),
+            data: { ...edit.baseData, text: edit.value },
+            baseData: edit.baseData,
+            intentId: editIntent(c.id),
           };
     const result = await operate(op);
     if (result === undefined)

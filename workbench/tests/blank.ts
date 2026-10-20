@@ -248,13 +248,22 @@ try {
     "Moving a pinned component moves it and releases the pin.",
   );
 
-  /* #9.4: the property panel's content field saves itself — no button. */
+  /* #9.4: the property panel's content field saves itself — no button.
+     内容在对象上：断言要读解析后的内容，不是实例自己的空壳。 */
+  const contentText = (board: any, instance: any) => {
+    const objectId =
+      (instance.binding || {}).objectId || instance.objectId;
+    const object = (board.contentObjects || []).find(
+      (o: any) => o.id === objectId,
+    );
+    return object?.data?.text;
+  };
   await frame
     .getByRole("textbox", { name: "内容", exact: true })
     .fill("改完即存");
-  b = await until((b) => b.instances[0].data.text === "改完即存");
+  b = await until((b) => contentText(b, b.instances[0]) === "改完即存");
   assert.equal(
-    b.instances[0].data.text,
+    contentText(b, b.instances[0]),
     "改完即存",
     "Stopping typing is enough to save the content.",
   );
@@ -265,9 +274,9 @@ try {
   await inline.waitFor();
   await inline.fill("就地改过的内容");
   await inline.press("Enter");
-  b = await until((b) => b.instances[0].data.text === "就地改过的内容");
+  b = await until((b) => contentText(b, b.instances[0]) === "就地改过的内容");
   assert.equal(
-    b.instances[0].data.text,
+    contentText(b, b.instances[0]),
     "就地改过的内容",
     "Editing on the canvas writes the component back.",
   );
