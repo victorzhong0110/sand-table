@@ -276,7 +276,7 @@ try {
     b.instances.find((c: any) => c.id === chart.id).data.points[1].value,
     15,
   );
-  await frame.locator('[data-instance-id="' + chart.id + '"] svg').waitFor();
+  await frame.locator('[data-instance-id="' + chart.id + '"] svg.component-chart').waitFor();
   await frame.getByRole("button", { name: /编排/ }).first().click();
   const card = frame.locator('[data-instance-id="' + chart.id + '"]');
   await card.focus();
