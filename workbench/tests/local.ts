@@ -88,6 +88,38 @@ try {
       .waitFor({ timeout: 15000 });
   } catch (e) {
     // 诊断：把宿主页面与白板页面的实际状态打出来，别只留一句超时。
+    const boot = await page.request
+      .post(new URL("/bootstrap", connection.url).href, {
+        headers: {
+          Origin: connection.url.slice(0, -1),
+          "X-Sand-Token": connection.token,
+        },
+        data: {},
+      })
+      .then((r) => r.json())
+      .catch((err) => ({ error: String(err) }));
+    const boardData = (boot as any)?.boardResult?._meta?.data;
+    console.log(
+      "DIAG server board:",
+      JSON.stringify({
+        title: boardData?.title,
+        presentation: boardData?.presentation,
+        id: boardData?.id,
+        instances: boardData?.instances?.length,
+        spaces: boardData?.spaces?.length,
+        objects: boardData?.objects?.length,
+      }),
+    );
+    console.log(
+      "DIAG frame html:",
+      (
+        await page
+          .frameLocator("iframe")
+          .locator("body")
+          .innerHTML()
+          .catch(() => "(no frame)")
+      ).slice(0, 700),
+    );
     console.log(
       "DIAG outer #error:",
       await page
