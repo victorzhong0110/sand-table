@@ -299,6 +299,8 @@ button[aria-pressed="true"] {
 }
 .zoom {
   position: absolute;
+  /* 缩放条压在画布内容之上：卡片被拖到它上面时，缩放条仍然可点。 */
+  z-index: 2;
   /* The floating tool panel ends just above the canvas bottom; keeping the
      zoom bar a little lower leaves a visible gap between the two instead
      of letting the panel sit on the bar's edge (issue #10). */
@@ -592,7 +594,9 @@ footer p {
   white-space: pre-wrap;
   user-select: text;
 }
-.component-card strong {
+/* 只保护卡片的直接子标题：行向 chrome 里的折叠标题要能收缩，
+   否则长标题把层级切换按钮推出卡片边界。 */
+.component-card > strong {
   flex-shrink: 0;
 }
 .component-card button {
@@ -856,6 +860,23 @@ legend {
 }
 .component-editor textarea {
   min-height: 90px;
+}
+/* 自动保存与草稿：没写进去要说清楚，草稿还在也要看得见。 */
+.component-editor .edit-failure {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #833c28;
+  background: #fbe7e1;
+  border-radius: 8px;
+}
+.component-editor .edit-failure p {
+  margin: 0 0 8px;
+}
+.component-editor .edit-status {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
 }
 @media (max-width: 850px) {
   .space-shell .canvas {
@@ -1650,10 +1671,11 @@ main.canvas-app {
    used to refuse to shrink: the ellipsis never applied and the title
    pushed the level toggle clean out of the card. min-width: 0 lets the
    title shrink so the ellipsis works and the button stays put. The
-   selector has to out-specify ".component-card strong { flex-shrink: 0 }"
+   selector has to out-specify ".component-card > strong { flex-shrink: 0 }"
    above, which is there to keep the full-level title from being squeezed
-   vertically. */
-.component-card .collapsed-title {
+   vertically; that rule is scoped to direct children so it no longer
+   reaches the row-direction chrome. */
+.component-chrome .collapsed-title {
   min-width: 0;
   flex: 1 1 auto;
   overflow: hidden;

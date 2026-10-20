@@ -1,9 +1,22 @@
-import { useState, useEffect, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  type KeyboardEvent as ReactKeyEvent,
+} from "react";
 import type { Board } from "../core/model.ts";
 import type { ComponentInstance, ThemeConfig } from "../core/spaces.ts";
 import { componentTypes, defaultData } from "../core/spaces.ts";
+import { peekContent, resolveContent } from "../core/content.ts";
+import type { WorkspaceObject } from "../core/objects.ts";
 import { Icon } from "./Icon.tsx";
-import { editIntent, endEditSession } from "./edit-session.ts";
+import {
+  clearDraft,
+  editIntent,
+  endEditSession,
+  readDraft,
+  writeDraft,
+} from "./edit-session.ts";
 export function ComponentPanel({
   board: b,
   viewId,
@@ -103,79 +116,115 @@ export function ComponentPanel({
       {selected.length > 0 && (
         <>
           <h3>选中组件</h3>
-          {selected.map((c) => (
-            <div key={c.id} className="report">
-              <div className="report-head">
-                <b title={c.title}>{c.title}</b>
-                <div className="report-actions">
-                  <button
-                    className="icon-button"
-                    title={`复制 ${c.title}`}
-                    aria-label="复制"
-                    disabled={busy}
-                    onClick={() =>
-                      void operate({ kind: "duplicate", instanceId: c.id })
-                    }
-                  >
-                    <Icon name="copy" size={15} />
-                  </button>
-                  <button
-                    className="icon-button"
-                    title={
-                      c.rect.pinned ? `取消固定 ${c.title}` : `固定位置 ${c.title}`
-                    }
-                    aria-label={c.rect.pinned ? "取消固定" : "固定位置"}
-                    aria-pressed={c.rect.pinned}
-                    disabled={busy}
-                    onClick={() =>
-                      void operate({
-                        kind: "place",
-                        items: [
-                          {
-                            id: c.id,
-                            rect: { ...c.rect, pinned: !c.rect.pinned },
-                          },
-                        ],
-                      })
-                    }
-                  >
-                    <Icon name="pin" size={15} />
-                  </button>
+          {selected.map((c) => {
+            /* 标题同源（D4）：展示处一律从内容模型解析，不读实例自己的旧标题。
+               绑定了内容对象的实例改名后，这里显示的是对象上的新标题；
+               只读渲染用 peekContent，下面要改副本的编辑器用 resolveContent。 */
+            const shown = peekContent(c, b.contentObjects);
+            /* 绑定了内容对象的实例：内容在对象上，这张卡只是一次呈现。 */
+            const bound = shown.objectId
+              ? b.contentObjects.find((o) => o.id === shown.objectId)
+              : undefined;
+            return (
+              <div key={c.id} className="report">
+                <div className="report-head">
+                  <b title={shown.title}>{shown.title}</b>
+                  <div className="report-actions">
+                    <button
+                      className="icon-button"
+                      title={`复制 ${shown.title}`}
+                      aria-label="复制"
+                      disabled={busy}
+                      onClick={() =>
+                        void operate({ kind: "duplicate", instanceId: c.id })
+                      }
+                    >
+                      <Icon name="copy" size={15} />
+                    </button>
+                    <button
+                      className="icon-button"
+                      title={
+                        c.rect.pinned
+                          ? `取消固定 ${shown.title}`
+                          : `固定位置 ${shown.title}`
+                      }
+                      aria-label={c.rect.pinned ? "取消固定" : "固定位置"}
+                      aria-pressed={c.rect.pinned}
+                      disabled={busy}
+                      onClick={() =>
+                        void operate({
+                          kind: "place",
+                          items: [
+                            {
+                              id: c.id,
+                              rect: { ...c.rect, pinned: !c.rect.pinned },
+                            },
+                          ],
+                        })
+                      }
+                    >
+                      <Icon name="pin" size={15} />
+                    </button>
+                  </div>
                 </div>
+                <select
+                  aria-label={`移动 ${shown.title} 到白板`}
+                  value={c.spaceId}
+                  onChange={(e) =>
+                    void operate({
+                      kind: "move",
+                      instanceId: c.id,
+                      spaceId: e.target.value,
+                    })
+                  }
+                >
+                  {b.spaces.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.title}
+                    </option>
+                  ))}
+                </select>
+                {bound && (
+                  /* 这两件事不是一回事（D8）：
+                     「再放一份」= 同一个对象在当前白板新增一次呈现（内容共享、布局独立）；
+                     「复制出独立对象」= 内容深拷贝出一个新对象，此后互不影响。 */
+                  <div className="report-actions">
+                    <button
+                      disabled={busy}
+                      onClick={() =>
+                        void operate({ kind: "present", objectId: bound.id })
+                      }
+                    >
+                      再放一份
+                    </button>
+                    <button
+                      disabled={busy}
+                      onClick={() =>
+                        void operate({ kind: "copyObject", instanceId: c.id })
+                      }
+                    >
+                      复制出独立对象
+                    </button>
+                  </div>
+                )}
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    void operate({ kind: "remove", instanceId: c.id })
+                  }
+                >
+                  移除
+                </button>
               </div>
-              <select
-                aria-label={`移动 ${c.title} 到白板`}
-                value={c.spaceId}
-                onChange={(e) =>
-                  void operate({
-                    kind: "move",
-                    instanceId: c.id,
-                    spaceId: e.target.value,
-                  })
-                }
-              >
-                {b.spaces.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.title}
-                  </option>
-                ))}
-              </select>
-              <button
-                disabled={busy}
-                onClick={() =>
-                  void operate({ kind: "remove", instanceId: c.id })
-                }
-              >
-                移除
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </>
       )}
       {selected.length === 1 && (
         <ComponentEditor
           key={selected[0].id}
           instance={selected[0]}
+          objects={b.contentObjects}
           busy={busy}
           operate={operate}
           action={action}
@@ -252,150 +301,282 @@ export function ComponentPanel({
     </section>
   );
 }
+/**
+ * 属性栏里的编辑器。
+ *
+ * 内容在对象上，展示只是它的一次呈现：标题与字段都从对象解析，
+ * 写回也写进对象（同一个对象在别处的展示会同步更新）。
+ *
+ * 自动保存：停止输入约 600ms（或失焦）写一次。
+ * - 一次编辑会话里的连续保存共用同一个 intentId，600ms 防抖不会把一次
+ *   编辑拆成一堆历史步骤。
+ * - 写回带 baseData（编辑器看到的那份基线）与 expectedVersion（对象版本）：
+ *   服务端只应用真正改动的字段，并对「同一字段被别人改过」报冲突。
+ * - 没写进去时草稿留着，失败说清楚是哪些字段，并提示重新载入。
+ */
 function ComponentEditor({
   instance: c,
+  objects,
   busy,
   operate,
   action,
 }: {
   instance: ComponentInstance;
+  objects: WorkspaceObject[];
   busy: boolean;
   operate: (op: any) => Promise<any>;
   action: (name: string, args?: Record<string, unknown>) => Promise<any>;
 }) {
-  const [title, setTitle] = useState(c.title),
-    [data, setData] = useState<Record<string, any>>(c.data),
-    [json, setJson] = useState(JSON.stringify(c.data, null, 2)),
-    [error, setError] = useState(""),
-    [failed, setFailed] = useState("");
-  /* #9.4: content fields save themselves. A field that changes starts a short
-     timer; when the person stops typing the change is written back, with the
-     same intent token for the whole run of typing, so the server merges it
-     into one history step. The explicit button stays as a fallback.
-
-     Only the fields the person actually touched are written back, and they
-     are merged into the data the server holds — so an agent's change to
-     another field of the same component is not overwritten by an auto-save. */
+  const content = resolveContent(c, objects);
+  const bound = content.objectId
+    ? objects.find((o) => o.id === content.objectId)
+    : undefined;
+  /* 服务端内容变了才有新基线：绑定对象看对象版本，没绑定看实例自身。 */
+  const contentKey = bound ? `object:${bound.version}` : `local:${c.updatedAt}`;
+  /* 切换组件再回来，上次没写进去的输入还在。 */
+  const restored = useRef(readDraft(c.id)).current;
+  const [title, setTitle] = useState(restored ? restored.title : content.title);
+  const [data, setData] = useState<Record<string, any>>(() =>
+    restored ? applyPaths(content.data, restored.edits) : content.data,
+  );
+  const [json, setJson] = useState(() =>
+    JSON.stringify(
+      restored ? applyPaths(content.data, restored.edits) : content.data,
+      null,
+      2,
+    ),
+  );
+  const [error, setError] = useState("");
+  const [failure, setFailure] = useState("");
+  const [dirty, setDirty] = useState(
+    restored
+      ? Object.keys(restored.edits).length > 0 ||
+        restored.title !== restored.startTitle
+      : false,
+  );
   const timer = useRef(0);
-  const pending = useRef(new Set<string>());
-  const edits = useRef<Record<string, unknown>>({});
-  const pendingLabel = useRef("");
-  const server = useRef({ title: c.title, data: c.data });
-  const serverData = useRef(c.data);
-  serverData.current = c.data;
-  useEffect(() => {
-    /* The server is the source of truth for what has been saved. Local edits
-       that have not been saved are kept: the person is still typing. */
-    const clean =
-      title === server.current.title &&
-      JSON.stringify(data) === JSON.stringify(server.current.data);
-    server.current = { title: c.title, data: c.data };
-    if (clean) {
-      setTitle(c.title);
-      setData(c.data);
-      setJson(JSON.stringify(c.data, null, 2));
+  /* 改过的字段：路径 → 新值。 */
+  const edits = useRef<Record<string, unknown>>(
+    restored ? { ...restored.edits } : {},
+  );
+  /* 改过的字段在被改之前的值：冲突判定拿它跟服务端的当前值比。 */
+  const starts = useRef<Record<string, unknown>>(
+    restored ? { ...restored.starts } : {},
+  );
+  const labels = useRef<Record<string, string>>({});
+  const titleRef = useRef(title);
+  const startTitle = useRef(restored ? restored.startTitle : content.title);
+  /* 服务端当前的内容（基线）。 */
+  const serverData = useRef<Record<string, any>>(content.data);
+  const serverTitle = useRef(content.title);
+  /* 本地草稿：服务端的内容叠上人的未提交改动。 */
+  const draftData = useRef<Record<string, any>>(data);
+  const jsonDirty = useRef(false);
+  const version = useRef<number | undefined>(bound?.version);
+
+  const refreshDirty = () =>
+    setDirty(
+      Object.keys(edits.current).length > 0 ||
+        titleRef.current !== startTitle.current,
+    );
+  /** 把草稿留在组件之外：切换组件、关掉面板都不丢输入。 */
+  const persist = () => {
+    const paths = Object.keys(edits.current);
+    if (!paths.length && titleRef.current === startTitle.current) {
+      clearDraft(c.id);
+      return;
     }
-  }, [c.updatedAt]);
-  useEffect(() => () => clearTimeout(timer.current), []);
-  /* Leaving the component ends the editing session: the next edit is a new
-     intent and therefore a new step. Moving between two fields of the same
-     component does not — that is one continuous edit and stays one step, so
-     one undo takes the whole edit back. */
-  useEffect(() => () => endEditSession(c.id), [c.id]);
-  const commit = async () => {
+    writeDraft(c.id, {
+      title: titleRef.current,
+      startTitle: startTitle.current,
+      edits: { ...edits.current },
+      starts: { ...starts.current },
+    });
+  };
+  /** 写回一次。成功返回 true；失败保留草稿并把原因说清楚。 */
+  const commit = async (): Promise<boolean> => {
     clearTimeout(timer.current);
-    if (!pending.current.size) return;
-    const keys = [...pending.current];
-    const next = { ...serverData.current };
-    for (const key of keys)
-      if (key !== "title") setPath(next, key, edits.current[key]);
+    const paths = Object.keys(edits.current);
+    const titleChanged = titleRef.current !== startTitle.current;
+    if (!paths.length && !titleChanged) return true;
     const op: any = {
       kind: "update",
       instanceId: c.id,
-      intent: editIntent(c.id),
+      /* 一次编辑会话里的连续保存共用同一个意图。 */
+      intentId: editIntent(c.id),
     };
-    if (keys.includes("title")) op.title = edits.current.title;
-    if (!["object", "board"].includes(c.type)) op.data = next;
+    if (titleChanged) {
+      op.title = titleRef.current;
+      /* 标题冲突也要能指出来：带上编辑器看到的旧标题。 */
+      op.baseTitle = startTitle.current;
+    }
+    if (paths.length) {
+      /* baseData 是编辑器看到的那份基线：服务端只应用真正改动的字段，
+         并能判断「同一字段被别人改过」。 */
+      op.baseData = applyPaths(serverData.current, starts.current);
+      op.data = applyPaths(serverData.current, edits.current);
+    }
+    /* 绑定对象时带上当前版本：版本对不上就拒绝写入，不覆盖别人的改动。 */
+    if (version.current !== undefined) op.expectedVersion = version.current;
     const result = await operate(op);
     if (result === undefined) {
-      /* Keep the change pending so the next attempt tries again, and say
-         which field did not make it — a failed write that looks like a
-         success is the failure mode this is here to remove. */
-      setFailed(
-        `「${pendingLabel.current || "内容"}」没有保存成功：服务端拒绝了这次写入，原因见页面上方的提示。`,
+      /* 没写进去：草稿留着，失败说清楚是哪些字段，并提示重新载入。 */
+      const names = paths.map((p) => labels.current[p] || p);
+      if (titleChanged) names.unshift("名称");
+      setFailure(
+        `${names.length ? `「${names.join("、")}」` : "这次改动"}没有保存成功：服务端拒绝了这次写入（原因见页面上方的提示）。草稿已保留，重新载入后可以再试一次。`,
       );
-      return;
+      refreshDirty();
+      persist();
+      return false;
     }
-    pending.current.clear();
-    setFailed("");
+    for (const path of paths) {
+      delete edits.current[path];
+      delete starts.current[path];
+      delete labels.current[path];
+    }
+    if (titleChanged) startTitle.current = titleRef.current;
+    /* 服务端把对象版本加了一：下一次保存要用新版本。 */
+    if (version.current !== undefined) version.current += 1;
+    setFailure("");
+    refreshDirty();
+    persist();
+    return true;
   };
-  /* Leaving a field is not the end of the session: the auto-save writes the
-     change but keeps the intent, so one run of editing stays one step
-     however many times it is written. */
-  const leave = () => void commit();
   const schedule = () => {
     clearTimeout(timer.current);
     timer.current = window.setTimeout(() => void commit(), 600);
   };
-  const touch = (key: string, label: string, value: unknown) => {
-    pending.current.add(key);
-    edits.current[key] = value;
-    pendingLabel.current = label;
+  /** 改一个字段：记下新值与它被改之前的值（冲突判定要用）。 */
+  const touch = (path: string, label: string, value: unknown) => {
+    const start = getPath(serverData.current, path);
+    edits.current[path] = value;
+    labels.current[path] = label;
+    if (!(path in starts.current)) starts.current[path] = start;
+    if (sameValue(value, start)) {
+      /* 改回原样：这一项没有改动，不写回。 */
+      delete edits.current[path];
+      delete starts.current[path];
+      delete labels.current[path];
+    }
+    const next = applyPaths(draftData.current, { [path]: value });
+    draftData.current = next;
+    setData(next);
+    refreshDirty();
     schedule();
+    persist();
   };
-  const revert = (key: string) => {
-    pending.current.delete(key);
-    delete edits.current[key];
-    if (key === "title") setTitle(server.current.title);
-    else setData({ ...data, [key]: server.current.data?.[key] });
+  /** 改标题：标题不属于 data，单独记。 */
+  const touchTitle = (value: string) => {
+    titleRef.current = value;
+    setTitle(value);
+    refreshDirty();
+    schedule();
+    persist();
+  };
+  /** Esc：这一项回到服务端的值，并结束这次编辑会话。 */
+  const revert = (path: string) => {
+    delete edits.current[path];
+    delete starts.current[path];
+    delete labels.current[path];
+    if (path === "title") {
+      titleRef.current = serverTitle.current;
+      startTitle.current = serverTitle.current;
+      setTitle(serverTitle.current);
+    } else {
+      const next = applyPaths(draftData.current, {
+        [path]: getPath(serverData.current, path),
+      });
+      draftData.current = next;
+      setData(next);
+    }
     endEditSession(c.id);
+    refreshDirty();
+    persist();
   };
+  /** 重新载入：草稿留着，改动叠在服务端最新值之上，基线换成最新值。 */
+  const reload = async () => {
+    const fresh = (await action("sand_read_board")) as Board | undefined;
+    const latest = fresh?.contentObjects;
+    if (!latest) return;
+    const resolved = resolveContent(c, latest);
+    const nextStarts: Record<string, unknown> = {};
+    for (const path of Object.keys(edits.current))
+      nextStarts[path] = getPath(resolved.data, path);
+    starts.current = nextStarts;
+    if (titleRef.current !== startTitle.current)
+      startTitle.current = resolved.title;
+    const next = applyPaths(resolved.data, edits.current);
+    draftData.current = next;
+    setData(next);
+    if (!jsonDirty.current) setJson(JSON.stringify(next, null, 2));
+    setFailure("");
+    persist();
+  };
+  /* 离开一个字段不是编辑会话的结束：改动写回去，但意图不变，
+     一次连续编辑仍然只是一步。 */
+  const leave = () => void commit();
+  const onKey = (path: string) => (e: ReactKeyEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      revert(path);
+      (e.target as HTMLElement).blur();
+    }
+  };
+
+  /* 服务端内容变了：以它为新基线，人的未提交改动叠在上面。
+     没被改过的字段跟着服务端走（别人的并发修改不会被旧草稿覆盖），
+     改过的字段保留草稿值与它的起始值（冲突判定要用）。 */
+  useEffect(() => {
+    const server = content.data;
+    serverData.current = server;
+    serverTitle.current = content.title;
+    if (bound && (version.current === undefined || bound.version > version.current))
+      version.current = bound.version;
+    const next = applyPaths(server, edits.current);
+    draftData.current = next;
+    setData(next);
+    if (!jsonDirty.current) setJson(JSON.stringify(next, null, 2));
+    if (titleRef.current === startTitle.current) {
+      /* 标题没被改：基线跟着服务端走（别人的改名不算我改的）。 */
+      titleRef.current = content.title;
+      startTitle.current = content.title;
+      setTitle(content.title);
+    }
+  }, [contentKey]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  /* 离开这个组件就是一次编辑会话的结束：下一次编辑是新的意图、新的步骤。 */
+  useEffect(() => () => endEditSession(c.id), [c.id]);
+  /* 上次没写进去的改动：回到这个组件就补一次自动保存。 */
+  useEffect(() => {
+    if (!restored) return;
+    if (
+      Object.keys(edits.current).length ||
+      titleRef.current !== startTitle.current
+    )
+      schedule();
+  }, []);
+
   const field = (key: string, label: string, multiline = false) => (
     <label key={key}>
       {label}
       {multiline ? (
         <textarea
           value={String(data[key] ?? "")}
-          onChange={(e) => {
-            setData({ ...data, [key]: e.target.value });
-            touch(key, label, e.target.value);
-          }}
+          onChange={(e) => touch(key, label, e.target.value)}
           onBlur={leave}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.preventDefault();
-              revert(key);
-              (e.target as HTMLElement).blur();
-            }
-          }}
+          onKeyDown={onKey(key)}
         />
       ) : (
         <input
           value={String(data[key] ?? "")}
-          onChange={(e) => {
-            setData({ ...data, [key]: e.target.value });
-            touch(key, label, e.target.value);
-          }}
+          onChange={(e) => touch(key, label, e.target.value)}
           onBlur={leave}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.preventDefault();
-              revert(key);
-              (e.target as HTMLElement).blur();
-            }
-          }}
+          onKeyDown={onKey(key)}
         />
       )}
     </label>
   );
-  const save = () =>
-    operate({
-      kind: "update",
-      instanceId: c.id,
-      title,
-      data,
-      intent: editIntent(c.id),
-    });
   return (
     <section className="component-editor">
       <h3>配置</h3>
@@ -404,18 +585,9 @@ function ComponentEditor({
         <input
           aria-label="编辑组件名称"
           value={title}
-          onChange={(e) => {
-            setTitle(e.target.value);
-            touch("title", "名称", e.target.value);
-          }}
+          onChange={(e) => touchTitle(e.target.value)}
           onBlur={leave}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.preventDefault();
-              revert("title");
-              (e.target as HTMLElement).blur();
-            }
-          }}
+          onKeyDown={onKey("title")}
         />
       </label>
       {["text", "heading", "code"].includes(c.type) &&
@@ -450,12 +622,7 @@ function ComponentEditor({
                 });
                 if (asset) {
                   await action("sand_read_board");
-                  setData({ ...data, assetId: asset.id });
-                  await operate({
-                    kind: "update",
-                    instanceId: c.id,
-                    data: { ...data, assetId: asset.id },
-                  });
+                  touch("assetId", "附加图片／音视频", asset.id);
                 }
               }}
             />
@@ -475,13 +642,10 @@ function ComponentEditor({
             状态
             <select
               value={data.state || "unknown"}
-              onChange={(e) =>
-                setData({
-                  ...data,
-                  state: e.target.value,
-                  observedAt: Date.now(),
-                })
-              }
+              onChange={(e) => {
+                touch("state", "状态", e.target.value);
+                touch("observedAt", "观测时间", Date.now());
+              }}
             >
               <option value="unknown">未知</option>
               <option value="operational">可用</option>
@@ -503,17 +667,19 @@ function ComponentEditor({
                 .map((i: any) => `${i.done ? "[x] " : ""}${i.text}`)
                 .join("\n")}
               onChange={(e) =>
-                setData({
-                  ...data,
-                  items: e.target.value
+                touch(
+                  "items",
+                  "清单",
+                  e.target.value
                     .split("\n")
                     .filter(Boolean)
                     .map((line) => ({
                       text: line.replace(/^\[x\]\s*/, ""),
                       done: line.startsWith("[x]"),
                     })),
-                })
+                )
               }
+              onBlur={leave}
             />
           </label>
         </>
@@ -524,7 +690,7 @@ function ComponentEditor({
             图表形式
             <select
               value={data.kind || "bar"}
-              onChange={(e) => setData({ ...data, kind: e.target.value })}
+              onChange={(e) => touch("kind", "图表形式", e.target.value)}
             >
               <option value="bar">柱状图</option>
               <option value="line">折线图</option>
@@ -547,7 +713,8 @@ function ComponentEditor({
                       value: Number(line.slice(at + 1)),
                     };
                   });
-                setData({ ...data, points });
+                touch("points", "数据", points);
+                leave();
               }}
             />
           </label>
@@ -568,41 +735,15 @@ function ComponentEditor({
               <input
                 aria-label={`方案 ${i + 1} 名称`}
                 value={data[key]?.title || ""}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setData({
-                    ...data,
-                    [key]: { ...data[key], title: value },
-                  });
-                  touch(`${key}.title`, `方案 ${i + 1} 名称`, value);
-                }}
+                onChange={(e) => touch(`${key}.title`, `方案 ${i + 1} 名称`, e.target.value)}
                 onBlur={leave}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    e.preventDefault();
-                    revert(`${key}.title`);
-                    (e.target as HTMLElement).blur();
-                  }
-                }}
+                onKeyDown={onKey(`${key}.title`)}
               />
               <textarea
                 value={data[key]?.text || ""}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setData({
-                    ...data,
-                    [key]: { ...data[key], text: value },
-                  });
-                  touch(`${key}.text`, `方案 ${i + 1} 内容`, value);
-                }}
+                onChange={(e) => touch(`${key}.text`, `方案 ${i + 1} 内容`, e.target.value)}
                 onBlur={leave}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    e.preventDefault();
-                    revert(`${key}.text`);
-                    (e.target as HTMLElement).blur();
-                  }
-                }}
+                onKeyDown={onKey(`${key}.text`)}
               />
             </fieldset>
           ))}
@@ -615,26 +756,23 @@ function ComponentEditor({
             列名（用逗号分隔）
             <input
               value={(data.columns || []).join(",")}
-              onChange={(e) =>
-                setData({ ...data, columns: e.target.value.split(",") })
-              }
+              onChange={(e) => touch("columns", "列名", e.target.value.split(","))}
             />
           </label>
           <label>
             数据（每行一条，用逗号分列）
             <textarea
-              value={(data.rows || [])
+              defaultValue={(data.rows || [])
                 .map((row: any[]) => row.join(","))
                 .join("\n")}
-              onChange={(e) =>
-                setData({
-                  ...data,
-                  rows: e.target.value
-                    .split("\n")
-                    .filter(Boolean)
-                    .map((line) => line.split(",")),
-                })
-              }
+              onBlur={(e) => {
+                const rows = e.target.value
+                  .split("\n")
+                  .filter(Boolean)
+                  .map((line) => line.split(","));
+                touch("rows", "数据", rows);
+                leave();
+              }}
             />
           </label>
         </>
@@ -647,9 +785,10 @@ function ComponentEditor({
               .map((v: any) => `${v.at} | ${v.label} | ${v.detail || ""}`)
               .join("\n")}
             onChange={(e) =>
-              setData({
-                ...data,
-                events: e.target.value
+              touch(
+                "events",
+                "事件",
+                e.target.value
                   .split("\n")
                   .filter(Boolean)
                   .map((line) => {
@@ -658,8 +797,9 @@ function ComponentEditor({
                       .map((v) => v.trim());
                     return { at, label, detail: detail.join(" | ") };
                   }),
-              })
+              )
             }
+            onBlur={leave}
           />
         </label>
       )}
@@ -669,7 +809,10 @@ function ComponentEditor({
           <textarea
             aria-label="组件高级配置"
             value={json}
-            onChange={(e) => setJson(e.target.value)}
+            onChange={(e) => {
+              jsonDirty.current = true;
+              setJson(e.target.value);
+            }}
           />
           <button
             onClick={() => {
@@ -681,14 +824,27 @@ function ComponentEditor({
                   Array.isArray(parsed)
                 )
                   throw Error("需要对象格式");
-                setData(parsed);
+                /* 整份替换：逐字段标出与基线的差异，交给服务端按字段合并。 */
+                const server = serverData.current;
+                const nextEdits: Record<string, unknown> = {};
+                const nextStarts: Record<string, unknown> = {};
+                for (const key of Array.from(
+                  new Set([...Object.keys(server), ...Object.keys(parsed)]),
+                )) {
+                  if (!sameValue(parsed[key], server[key])) {
+                    nextEdits[key] = parsed[key];
+                    nextStarts[key] = server[key];
+                  }
+                }
+                edits.current = nextEdits;
+                starts.current = nextStarts;
+                const next = applyPaths(server, nextEdits);
+                draftData.current = next;
+                setData(next);
+                setJson(JSON.stringify(next, null, 2));
+                jsonDirty.current = false;
                 setError("");
-                void operate({
-                  kind: "update",
-                  instanceId: c.id,
-                  title,
-                  data: parsed,
-                });
+                void commit();
               } catch (e) {
                 setError(String(e));
               }
@@ -698,20 +854,27 @@ function ComponentEditor({
           </button>
         </details>
       )}
-      {(error || failed) && <p role="alert">{error || failed}</p>}
+      {(error || failure) && (
+        <div className="edit-failure" role="alert">
+          <p>{error || failure}</p>
+          {failure && (
+            <button disabled={busy} onClick={() => void reload()}>
+              重新载入并保留草稿
+            </button>
+          )}
+        </div>
+      )}
+      {dirty && !error && !failure && (
+        <p className="edit-status">
+          有未保存的改动：停止输入约 0.6 秒后自动写入，也可以点「保存组件」立即写入。
+        </p>
+      )}
       <button
         disabled={busy}
         onClick={() =>
-          void (
-            ["object", "board"].includes(c.type)
-              ? operate({ kind: "update", instanceId: c.id, title })
-              : save()
-          ).then((result) => {
-            if (result !== undefined) {
-              pending.current.clear();
-              setFailed("");
-              endEditSession(c.id);
-            }
+          void commit().then((ok) => {
+            /* 显式保存是一次编辑会话的结束：下一次编辑是新的历史步骤。 */
+            if (ok) endEditSession(c.id);
           })
         }
       >
@@ -720,16 +883,53 @@ function ComponentEditor({
     </section>
   );
 }
-/** Write one field into the data, following a dotted path. */
-function setPath(target: Record<string, any>, path: string, value: unknown) {
+/** Read one value out of a dotted path. */
+function getPath(target: Record<string, any>, path: string): unknown {
+  let node: any = target;
+  for (const key of path.split(".")) {
+    if (node === null || node === undefined || typeof node !== "object")
+      return undefined;
+    node = node[key];
+  }
+  return node;
+}
+/** Copy the path's ancestors and write the value: the input is not modified. */
+function withPath(
+  target: Record<string, any>,
+  path: string,
+  value: unknown,
+): Record<string, any> {
   const parts = path.split(".");
-  let node = target;
+  const root: Record<string, any> = { ...target };
+  let node = root;
   for (let i = 0; i < parts.length - 1; i++) {
     const key = parts[i];
-    if (!node[key] || typeof node[key] !== "object") node[key] = {};
+    const child = node[key];
+    node[key] =
+      child && typeof child === "object"
+        ? Array.isArray(child)
+          ? [...child]
+          : { ...child }
+        : {};
     node = node[key];
   }
   node[parts[parts.length - 1]] = value;
+  return root;
+}
+/** Apply a set of path → value patches onto a copy of the data. */
+function applyPaths(
+  target: Record<string, any>,
+  patches: Record<string, unknown>,
+): Record<string, any> {
+  let next = { ...target };
+  for (const [path, value] of Object.entries(patches))
+    next = withPath(next, path, value);
+  return next;
+}
+/** Deep equality for the values inside a component's data. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 const palettes = {
   paper: {
@@ -815,7 +1015,9 @@ export function ThemePanel({
           <input
             type="color"
             value={String(config[key as keyof ThemeConfig])}
-            onChange={(e) => setConfig({ ...config, [key]: e.target.value })}
+            onChange={(e) =>
+              setConfig({ ...config, [key]: e.target.value })
+            }
           />
         </label>
       ))}
@@ -857,9 +1059,7 @@ export function ThemePanel({
           min="0"
           max="24"
           value={config.radius}
-          onChange={(e) =>
-            setConfig({ ...config, radius: Number(e.target.value) })
-          }
+          onChange={(e) => setConfig({ ...config, radius: Number(e.target.value) })}
         />
       </label>
       <label className="file-choice">
