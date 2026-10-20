@@ -4,6 +4,18 @@ import {
   syncSelection,
 } from "./space-state.ts";
 import { intentSummary } from "./changes.ts";
+import {
+  captureState,
+  currentState,
+  pushEdit,
+  applyFlip,
+  jumpTo,
+  summarize,
+  restoreState,
+  type BoardHistory,
+  type ContentState,
+  type HistorySnapshot,
+} from "./history.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type {
   Board,
@@ -16,6 +28,7 @@ import type {
 } from "./model.ts";
 export class BoardStore {
   boards = new Map<string, Board>();
+  histories = new Map<string, BoardHistory>();
   contextSnapshots = new Map<
     string,
     { revision: number; parts: Record<string, string> }
@@ -31,6 +44,7 @@ export class BoardStore {
       if (b.expiresAt <= this.now()) {
         this.boards.delete(id);
         this.contextSnapshots.delete(id);
+        this.histories.delete(id);
       }
   }
   get(id: string) {
@@ -88,7 +102,104 @@ export class BoardStore {
     };
     initializeSpaces(b);
     this.boards.set(b.id, b);
+    this.histories.set(b.id, {
+      initial: captureState(b),
+      steps: [],
+      flips: [],
+      cursor: -1,
+      bytes: 0,
+      seq: 0,
+    });
     return this.read(b.id);
+  }
+  history(id: string): HistorySnapshot {
+    this.get(id);
+    const h = this.histories.get(id);
+    const records = h ? summarize(h) : [];
+    return {
+      boardId: id,
+      records,
+      canUndo: h ? h.cursor >= 0 : false,
+      canRedo: h ? h.cursor < h.steps.length - 1 : false,
+      note:
+        "Every write is a record on one history: Cmd+Z walks the board back one edit, Cmd+Shift+Z walks it forward, and the undo is itself a record that can be flipped again. Scope is board content only — intents, proposals and files are never touched.",
+    };
+  }
+  /** Record one write as a history step. */
+  recordEdit(
+    id: string,
+    entry: {
+      label: string;
+      author: string;
+      intent?: string;
+      state?: ContentState;
+    },
+  ) {
+    const b = this.get(id);
+    const h = this.histories.get(id);
+    if (!h) return;
+    const state = entry.state ?? captureState(b);
+    const record = pushEdit(h, {
+      id: randomUUID(),
+      label: entry.label,
+      at: this.now(),
+      author: entry.author,
+      intent: entry.intent,
+      state,
+    });
+    return record;
+  }
+  /**
+   * Walk the board back (or forward) one recorded edit.
+   *
+   * The move is pushed onto the history as its own record, so it shows up in
+   * the history panel, carries its author, and can itself be flipped — a
+   * redo brings the undone edit back.
+   */
+  undo(id: string, author = "human", kind: "undo" | "redo" = "undo") {
+    const b = this.get(id);
+    const h = this.histories.get(id);
+    if (!h) throw Error("没有可回退的操作。");
+    const state = applyFlip(h, {
+      id: randomUUID(),
+      kind,
+      at: this.now(),
+      author,
+    });
+    restoreState(b, state);
+    b.revision++;
+    return { board: this.read(id) };
+  }
+  /** Jump to a recorded step; the jump is itself a record. */
+  undoTo(id: string, recordId: string, author = "human") {
+    const b = this.get(id);
+    const h = this.histories.get(id);
+    if (!h) throw Error("没有可回退的操作。");
+    let index = h.steps.findIndex((s) => s.id === recordId);
+    if (index < 0) {
+      const flip = h.flips.find((f) => f.id === recordId);
+      if (!flip) throw Error("未知的历史步骤。");
+      // A flip records the step it landed on by id, not by position: the
+      // position moves when old steps are trimmed away, the id does not.
+      if (flip.stepId) {
+        index = h.steps.findIndex((s) => s.id === flip.stepId);
+        if (index < 0)
+          throw Error("这一步的记录已经被清理，无法回退到。");
+      } else index = -1;
+    }
+    const state = jumpTo(h, index, {
+      id: randomUUID(),
+      at: this.now(),
+      author,
+    });
+    restoreState(b, state);
+    b.revision++;
+    return { board: this.read(id) };
+  }
+  /** The content the board currently shows, as recorded by the history. */
+  historyState(id: string) {
+    const h = this.histories.get(id);
+    return h ? currentState(h) : undefined;
   }
   ids(b: Board, ids: string[]) {
     if (
@@ -465,6 +576,7 @@ export class BoardStore {
   }
   end(id: string) {
     this.contextSnapshots.delete(id);
+    this.histories.delete(id);
     this.get(id);
     this.boards.delete(id);
     return { ended: true, boardId: id };

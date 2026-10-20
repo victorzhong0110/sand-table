@@ -145,8 +145,12 @@ try {
   await frame
     .getByRole("button", { name: "提交改动意图", exact: true })
     .click();
+  // The UI writes the intent asynchronously; give the board a moment to settle
+  // so the MCP read below does not race the write.
+  await untilBoard((b: any) => b.intents.length > 0);
   const intents = await call("sand_read_intents", { boardId }),
     intent = intents[0];
+  assert.ok(intent, "The UI-submitted intent should be readable through MCP.");
   assert.equal(intent.allowedFiles[0].path, "src/index.js");
   const file = intent.allowedFiles[0],
     before = readFileSync(join(repo, file.path), "utf8");

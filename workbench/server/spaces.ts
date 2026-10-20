@@ -1,11 +1,17 @@
-import { viewResult } from "../core/results.ts";
+import { boardSummary, viewResult } from "../core/results.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { BoardStore } from "../core/store.ts";
 import type { Board } from "../core/model.ts";
 import type { ComponentInstance, Rect, View } from "../core/spaces.ts";
-import { componentTypes, defaultData, safeUrl } from "../core/spaces.ts";
+import {
+  componentTypes,
+  defaultData,
+  safeUrl,
+  checkComponentData,
+} from "../core/spaces.ts";
 import { openView } from "../core/space-state.ts";
+import { stateSignature } from "../core/history.ts";
 import type { RegisterTool } from "./tool-types.ts";
 const id = z.string().min(1).max(500),
   board = { boardId: id };
@@ -29,62 +35,6 @@ const theme = z.object({
   radius: z.number().min(0).max(24),
   reduceMotion: z.boolean(),
 });
-function checkData(type: string, data: Record<string, unknown>) {
-  if (JSON.stringify(data).length > 40000)
-    throw Error("Component data exceeds 40 KB.");
-  if (data.url && !safeUrl(data.url))
-    throw Error("Resource URL must use HTTP(S).");
-  if (data.sourceUrl && !safeUrl(data.sourceUrl))
-    throw Error("Source URL must use HTTP(S).");
-  if (type === "chart") {
-    const p = data.points;
-    if (
-      !Array.isArray(p) ||
-      p.length > 100 ||
-      p.some(
-        (v: any) =>
-          !v ||
-          typeof v.label !== "string" ||
-          v.label.length > 100 ||
-          !Number.isFinite(v.value),
-      )
-    )
-      throw Error("Chart needs up to 100 finite labeled values.");
-  }
-  if (type === "table") {
-    if (
-      !Array.isArray(data.columns) ||
-      data.columns.length > 20 ||
-      data.columns.some((v) => typeof v !== "string") ||
-      !Array.isArray(data.rows) ||
-      data.rows.length > 200 ||
-      data.rows.some(
-        (row) =>
-          !Array.isArray(row) ||
-          row.length !== (data.columns as unknown[]).length ||
-          row.some(
-            (v) =>
-              !["string", "number", "boolean"].includes(typeof v) && v !== null,
-          ),
-      )
-    )
-      throw Error("Table dimensions or values are invalid.");
-  }
-  if (
-    type === "task" &&
-    (!Array.isArray(data.items) ||
-      data.items.length > 100 ||
-      data.items.some(
-        (v: any) => typeof v?.text !== "string" || typeof v.done !== "boolean",
-      ))
-  )
-    throw Error("Checklist values are invalid.");
-  if (
-    type === "events" &&
-    (!Array.isArray(data.events) || data.events.length > 100)
-  )
-    throw Error("At most 100 current events.");
-}
 export class Spaces {
   store: BoardStore;
   constructor(store: BoardStore) {
@@ -100,12 +50,48 @@ export class Spaces {
     const b = this.store.get(boardId);
     if (b.revision !== revision)
       throw Error("Board changed. Read current board and retry.");
+    if (op.kind === "undo" || op.kind === "redo")
+      return op.kind === "undo"
+        ? this.store.undo(boardId, author).board
+        : this.store.undo(boardId, author, "redo").board;
     const v = openView(b, viewId);
     const item = (instanceId: string) => {
       const c = b.instances.find((c) => c.id === instanceId);
       if (!c) throw Error("Unknown component instance.");
       return c;
     };
+    /* The label is read after the write, so "修改「X」" names the title the
+       component has *now*. A removal takes the title with it, so that one is
+       captured before. */
+    const historyLabel = (removedTitle?: string): string | undefined => {
+      switch (op.kind) {
+        case "create":
+          return `新建「${op.title}」`;
+        case "update":
+          return `修改「${item(op.instanceId).title}」`;
+        case "place":
+          return `移动 ${op.items.length} 个组件`;
+        case "duplicate":
+          return `复制「${item(op.instanceId).title}」`;
+        case "move":
+          return `移动「${item(op.instanceId).title}」`;
+        case "remove":
+          return `删除「${removedTitle}」`;
+        case "link":
+          return "建立关系";
+        case "unlink":
+          return "删除关系";
+        case "group":
+          return `分组「${op.title}」`;
+        case "theme":
+          return "切换外观";
+        default:
+          return undefined;
+      }
+    };
+    const removedTitle =
+      op.kind === "remove" ? item(op.instanceId).title : undefined;
+    const signature = stateSignature(b);
     const validSpace = (spaceId: string) => {
       if (!b.spaces.some((s) => s.id === spaceId))
         throw Error("Unknown whiteboard.");
@@ -169,7 +155,7 @@ export class Spaces {
       if (b.instances.length + 1 + definitions.length > 2200)
         throw Error("Component limit reached.");
       let data = op.data ?? defaultData(type);
-      checkData(type, data);
+      checkComponentData(type, data);
       if (op.objectId && !b.objects.some((o) => o.id === op.objectId))
         throw Error("Unknown object.");
       if (type === "board") {
@@ -262,7 +248,7 @@ export class Spaces {
       if (op.data) {
         if (c.type === "board" || c.type === "object")
           throw Error("Use reference/whiteboard actions to change the target.");
-        checkData(c.type, op.data);
+        checkComponentData(c.type, op.data);
         if (c.type === "space-link") validSpace(String(op.data.spaceId));
         c.data = structuredClone(op.data);
       }
@@ -383,12 +369,56 @@ export class Spaces {
       });
     }
     if (op.kind === "theme") b.theme = op.theme;
+    const label = historyLabel(removedTitle);
+    if (label && stateSignature(b) !== signature)
+      this.store.recordEdit(boardId, {
+        label,
+        author,
+        intent: op.intent,
+      });
     b.focusedViewId = viewId;
     v.updatedAt = Date.now();
     b.revision++;
     return this.store.read(boardId);
   }
+  /** Board-level undo. It pushes a new reversible record instead of
+   * popping a stack, so an undo can itself be undone. */
+  undo(
+    boardId: string,
+    revision: number | undefined,
+    author = "human",
+  ) {
+    const b = this.store.get(boardId);
+    if (revision !== undefined && b.revision !== revision)
+      throw Error("Board changed. Read current board and retry.");
+    return this.store.undo(boardId, author).board;
+  }
+  redo(
+    boardId: string,
+    revision: number | undefined,
+    author = "human",
+  ) {
+    const b = this.store.get(boardId);
+    if (revision !== undefined && b.revision !== revision)
+      throw Error("Board changed. Read current board and retry.");
+    return this.store.undo(boardId, author, "redo").board;
+  }
+  history(boardId: string) {
+    return this.store.history(boardId);
+  }
+  undoTo(
+    boardId: string,
+    revision: number | undefined,
+    recordId: string,
+    author = "human",
+  ) {
+    const b = this.store.get(boardId);
+    if (revision !== undefined && b.revision !== revision)
+      throw Error("Board changed. Read current board and retry.");
+    return this.store.undoTo(boardId, recordId, author).board;
+  }
 }
+const intentToken = z.string().max(200).optional();
 const operation = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("select"),
@@ -412,6 +442,7 @@ const operation = z.discriminatedUnion("kind", [
     objectId: id.optional(),
     icon: z.string().max(80).optional(),
     rect: rect.optional(),
+    intent: intentToken,
   }),
   z.object({
     kind: z.literal("update"),
@@ -423,10 +454,12 @@ const operation = z.discriminatedUnion("kind", [
       .optional(),
     title: z.string().min(1).max(120).optional(),
     data: z.record(z.string(), z.unknown()).optional(),
+    intent: intentToken,
   }),
   z.object({
     kind: z.literal("place"),
     items: z.array(z.object({ id, rect })).min(1).max(500),
+    intent: intentToken,
   }),
   z.object({ kind: z.literal("duplicate"), instanceId: id }),
   z.object({ kind: z.literal("move"), instanceId: id, spaceId: id }),
@@ -451,6 +484,8 @@ const operation = z.discriminatedUnion("kind", [
     title: z.string().min(1).max(80),
   }),
   z.object({ kind: z.literal("theme"), theme: theme.nullable() }),
+  z.object({ kind: z.literal("undo") }),
+  z.object({ kind: z.literal("redo") }),
 ]);
 export function registerSpaceTools(tool: RegisterTool, spaces: Spaces) {
   tool(
@@ -570,7 +605,7 @@ export function registerSpaceTools(tool: RegisterTool, spaces: Spaces) {
   );
   tool(
     "sand_edit_space",
-    "Arrange/configure components only when requested. Does not edit code, change source ownership or grant write permission; pinned components and containment cycles are checked.",
+    "Arrange/configure components only when requested. Does not edit code, change source ownership or grant write permission; pinned components and containment cycles are checked. The result names the instances it created or changed, so you can read them back with sand_find_objects (instances) or sand_read_spaces without guessing.",
     {
       ...board,
       revision: z.number().int(),
@@ -578,8 +613,83 @@ export function registerSpaceTools(tool: RegisterTool, spaces: Spaces) {
       author: z.string().max(100).default("agent"),
       operation,
     },
-    (a) =>
-      spaces.update(a.boardId, a.revision, a.viewId, a.operation, a.author),
+    (a) => {
+      const operation = a.operation;
+      const before = new Set(
+        spaces.store.get(a.boardId).instances.map((i) => i.id),
+      );
+      const result = spaces.update(
+        a.boardId,
+        a.revision,
+        a.viewId,
+        operation,
+        a.author,
+      );
+      const created = result.instances.filter((i) => !before.has(i.id));
+      const changed =
+        operation.kind === "update"
+          ? result.instances.find((i) => i.id === operation.instanceId)
+          : undefined;
+      return viewResult(
+        {
+          ...boardSummary(result),
+          createdInstances: created.map((i) => ({
+            id: i.id,
+            title: i.title,
+            type: i.type,
+            spaceId: i.spaceId,
+          })),
+          ...(changed
+            ? {
+                changedInstance: {
+                  id: changed.id,
+                  title: changed.title,
+                  type: changed.type,
+                  spaceId: changed.spaceId,
+                },
+              }
+            : {}),
+        },
+        result,
+      );
+    },
+  );
+  tool(
+    "sand_history",
+    "List the board's reversible content history. Undo pushes a new record instead of popping a stack, so undoing an undo brings the change back. Scope is board content only — intents, proposals and files are never reverted.",
+    { ...board },
+    (a) => spaces.history(a.boardId),
+  );
+  tool(
+    "sand_undo",
+    "Revert the newest board content change by pushing a new reversible record (not by popping a stack). Undo it again to bring the change back. Omit revision to act on the server's current board.",
+    {
+      ...board,
+      revision: z.number().int().optional(),
+      author: z.string().max(100).default("agent"),
+    },
+    (a) => spaces.undo(a.boardId, a.revision, a.author),
+  );
+  tool(
+    "sand_redo",
+    "Re-apply the change that the newest undo record reverted. Only available when the newest record is an undo or redo.",
+    {
+      ...board,
+      revision: z.number().int().optional(),
+      author: z.string().max(100).default("agent"),
+    },
+    (a) => spaces.redo(a.boardId, a.revision, a.author),
+  );
+  tool(
+    "sand_undo_to",
+    "Jump the board content back to a recorded step. The jump is itself a new reversible record.",
+    {
+      ...board,
+      revision: z.number().int().optional(),
+      recordId: id,
+      author: z.string().max(100).default("agent"),
+    },
+    (a) => spaces.undoTo(a.boardId, a.revision, a.recordId, a.author),
   );
   tool(
     "sand_attach_asset",

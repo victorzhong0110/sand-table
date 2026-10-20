@@ -18,6 +18,7 @@ export function boardSummary(b: Board) {
       }),
     ),
     objectCount: b.objects.length,
+    instanceCount: b.instances.length,
     relationCount: b.relations.length,
     selection: b.selection,
     guideFocus: b.guideFocus,
@@ -36,7 +37,7 @@ export function boardSummary(b: Board) {
       allowedFiles: i.allowedFiles,
     })),
     proposals: b.proposals.map(proposalSummary),
-    hint: "Use sand_find_objects for bounded object/source lookup; sand_read_context for the current human focus. Full map data is UI metadata.",
+    hint: "objectCount counts repository objects and sources; instanceCount counts whiteboard components. sand_find_objects searches both (objects and instances) so a component you just created is findable; sand_read_spaces lists instances with their configuration.",
   };
 }
 /** App-only metadata contains the full board; text/structured results remain bounded for models. */

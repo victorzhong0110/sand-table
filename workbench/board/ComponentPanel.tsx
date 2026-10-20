@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { Board } from "../core/model.ts";
 import type { ComponentInstance, ThemeConfig } from "../core/spaces.ts";
 import { componentTypes, defaultData } from "../core/spaces.ts";
 import { Icon } from "./Icon.tsx";
+import { editIntent, endEditSession } from "./edit-session.ts";
 export function ComponentPanel({
   board: b,
   viewId,
@@ -265,29 +266,136 @@ function ComponentEditor({
   const [title, setTitle] = useState(c.title),
     [data, setData] = useState<Record<string, any>>(c.data),
     [json, setJson] = useState(JSON.stringify(c.data, null, 2)),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [failed, setFailed] = useState("");
+  /* #9.4: content fields save themselves. A field that changes starts a short
+     timer; when the person stops typing the change is written back, with the
+     same intent token for the whole run of typing, so the server merges it
+     into one history step. The explicit button stays as a fallback.
+
+     Only the fields the person actually touched are written back, and they
+     are merged into the data the server holds — so an agent's change to
+     another field of the same component is not overwritten by an auto-save. */
+  const timer = useRef(0);
+  const pending = useRef(new Set<string>());
+  const edits = useRef<Record<string, unknown>>({});
+  const pendingLabel = useRef("");
+  const server = useRef({ title: c.title, data: c.data });
+  const serverData = useRef(c.data);
+  serverData.current = c.data;
   useEffect(() => {
-    setData(c.data);
-    setJson(JSON.stringify(c.data, null, 2));
-    setTitle(c.title);
+    /* The server is the source of truth for what has been saved. Local edits
+       that have not been saved are kept: the person is still typing. */
+    const clean =
+      title === server.current.title &&
+      JSON.stringify(data) === JSON.stringify(server.current.data);
+    server.current = { title: c.title, data: c.data };
+    if (clean) {
+      setTitle(c.title);
+      setData(c.data);
+      setJson(JSON.stringify(c.data, null, 2));
+    }
   }, [c.updatedAt]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  /* Leaving the component ends the editing session: the next edit is a new
+     intent and therefore a new step. Moving between two fields of the same
+     component does not — that is one continuous edit and stays one step, so
+     one undo takes the whole edit back. */
+  useEffect(() => () => endEditSession(c.id), [c.id]);
+  const commit = async () => {
+    clearTimeout(timer.current);
+    if (!pending.current.size) return;
+    const keys = [...pending.current];
+    const next = { ...serverData.current };
+    for (const key of keys)
+      if (key !== "title") setPath(next, key, edits.current[key]);
+    const op: any = {
+      kind: "update",
+      instanceId: c.id,
+      intent: editIntent(c.id),
+    };
+    if (keys.includes("title")) op.title = edits.current.title;
+    if (!["object", "board"].includes(c.type)) op.data = next;
+    const result = await operate(op);
+    if (result === undefined) {
+      /* Keep the change pending so the next attempt tries again, and say
+         which field did not make it — a failed write that looks like a
+         success is the failure mode this is here to remove. */
+      setFailed(
+        `「${pendingLabel.current || "内容"}」没有保存成功：服务端拒绝了这次写入，原因见页面上方的提示。`,
+      );
+      return;
+    }
+    pending.current.clear();
+    setFailed("");
+  };
+  /* Leaving a field is not the end of the session: the auto-save writes the
+     change but keeps the intent, so one run of editing stays one step
+     however many times it is written. */
+  const leave = () => void commit();
+  const schedule = () => {
+    clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => void commit(), 600);
+  };
+  const touch = (key: string, label: string, value: unknown) => {
+    pending.current.add(key);
+    edits.current[key] = value;
+    pendingLabel.current = label;
+    schedule();
+  };
+  const revert = (key: string) => {
+    pending.current.delete(key);
+    delete edits.current[key];
+    if (key === "title") setTitle(server.current.title);
+    else setData({ ...data, [key]: server.current.data?.[key] });
+    endEditSession(c.id);
+  };
   const field = (key: string, label: string, multiline = false) => (
     <label key={key}>
       {label}
       {multiline ? (
         <textarea
           value={String(data[key] ?? "")}
-          onChange={(e) => setData({ ...data, [key]: e.target.value })}
+          onChange={(e) => {
+            setData({ ...data, [key]: e.target.value });
+            touch(key, label, e.target.value);
+          }}
+          onBlur={leave}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              revert(key);
+              (e.target as HTMLElement).blur();
+            }
+          }}
         />
       ) : (
         <input
           value={String(data[key] ?? "")}
-          onChange={(e) => setData({ ...data, [key]: e.target.value })}
+          onChange={(e) => {
+            setData({ ...data, [key]: e.target.value });
+            touch(key, label, e.target.value);
+          }}
+          onBlur={leave}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              revert(key);
+              (e.target as HTMLElement).blur();
+            }
+          }}
         />
       )}
     </label>
   );
-  const save = () => operate({ kind: "update", instanceId: c.id, title, data });
+  const save = () =>
+    operate({
+      kind: "update",
+      instanceId: c.id,
+      title,
+      data,
+      intent: editIntent(c.id),
+    });
   return (
     <section className="component-editor">
       <h3>配置</h3>
@@ -296,7 +404,18 @@ function ComponentEditor({
         <input
           aria-label="编辑组件名称"
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => {
+            setTitle(e.target.value);
+            touch("title", "名称", e.target.value);
+          }}
+          onBlur={leave}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              revert("title");
+              (e.target as HTMLElement).blur();
+            }
+          }}
         />
       </label>
       {["text", "heading", "code"].includes(c.type) &&
@@ -449,21 +568,41 @@ function ComponentEditor({
               <input
                 aria-label={`方案 ${i + 1} 名称`}
                 value={data[key]?.title || ""}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const value = e.target.value;
                   setData({
                     ...data,
-                    [key]: { ...data[key], title: e.target.value },
-                  })
-                }
+                    [key]: { ...data[key], title: value },
+                  });
+                  touch(`${key}.title`, `方案 ${i + 1} 名称`, value);
+                }}
+                onBlur={leave}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    revert(`${key}.title`);
+                    (e.target as HTMLElement).blur();
+                  }
+                }}
               />
               <textarea
                 value={data[key]?.text || ""}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const value = e.target.value;
                   setData({
                     ...data,
-                    [key]: { ...data[key], text: e.target.value },
-                  })
-                }
+                    [key]: { ...data[key], text: value },
+                  });
+                  touch(`${key}.text`, `方案 ${i + 1} 内容`, value);
+                }}
+                onBlur={leave}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    revert(`${key}.text`);
+                    (e.target as HTMLElement).blur();
+                  }
+                }}
               />
             </fieldset>
           ))}
@@ -559,19 +698,38 @@ function ComponentEditor({
           </button>
         </details>
       )}
-      {error && <p role="alert">{error}</p>}
+      {(error || failed) && <p role="alert">{error || failed}</p>}
       <button
         disabled={busy}
         onClick={() =>
-          void (["object", "board"].includes(c.type)
-            ? operate({ kind: "update", instanceId: c.id, title })
-            : save())
+          void (
+            ["object", "board"].includes(c.type)
+              ? operate({ kind: "update", instanceId: c.id, title })
+              : save()
+          ).then((result) => {
+            if (result !== undefined) {
+              pending.current.clear();
+              setFailed("");
+              endEditSession(c.id);
+            }
+          })
         }
       >
         保存组件
       </button>
     </section>
   );
+}
+/** Write one field into the data, following a dotted path. */
+function setPath(target: Record<string, any>, path: string, value: unknown) {
+  const parts = path.split(".");
+  let node = target;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const key = parts[i];
+    if (!node[key] || typeof node[key] !== "object") node[key] = {};
+    node = node[key];
+  }
+  node[parts[parts.length - 1]] = value;
 }
 const palettes = {
   paper: {

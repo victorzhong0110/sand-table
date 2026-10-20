@@ -82,6 +82,59 @@ try {
     }
     throw Error("Expected state not reached.");
   };
+  /* #10: the zoom bar's five controls must stay visible and clickable. A "放大"
+     button that silently disappeared was reported; visibility is asserted
+     here so it cannot regress unnoticed. The ruler in the issue is "any
+     window size, any zoom level, any panel state", so all three are swept. */
+  const assertZoomBarUsable = async (label: string) => {
+    const zoom = frame.locator(".zoom");
+    await zoom.waitFor();
+    const measured = await zoom.evaluate((el) => {
+      const doc = el.ownerDocument;
+      const win = doc.defaultView!;
+      const bar = el.getBoundingClientRect();
+      return {
+        view: { w: win.innerWidth, h: win.innerHeight },
+        bar: { x: bar.x, y: bar.y, w: bar.width, h: bar.height },
+        controls: Array.from(el.querySelectorAll("button")).map((b) => {
+          const r = b.getBoundingClientRect();
+          const hit = doc.elementFromPoint(
+            r.x + r.width / 2,
+            r.y + r.height / 2,
+          );
+          return {
+            name: b.getAttribute("aria-label") || b.textContent || "",
+            width: r.width,
+            height: r.height,
+            x: r.x,
+            y: r.y,
+            covered: !(hit === b || (hit && b.contains(hit))),
+          };
+        }),
+      };
+    });
+    assert.ok(
+      measured.controls.length >= 4,
+      `The zoom bar lost controls (${label}).`,
+    );
+    for (const c of measured.controls) {
+      assert.ok(
+        c.width > 0 && c.height > 0,
+        `Zoom control "${c.name}" has no box (${label}).`,
+      );
+      assert.ok(
+        !c.covered,
+        `Zoom control "${c.name}" is covered by another element (${label}).`,
+      );
+      assert.ok(
+        c.x >= 0 &&
+          c.y >= 0 &&
+          c.x + c.width <= measured.view.w &&
+          c.y + c.height <= measured.view.h,
+        `Zoom control "${c.name}" sits outside the viewport (${label}).`,
+      );
+    }
+  };
   let b = await read();
   assert.equal(b.workspaces.length, 0);
   assert.equal(b.instances.length, 0);
@@ -91,11 +144,54 @@ try {
     0,
   );
   await page.getByRole("button", { name: "返回白板" }).click();
+  /* #10: the zoom bar's five controls stay visible and clickable. */
+  await assertZoomBarUsable("default 1440x1000");
+  for (let i = 0; i < 3; i++) {
+    await frame.getByRole("button", { name: "缩小" }).click();
+    await page.waitForTimeout(120);
+  }
+  await assertZoomBarUsable("zoomed out");
+  /* Zoom back in to where the canvas started. The rest of this test measures
+     sizes in screen pixels, so the zoom has to be back at 100%. */
+  for (let i = 0; i < 3; i++) {
+    await frame.getByRole("button", { name: "放大" }).click();
+    await page.waitForTimeout(120);
+  }
+  await assertZoomBarUsable("zoomed back in");
+  /* The zoom level the report used is unknown, so the extremes are swept as
+     well: the bar has to survive being pushed all the way in and out. */
+  for (let i = 0; i < 10; i++) {
+    await frame.getByRole("button", { name: "缩小" }).click();
+    await page.waitForTimeout(60);
+  }
+  await assertZoomBarUsable("zoomed all the way out");
+  for (let i = 0; i < 10; i++) {
+    await frame.getByRole("button", { name: "放大" }).click();
+    await page.waitForTimeout(60);
+  }
+  await assertZoomBarUsable("zoomed all the way in");
+  await frame.getByRole("button", { name: "复位", exact: true }).click();
+  await page.waitForTimeout(150);
+  await assertZoomBarUsable("reset");
+  /* Any window size: the bar is anchored to the canvas, and the canvas has
+     to stay usable when the window is narrow or short. */
+  for (const size of [
+    { width: 1100, height: 800 },
+    { width: 820, height: 640 },
+    { width: 600, height: 900 },
+    { width: 1440, height: 1000 },
+  ]) {
+    await page.setViewportSize(size);
+    await page.waitForTimeout(200);
+    await assertZoomBarUsable(`window ${size.width}x${size.height}`);
+  }
   const canvasBeforeDrop = await frame.locator(".canvas").boundingBox();
   await frame
     .getByRole("button", { name: "便签", exact: true })
     .dragTo(frame.locator(".canvas"), { targetPosition: { x: 300, y: 240 } });
   b = await until((b) => b.instances.some((i: any) => i.type === "text"));
+  /* #10: the bar has to survive the panels being open as well. */
+  await assertZoomBarUsable("properties panel open");
   assert.ok(b.instances[0].rect.x > 100);
   const placed = await frame
     .locator('[data-instance-id="' + b.instances[0].id + '"]')
@@ -110,12 +206,113 @@ try {
     "Drop accounts for the world origin, not just the camera.",
   );
 
+  /* #9.2: a component can be dragged straight on the canvas. The arrange
+     mode is not a precondition — the person does not have to know that a
+     mode exists. */
+  const card = frame.locator('[data-instance-id="' + b.instances[0].id + '"]');
+  const dragTo = async (dx: number, dy: number) => {
+    const box = (await card.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(
+      box.x + box.width / 2 + dx,
+      box.y + box.height / 2 + dy,
+      { steps: 8 },
+    );
+    await page.mouse.up();
+  };
+  const beforeDrag = b.instances[0].rect;
+  await dragTo(60, 40);
+  b = await until((b) => b.instances[0].rect.x !== beforeDrag.x);
+  assert.notEqual(
+    b.instances[0].rect.x,
+    beforeDrag.x,
+    "Dragging on the canvas moves the component.",
+  );
+
+  /* #9.2: a pinned component can still be moved, and moving it un-pins it. */
+  await frame.getByRole("button", { name: "固定位置", exact: true }).click();
+  b = await until((b) => b.instances[0].rect.pinned === true);
+  const pinned = b.instances[0].rect;
+  await dragTo(-50, 30);
+  b = await until(
+    (b) => b.instances[0].rect.pinned === false && b.instances[0].rect.x !== pinned.x,
+  );
+  assert.notEqual(
+    b.instances[0].rect.x,
+    pinned.x,
+    "Moving a pinned component moves it and releases the pin.",
+  );
+
+  /* #9.4: the property panel's content field saves itself — no button. */
+  await frame
+    .getByRole("textbox", { name: "内容", exact: true })
+    .fill("改完即存");
+  b = await until((b) => b.instances[0].data.text === "改完即存");
+  assert.equal(
+    b.instances[0].data.text,
+    "改完即存",
+    "Stopping typing is enough to save the content.",
+  );
+
+  /* #9.3: a double click edits the component where it sits. */
+  await card.dblclick();
+  const inline = frame.getByRole("textbox", { name: "就地编辑内容" });
+  await inline.waitFor();
+  await inline.fill("就地改过的内容");
+  await inline.press("Enter");
+  b = await until((b) => b.instances[0].data.text === "就地改过的内容");
+  assert.equal(
+    b.instances[0].data.text,
+    "就地改过的内容",
+    "Editing on the canvas writes the component back.",
+  );
+
   await frame.getByRole("textbox", { name: "编辑组件名称" }).fill("我的计划");
   await frame
     .getByRole("textbox", { name: "内容", exact: true })
     .fill("先收集证据，再比较方案");
   await frame.getByRole("button", { name: "保存组件", exact: true }).click();
   b = await until((b) => b.instances[0].data.text === "先收集证据，再比较方案");
+  /* #9.5: the same history is reachable from outside the browser. */
+  const history = await call("sand_history", { boardId });
+  assert.ok(history.records.length >= 2, "The writes are on the history.");
+  assert.equal(history.canUndo, true);
+  assert.equal(history.canRedo, false);
+  const edit = history.records.find(
+    (r: any) => r.kind === "edit" && r.label.includes("我的计划"),
+  );
+  assert.ok(edit, "The edit is on the history with a readable label.");
+  await call("sand_undo", { boardId });
+  b = await read();
+  assert.notEqual(
+    b.instances[0].title,
+    "我的计划",
+    "The undo reverts the last edit.",
+  );
+  await call("sand_redo", { boardId });
+  b = await until((b) => b.instances[0].title === "我的计划");
+  assert.equal(b.instances[0].data.text, "先收集证据，再比较方案");
+  /* Jumping to a record lands on the content that record produced: the
+     oldest record is the creation, so the board goes back to it. */
+  const oldest = history.records[0];
+  const newest = history.records.filter((r: any) => r.kind === "edit").at(-1)!;
+  const jumped = await call("sand_undo_to", { boardId, recordId: oldest.id });
+  assert.ok(jumped, "A recorded step can be jumped back to.");
+  b = await read();
+  assert.notEqual(
+    b.instances[0].title,
+    "我的计划",
+    "Jumping back to the oldest record restores the content it produced.",
+  );
+  assert.notEqual(b.instances[0].data.text, "先收集证据，再比较方案");
+  await call("sand_undo_to", { boardId, recordId: newest.id });
+  b = await until((b) => b.instances[0].title === "我的计划");
+  assert.equal(
+    b.instances[0].data.text,
+    "先收集证据，再比较方案",
+    "Jumping forward to the newest edit brings the content back.",
+  );
   const noteId = b.instances[0].id;
   const expandedRect = { ...b.instances[0].rect };
   assert.equal(await frame.getByRole("heading", { name: "图标库" }).count(), 0);
@@ -367,11 +564,29 @@ try {
     viewport.x + viewport.width - 3,
     viewport.y + viewport.height / 2,
   );
+  const quietStart = await cameraX();
+  await page.waitForTimeout(300);
+  assert.ok(
+    Math.abs((await cameraX()) - quietStart) < 2,
+    "Edge panning is off by default: the board must not move on its own",
+  );
+  await frame.getByRole("button", { name: "设置", exact: true }).click();
+  await frame.getByRole("checkbox", { name: "边缘移动" }).check();
+  await frame.getByRole("button", { name: "关闭设置", exact: true }).click();
+  await page.mouse.move(
+    viewport.x + viewport.width / 2,
+    viewport.y + viewport.height / 2,
+  );
+  await page.waitForTimeout(80);
+  await page.mouse.move(
+    viewport.x + viewport.width - 3,
+    viewport.y + viewport.height / 2,
+  );
   const edgeStart = await cameraX();
   await page.waitForTimeout(300);
   assert.ok(
     (await cameraX()) < edgeStart - 30,
-    "Hovering at the right edge pans without a drag",
+    "Hovering at the right edge pans without a drag once it is switched on",
   );
   await page.mouse.move(
     viewport.x + viewport.width / 2,
@@ -384,6 +599,18 @@ try {
     Math.abs((await cameraX()) - stopped) < 1,
     "Leaving the edge stops motion",
   );
+  for (const size of [
+    { width: 1440, height: 1000 },
+    { width: 1280, height: 800 },
+    { width: 1024, height: 768 },
+    { width: 900, height: 700 },
+  ]) {
+    await page.setViewportSize(size);
+    await page.waitForTimeout(120);
+    await assertZoomBarUsable(`${size.width}x${size.height}`);
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.waitForTimeout(120);
   await frame.getByRole("button", { name: "设置", exact: true }).click();
   assert.equal(
     await frame
@@ -391,6 +618,43 @@ try {
       .evaluate((el) => getComputedStyle(el).scrollbarWidth),
     "none",
   );
+  await frame.getByRole("button", { name: "关闭设置", exact: true }).click();
+  /* The toolbox was collapsed for the focus check; open it again for the
+     component pack protocol. */
+  await frame.getByRole("button", { name: "编排", exact: true }).click();
+  await frame.getByRole("tab", { name: "组件" }).click();
+  await frame.locator(".pack-import").waitFor();
+  /* The component pack protocol, end to end: a pack is data. It adds presets
+     to the toolbox, and a preset fills in a component type that already
+     exists. A type this version does not know is imported with a warning —
+     the data is kept and the canvas shows the placeholder. */
+  const pack = {
+    protocol: "sand-table/component-pack",
+    version: 1,
+    id: "com.example.review",
+    name: "评审包",
+    components: [
+      { key: "goal", type: "task", title: "目标与验收条件" },
+      { key: "future", type: "timeline", title: "未来组件" },
+    ],
+  };
+  await frame.locator(".pack-import > summary").click();
+  await frame
+    .getByRole("textbox", { name: "组件包 JSON" })
+    .fill(JSON.stringify(pack));
+  await frame.getByRole("button", { name: "从粘贴的 JSON 导入" }).click();
+  await frame.getByRole("button", { name: "目标与验收条件", exact: true }).waitFor();
+  await frame.getByRole("button", { name: "未来组件", exact: true }).waitFor();
+  const packNotice = await frame.locator(".pack-notice").innerText();
+  assert.ok(
+    packNotice.includes("未知组件类型"),
+    "The unknown type is reported to the person: " + packNotice,
+  );
+  await frame.getByRole("button", { name: "目标与验收条件", exact: true }).click();
+  b = await until((b) => b.instances.some((i: any) => i.title === "目标与验收条件"));
+  const preset = b.instances.find((i: any) => i.title === "目标与验收条件");
+  assert.equal(preset.type, "task", "The preset fills in a type that exists.");
+  assert.deepEqual(preset.data.items, [], "The preset uses the type's own data.");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: "artifacts/blank-mobile.png", fullPage: true });
   assert.ok(
@@ -398,7 +662,7 @@ try {
   );
   assert.deepEqual(errors, []);
   console.log(
-    "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, nested boards, explicit AI handoff/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",
+    "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, explicit AI handoff/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",
   );
 } catch (e) {
   const failedPage = browser?.contexts()[0]?.pages()[0];

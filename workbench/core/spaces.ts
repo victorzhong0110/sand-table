@@ -114,6 +114,67 @@ export function defaultData(type: string): Record<string, unknown> {
       return {};
   }
 }
+/**
+ * The check every write of component data goes through — the editor, the
+ * Agent's tools and an imported component pack all use this one function, so
+ * there is a single set of rules rather than several that drift apart.
+ */
+export function checkComponentData(type: string, data: Record<string, unknown>) {
+  if (JSON.stringify(data).length > 40000)
+    throw Error("Component data exceeds 40 KB.");
+  if (data.url && !safeUrl(data.url))
+    throw Error("Resource URL must use HTTP(S).");
+  if (data.sourceUrl && !safeUrl(data.sourceUrl))
+    throw Error("Source URL must use HTTP(S).");
+  if (type === "chart") {
+    const p = data.points;
+    if (
+      !Array.isArray(p) ||
+      p.length > 100 ||
+      p.some(
+        (v: any) =>
+          !v ||
+          typeof v.label !== "string" ||
+          v.label.length > 100 ||
+          !Number.isFinite(v.value),
+      )
+    )
+      throw Error("Chart needs up to 100 finite labeled values.");
+  }
+  if (type === "table") {
+    if (
+      !Array.isArray(data.columns) ||
+      data.columns.length > 20 ||
+      data.columns.some((v) => typeof v !== "string") ||
+      !Array.isArray(data.rows) ||
+      data.rows.length > 200 ||
+      data.rows.some(
+        (row) =>
+          !Array.isArray(row) ||
+          row.length !== (data.columns as unknown[]).length ||
+          row.some(
+            (v) =>
+              !["string", "number", "boolean"].includes(typeof v) && v !== null,
+          ),
+      )
+    )
+      throw Error("Table dimensions or values are invalid.");
+  }
+  if (
+    type === "task" &&
+    (!Array.isArray(data.items) ||
+      data.items.length > 100 ||
+      data.items.some(
+        (v: any) => typeof v?.text !== "string" || typeof v.done !== "boolean",
+      ))
+  )
+    throw Error("Checklist values are invalid.");
+  if (
+    type === "events" &&
+    (!Array.isArray(data.events) || data.events.length > 100)
+  )
+    throw Error("At most 100 current events.");
+}
 export function safeUrl(value: unknown) {
   if (typeof value !== "string" || !value) return undefined;
   try {

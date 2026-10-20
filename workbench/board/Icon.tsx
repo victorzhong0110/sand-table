@@ -120,6 +120,19 @@ export function Icon({ name, size = 20 }: { name: string; size?: number }) {
         <path d="M10 10v7" />
       </>
     ),
+    history: (
+      <>
+        <path d="M3 9a7 7 0 1 1 1.2 5.4" />
+        <path d="M3 4v5h5" />
+        <path d="M10 6v4l3 2" />
+      </>
+    ),
+    undo: (
+      <>
+        <path d="M4 9h8a4 4 0 0 1 0 8H8" />
+        <path d="m7 5-3 4 3 4" />
+      </>
+    ),
   };
   return (
     <svg

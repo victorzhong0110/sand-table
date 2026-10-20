@@ -1,6 +1,7 @@
 import { Icon } from "./Icon.tsx";
 import { useState, useEffect, useRef, type CSSProperties } from "react";
 import type { Board, Item } from "../core/model.ts";
+import type { HistorySnapshot } from "../core/history.ts";
 import { safeUrl, defaultData, componentTypes } from "../core/spaces.ts";
 import { SpaceCanvas } from "./SpaceCanvas.tsx";
 import { Toolbox } from "./Toolbox.tsx";
@@ -18,6 +19,10 @@ export function CanvasShell({
   operate,
   openLink,
   sendMessage,
+  history,
+  onUndo,
+  onRedo,
+  onJump,
 }: {
   board: Board;
   viewId: string;
@@ -28,11 +33,16 @@ export function CanvasShell({
   operate: (op: any) => Promise<any>;
   openLink: (url: string) => void;
   sendMessage: (text: string) => Promise<void>;
+  /** The board's reversible history and the moves that change it. */
+  history?: HistorySnapshot;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  onJump?: (recordId: string) => void;
 }) {
   const [mode, setMode] = useState("browse"),
     [focusRevision, setFocusRevision] = useState(0),
     [navSection, setNavSection] = useState("tools"),
-    [edgePan, setEdgePan] = useState(true),
+    [edgePan, setEdgePan] = useState(false),
     [edgeSpeed, setEdgeSpeed] = useState(600),
     [settingsOpen, setSettingsOpen] = useState(false),
     [toolsOpen, setToolsOpen] = useState(true),
@@ -83,10 +93,11 @@ export function CanvasShell({
     title: string,
     data?: any,
     objectId?: string,
+    size?: { width: number; height: number },
   ) => {
     setQuery("");
     setMode("arrange");
-    const size = componentTypes.find((c) => c.type === type);
+    const size_ = componentTypes.find((c) => c.type === type);
     const narrow = window.innerWidth < 700;
     if (narrow) setToolsOpen(false);
     const camera = view?.camera || { x: 24, y: 24, zoom: 1 };
@@ -100,8 +111,10 @@ export function CanvasShell({
       rect: {
         x: ((narrow ? 24 : 280) + offset - camera.x) / camera.zoom,
         y: (160 + offset - 36 - camera.y) / camera.zoom,
-        width: size?.width || 280,
-        height: size?.height || 180,
+        /* A component pack can say how big its preset should be; without one
+           the type's own size is used. */
+        width: size?.width || size_?.width || 280,
+        height: size?.height || size_?.height || 180,
         pinned: false,
       },
       ...(objectId ? { objectId } : {}),
@@ -268,6 +281,11 @@ export function CanvasShell({
             setMode={setMode}
             create={create}
             action={action}
+            call={call}
+            history={history}
+            onUndo={onUndo}
+            onRedo={onRedo}
+            onJump={onJump}
             showPanel={setPanel}
           />
         </div>

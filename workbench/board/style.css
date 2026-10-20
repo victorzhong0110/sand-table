@@ -299,7 +299,10 @@ button[aria-pressed="true"] {
 }
 .zoom {
   position: absolute;
-  bottom: 15px;
+  /* The floating tool panel ends just above the canvas bottom; keeping the
+     zoom bar a little lower leaves a visible gap between the two instead
+     of letting the panel sit on the bar's edge (issue #10). */
+  bottom: 8px;
   left: 16px;
   display: flex;
   gap: 10px;
@@ -1981,3 +1984,48 @@ main.canvas-app {
 @media(max-width:700px) { .canvas-app .studio-inspector.is-context { top: 92px; left: 8px; } }
 .canvas-app .component-card.detail-full .component-chrome { position: absolute; top: 8px; right: 8px; margin: 0; }
 .canvas-app .component-card.detail-full .component-symbol { display: none; }
+
+/* #9.3: editing a component where it sits. The editor covers the body of
+   the card, or the whole card when the title is being edited, and the card
+   itself is outlined so the state is unmistakable. */
+.canvas-app .component-card.editing {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.canvas-app .inline-edit {
+  position: absolute;
+  inset: 38px 8px 8px 8px;
+  z-index: 4;
+  min-height: 56px;
+  resize: none;
+  font: inherit;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 8px;
+  user-select: text;
+}
+.canvas-app .inline-edit.is-title {
+  inset: 8px;
+  min-height: 0;
+}
+.canvas-app .inline-edit:focus {
+  outline: none;
+}
+/* #9.2: what just happened on the canvas, said where it happened. */
+.canvas-notice {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  z-index: 5;
+  margin: 0;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  pointer-events: none;
+}
