@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BoardStore } from "../core/store.ts";
@@ -12,7 +12,11 @@ import { Spaces } from "../server/spaces.ts";
 import { openView } from "../core/space-state.ts";
 import { resolveContent } from "../core/content.ts";
 import { History } from "../core/history.ts";
-import { WorkspaceStore } from "../core/workspace.ts";
+import {
+  WorkspaceStore,
+  readObjectState,
+  writeObjectState,
+} from "../core/workspace.ts";
 import { workspacePort } from "../core/persistence.ts";
 import type { Projection } from "../core/model.ts";
 
@@ -544,5 +548,201 @@ test("预设里的原生内容同样是一等对象，不是卡在实例上的�
   assert.ok(
     resolveContent(chart!, b.contentObjects).data.points,
     "内容从对象读回",
+  );
+});
+
+test("动作种类（kind）落盘往返不丢：重启后撤销依然可用", () => {
+  const root = mkdtempSync(join(tmpdir(), "sand-kernel-kind-"));
+  try {
+    const store = new BoardStore();
+    store.attachPersistence(workspacePort(new WorkspaceStore(root)), "default");
+    const spaces = new Spaces(store);
+    let board = store.open(empty, "空白工作区");
+    openView(store.get(board.id), "view-a");
+    spaces.update(board.id, store.get(board.id).revision, "view-a", {
+      kind: "create",
+      type: "text",
+      title: "林澈",
+      data: { text: "在港口长大" },
+    });
+    store.flushSave();
+
+    const file = JSON.parse(
+      readFileSync(join(root, "default", "workspace.json"), "utf8"),
+    );
+    const entry = file.history.undo[0];
+    assert.ok(entry, "落盘文件里要有撤销条目");
+    assert.equal(entry.kind, "create-object", "kind 不能在写盘时丢掉");
+
+    // 重启：撤销栈从文件读回，kind 还在，撤销照常工作。
+    const restarted = new BoardStore();
+    restarted.attachPersistence(
+      workspacePort(new WorkspaceStore(root)),
+      "default",
+    );
+    const reopened = restarted.open(empty, "空白工作区");
+    assert.equal(
+      restarted.get(reopened.id).contentObjects.length,
+      1,
+      "重启后内容还在",
+    );
+    const undone = restarted.undo(reopened.id, "human");
+    assert.equal(undone.undone, true, "重启后仍可撤销");
+    assert.equal(
+      restarted.get(reopened.id).contentObjects.length,
+      0,
+      "撤销真的把内容撤掉了",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("同一意图里连续改同一个对象：一次撤销真的回退（不是只报成功）", () => {
+  const { store, op, boardId } = setup();
+  op({
+    kind: "create",
+    type: "text",
+    title: "人物：林澈",
+    data: { text: "第一版" },
+    intentId: "intent-create",
+  });
+  const instanceId = store.get(boardId).instances[0].id;
+  op({
+    kind: "update",
+    instanceId,
+    data: { text: "第二版" },
+    intentId: "intent-typing",
+  });
+  op({
+    kind: "update",
+    instanceId,
+    data: { text: "第三版" },
+    intentId: "intent-typing",
+  });
+  assert.equal(
+    store.get(boardId).contentObjects[0].data?.text,
+    "第三版",
+    "两次编辑落在同一个对象上",
+  );
+  const undone = store.undo(boardId, "human");
+  assert.equal(undone.undone, true);
+  assert.equal(
+    store.get(boardId).contentObjects[0].data?.text,
+    "第一版",
+    "一次撤销回到该意图的最早状态（只报成功、实际没回退是缺陷）",
+  );
+});
+
+test("合并撤销不会把对象快照写进语义关系", () => {
+  const { store, op, boardId } = setup();
+  op({
+    kind: "create",
+    type: "text",
+    title: "人物：林澈",
+    data: { text: "第一版" },
+    intentId: "intent-one",
+  });
+  op({
+    kind: "create",
+    type: "text",
+    title: "地点：港口",
+    data: { text: "雾很大" },
+    intentId: "intent-one",
+  });
+  op({
+    kind: "relate",
+    source: store.get(boardId).contentObjects[0].id,
+    target: store.get(boardId).contentObjects[1].id,
+    relation: "related",
+  });
+  assert.equal(
+    store.get(boardId).objectRelations.length,
+    1,
+    "先有一条语义关系",
+  );
+  // 撤销栈顶是「建立关系」，再撤一次才是「创建两个对象」。
+  store.undo(boardId, "human");
+  assert.equal(store.get(boardId).objectRelations.length, 0, "关系被撤销");
+  store.undo(boardId, "human");
+  const b = store.get(boardId);
+  assert.equal(b.contentObjects.length, 0, "两个对象都被撤掉了");
+  assert.equal(b.objectRelations.length, 0, "撤销对象创建不该留下任何关系");
+  assert.ok(
+    b.objectRelations.every(
+      (r) => typeof r.source === "string" && typeof r.target === "string",
+    ),
+    "关系表里不能混进对象快照",
+  );
+});
+
+test("对象状态与文件结构的对应是显式的：展示实例在 boards[0] 下", () => {
+  const file = {
+    schemaVersion: 1,
+    id: "ws1",
+    title: "工作空间",
+    createdAt: 0,
+    updatedAt: 0,
+    revision: 1,
+    contentRevision: 1,
+    boards: [
+      {
+        id: "b1",
+        title: "白板",
+        revision: 1,
+        contentRevision: 1,
+        spaces: [],
+        presentations: [
+          {
+            id: "p1",
+            spaceId: "overview",
+            type: "text",
+            title: "便签",
+            data: {},
+            rect: { x: 0, y: 0, width: 280, height: 180, pinned: false },
+            updatedAt: 0,
+            author: "human",
+          },
+        ],
+        views: {},
+        selection: [],
+        placements: {},
+        notes: {},
+        groups: [],
+        spaceLinks: [],
+        assets: [],
+        activities: [],
+        guides: [],
+        intents: [],
+        proposals: [],
+        validations: [],
+      },
+    ],
+    objects: [],
+    relations: [],
+    resources: [],
+    activities: [],
+    history: { undo: [], redo: [] },
+    audit: [],
+  };
+
+  const state = readObjectState(file);
+  assert.equal(state.presentations.length, 1, "展示实例从 boards[0] 读回");
+  assert.equal(state.objects.length, 0);
+
+  // 删掉展示实例后写回文件：它必须真的从 boards[0].presentations 里消失。
+  const next = writeObjectState(file, {
+    ...state,
+    presentations: [],
+  });
+  assert.equal(
+    next.boards[0].presentations.length,
+    0,
+    "被删的展示实例不会复活",
+  );
+  assert.equal(
+    (next as unknown as { presentations?: unknown }).presentations,
+    undefined,
+    "文件顶层不该多出 presentations 段",
   );
 });

@@ -11,6 +11,7 @@ import {
   isNativeContent,
   isReferenceContent,
 } from "../core/spaces.ts";
+import { canNest } from "../core/content.ts";
 import { openView } from "../core/space-state.ts";
 import type { RegisterTool } from "./tool-types.ts";
 const id = z.string().min(1).max(500),
@@ -122,15 +123,10 @@ export class Spaces {
       if (!b.spaces.some((s) => s.id === spaceId))
         throw Error("Unknown whiteboard.");
     };
-    const ancestor = (parent: string, child: string): boolean => {
-      let cursor = b.spaces.find((s) => s.id === child);
-      let count = 0;
-      while (cursor && count++ <= b.spaces.length) {
-        if (cursor.id === parent) return true;
-        cursor = b.spaces.find((s) => s.id === cursor!.parentId);
-      }
-      return false;
-    };
+    // 白板嵌套无环（I4）：判定收敛到 core/content.ts 的 canNest，别在接线层再写一份。
+    // ancestor(target, destination)：target 是 destination 的祖先时，移动会形成环。
+    const ancestor = (target: string, destination: string): boolean =>
+      !canNest(b.spaces, destination, target);
     if (op.kind === "select") {
       if (op.ids.some((id: string) => item(id).spaceId !== v.spaceId))
         throw Error("Selection must be in the current view.");

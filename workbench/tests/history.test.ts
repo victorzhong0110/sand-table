@@ -55,8 +55,24 @@ const audit = (id: string, via?: "undo" | "redo"): AuditEntry => ({
   via,
 });
 
+/**
+ * 撤销单位里的实体快照。History 输出一律是 batch 形状
+ * （core/store.ts 的 applyPatch 只认快照数组）。
+ */
+const snapshots = (patch: Patch, side: "before" | "after") => {
+  const raw = side === "before" ? patch.before : patch.after;
+  // 输入可以是单目标形状；History 输出一律是 batch 形状。
+  if (Array.isArray(raw))
+    return raw as { target: string; id: string; value: unknown }[];
+  return [{ target: patch.target, id: patch.id, value: raw }];
+};
+
+/** 撤销单位里第一个实体的值。 */
+const valueOf = (patch: Patch, side: "before" | "after"): unknown =>
+  snapshots(patch, side)[0]?.value;
+
 /** 模拟 core/store.ts 的 applySnapshot：value 为 null 即删除。 */
-const apply = (
+const applyValues = (
   board: Map<string, unknown>,
   list: { id: string; value: unknown }[],
 ) => {
@@ -64,6 +80,18 @@ const apply = (
     if (item.value === null) board.delete(item.id);
     else board.set(item.id, item.value);
   }
+};
+
+/** 按补丁的一侧施加快照。 */
+const apply = (
+  board: Map<string, unknown>,
+  patch: Patch,
+  side: "before" | "after",
+) => {
+  applyValues(
+    board,
+    snapshots(patch, side).map((s) => ({ id: s.id, value: s.value })),
+  );
 };
 
 test("不同 intentId 的编辑各自是一个撤销单位，undo 三次回到初始状态", () => {
@@ -74,9 +102,9 @@ test("不同 intentId 的编辑各自是一个撤销单位，undo 三次回到�
   const c = entry("i3", single("object", "o3", null, { id: "o3", title: "C" }));
   for (const e of [a, b, c]) {
     h.record(e);
-    apply(board, [{ id: "o1", value: e.patch.after }]);
+    apply(board, e.patch, "after");
   }
-  assert.equal(board.size, 1);
+  assert.equal(board.size, 3, "三个意图各建了一个对象");
   assert.equal(h.canUndo, true);
   assert.equal(h.canRedo, false);
   assert.equal(h.state.undo.length, 3);
@@ -92,6 +120,12 @@ test("不同 intentId 的编辑各自是一个撤销单位，undo 三次回到�
   assert.equal(third!.id, a.id);
   assert.equal(third!.patch.id, "o1");
 
+  // 三次撤销回到起点：对象一个都不剩。
+  apply(board, third!.patch, "before");
+  apply(board, second!.patch, "before");
+  apply(board, first!.patch, "before");
+  assert.equal(board.size, 0, "三次 undo 必须把三个对象都清掉");
+
   assert.equal(h.canUndo, false);
   assert.equal(h.state.undo.length, 0);
   assert.equal(h.state.redo.length, 3);
@@ -104,18 +138,26 @@ test("同一 intentId 的连续变更合并为一个撤销单位，undo 一次�
   h.record(first);
   h.record(entry("typing", single("object", "o1", "ab", "abc")));
   h.record(entry("typing", single("object", "o1", "abc", "abcd")));
-  apply(board, [{ id: "o1", value: "abcd" }]);
+  applyValues(board, [{ id: "o1", value: "abcd" }]);
 
   assert.equal(h.state.undo.length, 1, "一个意图只占一个撤销单位");
   const merged = h.state.undo[0];
-  assert.equal(merged.patch.before, "a", "合并后必须保留最早的 before");
-  assert.equal(merged.patch.after, "abcd", "合并后必须覆盖最新的 after");
+  assert.equal(
+    valueOf(merged.patch, "before"),
+    "a",
+    "合并后必须保留最早的 before",
+  );
+  assert.equal(
+    valueOf(merged.patch, "after"),
+    "abcd",
+    "合并后必须覆盖最新的 after",
+  );
   assert.equal(merged.intentId, "typing");
   assert.equal(merged.id, first.id, "撤销单位的身份沿用最早那条");
 
   const undone = h.undo();
-  assert.equal(undone!.patch.before, "a");
-  apply(board, [{ id: "o1", value: undone!.patch.before }]);
+  assert.equal(valueOf(undone!.patch, "before"), "a");
+  apply(board, undone!.patch, "before");
   assert.equal(board.get("o1"), "a", "一次 undo 回到最初状态");
   assert.equal(h.undo(), undefined);
 });
@@ -131,7 +173,7 @@ test("同一意图内创建两个对象：一次 undo 全部回退，redo 全部
   h.record(
     entry("agent-batch", batch("o2", [snap("object", "o2", null)], [snap("object", "o2", objectB)])),
   );
-  apply(board, [
+  applyValues(board, [
     { id: "o1", value: objectA },
     { id: "o2", value: objectB },
   ]);
@@ -156,13 +198,13 @@ test("同一意图内创建两个对象：一次 undo 全部回退，redo 全部
   assert.deepEqual(after.find((s) => s.id === "o1")!.value, objectA);
   assert.deepEqual(after.find((s) => s.id === "o2")!.value, objectB);
 
-  apply(board, before);
+  applyValues(board, before);
   assert.equal(board.size, 0, "一次 undo 必须把两个对象都回退，不能只回退一半");
 
   const redone = h.redo();
   const redoneAfter = redone!.patch.after as { id: string; value: unknown }[];
   assert.equal(redoneAfter.length, 2, "redo 必须把两个对象都恢复");
-  apply(board, redoneAfter);
+  applyValues(board, redoneAfter);
   assert.equal(board.size, 2, "redo 不能永久丢失另一个对象");
   assert.deepEqual(board.get("o1"), objectA);
   assert.deepEqual(board.get("o2"), objectB);
@@ -298,7 +340,7 @@ test("撤销之后的新编辑不会并入被撤销的意图", () => {
   h.undo();
   h.record(entry("drag", single("object", "o1", 1, 5)));
   assert.equal(h.state.undo.length, 2, "被撤销的意图与新编辑是两个撤销单位");
-  assert.equal(h.undo()!.patch.before, 1);
+  assert.equal(valueOf(h.undo()!.patch, "before"), 1);
 });
 
 test("外部效果不进撤销栈，只留在拒绝列表里", () => {
@@ -441,7 +483,10 @@ test("记录后改写原条目不影响撤销栈", () => {
   e.patch.after = { title: "被篡改" };
   e.label = "被篡改";
   const undone = h.undo()!;
-  assert.equal((undone.patch.after as { title: string }).title, "B");
+  assert.equal(
+    (valueOf(undone.patch, "after") as { title: string }).title,
+    "B",
+  );
   assert.equal(undone.label, "意图 i1");
 });
 

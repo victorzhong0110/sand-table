@@ -146,7 +146,7 @@ export type ObjectRelation = {
 // 展示实例：只管呈现与布局
 export type Presentation = {
   id: string;
-  spaceId: string;             // 所属白板
+  spaceId: string;             // 所属空间（白板内分区 id，如 overview / 子白板空间）
   type: string;                // 组件类型（渲染方式）
   binding?: {
     kind: "object" | "local" | "tool";
@@ -193,11 +193,21 @@ export type Presentation = {
 | I14 | 工作空间格式有版本与迁移路径；迁移失败不静默丢弃 | 旧版本文件迁移测试 |
 | I15 | 引用失效、外部内容更新可识别，不静默覆盖 | 指纹比对 |
 
+**实现状态（2026-10-20 交叉审计后核对）**：I1–I14 已落地并有自动化用例覆盖；
+**I15 尚未实现**——`ResourceReference.status` 的 `stale` / `missing` 与 `ObjectSource.fingerprint`
+目前都没有计算方（没有比对入口），属于 P4 连接器范围，见 issue #13。
+本文不把它算作已完成，也不允许接线层假装它成立。
+
 ---
 
 ## 5. 存储与生命周期
 
 ### 5.1 落盘格式
+
+> 结构对应（接线时别猜）：`objects` 与 `relations` 在文件**顶层**；展示实例在
+> `boards[0].presentations`。纯函数层 `core/content.ts` 的 `ObjectState` 是一块**扁平**结构，
+> 不能当成文件的某一段直接铺回去——那会让被删的展示实例在重启后复活。
+> `core/workspace.ts` 的 `readObjectState()` / `writeObjectState()` 给出显式映射。
 
 ```text
 <root>/
@@ -251,6 +261,13 @@ export type Presentation = {
 - 审计日志只追加，记录执行者与动作（含「执行了撤销」），与撤销栈游标无关。
 - 白板撤销不声称撤回已发布的 PR、已运行的实验或已发送的内容。
 - 外部效果的回滚属于补偿操作，不进入白板撤销栈。
+- 撤销补丁**只有一种形状**：`target: "batch"`，`before` / `after` 都是实体快照数组
+  （`{ target, id, value }`，`value: null` 表示该实体在此刻不存在）。
+  单目标形状不被接受：它会被内核静默忽略，造成「撤销报成功、实际什么都没回退」。
+- 每条撤销条目必须声明动作种类（`kind`）。种类是「这条能不能进白板撤销栈」的判别依据
+  （I12），也是落盘后仍然可判的依据——写盘时不得丢弃它。
+- 绑定判定只有一处：展示实例绑定到哪个对象，统一由 `core/content.ts` 的 `boundId()` 判定。
+  删除、引用检查、撤销快照必须用同一个判定，否则会出现「删掉了却撤不回来」。
 
 ### 6.4 按操作影响处理
 

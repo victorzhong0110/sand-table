@@ -12,6 +12,8 @@ import {
   deleteObject as deleteWorkspaceObject,
   relate as relateObjects,
   unlink as unlinkRelation,
+  boundId,
+  presentationsFor,
 } from "./content.ts";
 import { History, appendAudit } from "./history.ts";
 import type {
@@ -703,6 +705,8 @@ export class BoardStore {
       }
       return;
     }
+    if (snapshot.target !== "relation")
+      throw new Error(`未知的补丁目标「${snapshot.target}」，无法应用。`);
     if (snapshot.value === null)
       b.objectRelations = b.objectRelations.filter((r) => r.id !== snapshot.id);
     else {
@@ -715,14 +719,12 @@ export class BoardStore {
 
   /** 应用一次撤销/重做。 */
   private applyPatch(b: Board, patch: Patch, side: "before" | "after") {
-    const value = (side === "before" ? patch.before : patch.after) as
-      | {
-          target: "object" | "presentation" | "relation";
-          id: string;
-          value: unknown;
-        }[]
-      | null;
-    if (!Array.isArray(value)) return;
+    const value = side === "before" ? patch.before : patch.after;
+    // 形状不对就报错：静默忽略等于「撤销报成功、实际什么都没回退」。
+    if (!Array.isArray(value))
+      throw new Error(
+        `撤销补丁的 ${side} 不是快照数组，无法应用（target=${patch.target}）。`,
+      );
     for (const snapshot of value) this.applySnapshot(b, snapshot);
   }
 
@@ -898,9 +900,9 @@ export class BoardStore {
         value: b.contentObjects.find((o) => o.id === objectId) ?? null,
       },
     ];
-    const bound = b.instances.filter(
-      (i) => i.binding?.kind === "object" && i.binding.objectId === objectId,
-    );
+    // 绑定判定必须与 core/content.ts 的删除口径一致：
+    // 少了旧 objectId 字段的展示实例，会被删掉却撤不回来。
+    const bound = b.instances.filter((i) => boundId(i) === objectId);
     for (const instance of bound)
       before.push({
         target: "presentation",
@@ -1104,9 +1106,14 @@ export class BoardStore {
       version: o.version,
       source: o.source,
       updatedAt: o.updatedAt,
-      presentationCount: b.instances.filter(
-        (i) => i.binding?.kind === "object" && i.binding.objectId === o.id,
-      ).length,
+      // 多展示读回（I2）：一份内容可以同时出现在好几张白板上。
+      presentationCount: presentationsFor(b.contentObjects, b.instances, o.id)
+        .length,
+      presentationIds: presentationsFor(
+        b.contentObjects,
+        b.instances,
+        o.id,
+      ).map((p) => p.id),
       // 检索用的拼接串：原生内容的正文在 data 里，标题之外也要能搜到。
       haystack: [o.title, o.body || "", o.type, JSON.stringify(o.data ?? {})]
         .join(" ")

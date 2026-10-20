@@ -15,12 +15,7 @@ export type ExternalLocator = {
 
 /** 对象来源：人工创建、外部导入、AI 生成或推断。 */
 export type ObjectSource = {
-  origin:
-    | "human"
-    | "imported"
-    | "ai-generated"
-    | "ai-inferred"
-    | "code-index";
+  origin: "human" | "imported" | "ai-generated" | "ai-inferred" | "code-index";
   author?: string;
   /** 依据说明。推断性来源必须给依据，不得伪装成已确认事实。 */
   basis?: string;
@@ -99,7 +94,11 @@ export type Rect = {
 /** 展示实例：对象在某白板上的一次呈现。 */
 export type Presentation = {
   id: string;
-  /** 所属白板。 */
+  /**
+   * 所属空间：白板内部的分区 id（例如 overview，或嵌套出来的子白板空间 id）。
+   * 注意：不是「所属白板」——工作空间文件里展示实例挂在 boards[0].presentations 下，
+   * 板内空间由 spaces[].id 表达。
+   */
   spaceId: string;
   /** 组件类型（渲染方式），不等于对象类型。 */
   type: string;
@@ -130,10 +129,8 @@ export type Patch = {
   target:
     | "object"
     | "presentation"
-    | "board"
-    | "relation"
-    | /** 一次意图涉及多个实体时的批量快照。 */
-      "batch";
+    | "relation" /** 一次意图涉及多个实体时的批量快照。 */
+    | "batch";
   id: string;
   before: unknown;
   after: unknown;

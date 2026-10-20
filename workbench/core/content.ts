@@ -111,8 +111,11 @@ const findObject = (
  * 展示实例绑定的对象 ID。
  * 统一绑定用 binding.objectId；代码投影实例走旧字段 objectId（见 core/objects.ts）。
  * binding 明确声明为 local / tool 时不绑定任何对象。
+ *
+ * 这是**唯一**的绑定判定：删除、引用检查、撤销快照都必须用它，
+ * 否则会出现「删掉了却撤不回来」这类口径分裂。
  */
-const boundId = (presentation: Presentation): string | undefined => {
+export const boundId = (presentation: Presentation): string | undefined => {
   if (presentation.binding && presentation.binding.kind !== "object")
     return undefined;
   return boundObjectId(presentation);

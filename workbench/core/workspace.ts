@@ -26,6 +26,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import type { ObjectState } from "./content.ts";
 import type {
   AuditEntry,
   HistoryEntry,
@@ -72,6 +73,32 @@ export type PersistedBoard = {
   validations: unknown[];
   theme?: unknown;
 };
+
+/**
+ * 对象状态与文件结构的对应关系（显式给出，不要靠猜）。
+ * - objects 与 relations 在文件顶层；
+ * - presentations 在 boards[0].presentations（展示实例是白板状态，不是工作空间级实体）。
+ * 纯函数层 core/content.ts 的 ObjectState 是一块**扁平**结构，
+ * 直接把它当成文件的某一段写进去会让被删的展示实例在重启后复活。
+ */
+export const readObjectState = (file: WorkspaceFile): ObjectState => ({
+  objects: file.objects,
+  presentations: file.boards[0]?.presentations ?? [],
+  relations: file.relations,
+});
+
+/** 把对象状态写回文件：按上面的对应关系落到各自的位置。 */
+export const writeObjectState = (
+  file: WorkspaceFile,
+  state: ObjectState,
+): WorkspaceFile => ({
+  ...file,
+  objects: state.objects,
+  relations: state.relations,
+  boards: file.boards.map((board, index) =>
+    index === 0 ? { ...board, presentations: state.presentations } : board,
+  ),
+});
 
 /** workspace.json 的完整内容。 */
 export type WorkspaceFile = {
@@ -260,7 +287,8 @@ const asString = (value: unknown, fallback: string): string =>
 const asNumber = (value: unknown, fallback: number): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
-const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+const asArray = (value: unknown): unknown[] =>
+  Array.isArray(value) ? value : [];
 
 const describe = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -274,6 +302,69 @@ const normalizeSpace = (raw: unknown): PersistedBoard["spaces"][number] => {
   if (typeof r.parentId === "string") space.parentId = r.parentId;
   if (typeof r.objectId === "string") space.objectId = r.objectId;
   return space;
+};
+
+/**
+ * 展示实例逐字段归一化。
+ * 缺 id / spaceId / type / rect 的实例是坏数据：判为损坏（走 .bak 回退），
+ * 而不是放行到运行时才炸出一个 TypeError。
+ */
+const normalizePresentation = (raw: unknown): Presentation => {
+  const r = isRecord(raw) ? raw : {};
+  const rect = isRecord(r.rect) ? r.rect : {};
+  const id = asString(r.id, "");
+  const spaceId = asString(r.spaceId, "");
+  const type = asString(r.type, "");
+  const numbers = [rect.x, rect.y, rect.width, rect.height];
+  if (
+    !id ||
+    !spaceId ||
+    !type ||
+    !numbers.every((n) => typeof n === "number" && Number.isFinite(n))
+  )
+    throw new WorkspaceCorruptError(
+      `presentation is malformed: ${JSON.stringify(raw).slice(0, 200)}`,
+    );
+  const presentation: Presentation = {
+    id,
+    spaceId,
+    type,
+    title: asString(r.title, ""),
+    data: isRecord(r.data) ? { ...r.data } : {},
+    rect: {
+      x: rect.x as number,
+      y: rect.y as number,
+      width: rect.width as number,
+      height: rect.height as number,
+      pinned: rect.pinned === true,
+    },
+    updatedAt: asNumber(r.updatedAt, 0),
+    author: asString(r.author, "unknown"),
+  };
+  if (isRecord(r.binding)) {
+    const kind = r.binding.kind;
+    if (kind === "object" || kind === "local" || kind === "tool") {
+      presentation.binding = {
+        kind,
+        ...(typeof r.binding.objectId === "string"
+          ? { objectId: r.binding.objectId }
+          : {}),
+      };
+    }
+  }
+  if (typeof r.objectId === "string") presentation.objectId = r.objectId;
+  if (isRecord(r.appearance)) {
+    const detail = r.appearance.detail;
+    presentation.appearance = {
+      ...(typeof r.appearance.icon === "string"
+        ? { icon: r.appearance.icon }
+        : {}),
+      ...(detail === "full" || detail === "label" || detail === "icon"
+        ? { detail }
+        : {}),
+    };
+  }
+  return presentation;
 };
 
 const normalizeBoard = (raw: unknown): PersistedBoard => {
@@ -290,7 +381,7 @@ const normalizeBoard = (raw: unknown): PersistedBoard => {
     revision: asNumber(r.revision, 0),
     contentRevision: asNumber(r.contentRevision, 0),
     spaces: asArray(r.spaces).filter(isRecord).map(normalizeSpace),
-    presentations: asArray(r.presentations).filter(isRecord) as Presentation[],
+    presentations: asArray(r.presentations).map(normalizePresentation),
     views: { ...views },
     selection: asArray(r.selection).filter(
       (value): value is string => typeof value === "string",
@@ -306,7 +397,8 @@ const normalizeBoard = (raw: unknown): PersistedBoard => {
     proposals: asArray(r.proposals),
     validations: asArray(r.validations),
   };
-  if (typeof r.focusedViewId === "string") board.focusedViewId = r.focusedViewId;
+  if (typeof r.focusedViewId === "string")
+    board.focusedViewId = r.focusedViewId;
   if (Array.isArray(r.spaceActivities))
     board.spaceActivities = r.spaceActivities;
   if (r.theme !== undefined) board.theme = r.theme;
@@ -343,7 +435,9 @@ const normalizeRelation = (raw: unknown): ObjectRelation => {
   if (isRecord(r.attributes)) relation.attributes = r.attributes;
   if (typeof r.basis === "string") relation.basis = r.basis;
   if (Array.isArray(r.evidence))
-    relation.evidence = r.evidence.filter(isRecord) as ObjectRelation["evidence"];
+    relation.evidence = r.evidence.filter(
+      isRecord,
+    ) as ObjectRelation["evidence"];
   return relation;
 };
 
@@ -394,7 +488,8 @@ const normalizeActivity = (raw: unknown): WorkspaceActivity => {
         ? r.reportedBy
         : "agent-self-report",
   };
-  if (typeof r.targetSpaceId === "string") activity.targetSpaceId = r.targetSpaceId;
+  if (typeof r.targetSpaceId === "string")
+    activity.targetSpaceId = r.targetSpaceId;
   if (Array.isArray(r.inputs)) activity.inputs = r.inputs as string[];
   if (Array.isArray(r.outputs)) activity.outputs = r.outputs as string[];
   if (typeof r.stale === "boolean") activity.stale = r.stale;
@@ -404,7 +499,6 @@ const normalizeActivity = (raw: unknown): WorkspaceActivity => {
 const normalizePatchTarget = (value: unknown): Patch["target"] => {
   switch (value) {
     case "presentation":
-    case "board":
     case "relation":
     case "batch":
       return value;
@@ -422,6 +516,8 @@ const normalizeHistoryEntry = (raw: unknown): HistoryEntry => {
     label: asString(r.label, ""),
     at: asNumber(r.at, 0),
     author: asString(r.author, "unknown"),
+    // kind 是 I12 的判别字段：丢了它，存一次盘之后这条动作就再也说不清是不是外部效果。
+    ...(typeof r.kind === "string" && r.kind ? { kind: r.kind } : {}),
     patch: {
       target: normalizePatchTarget(patch.target),
       id: asString(patch.id, ""),
@@ -458,6 +554,12 @@ const normalizeWorkspace = (raw: unknown): WorkspaceFile => {
       "workspace file has no usable id; refusing to invent an empty workspace",
     );
   const history = isRecord(r.history) ? r.history : {};
+  const objects = asArray(r.objects).filter(isRecord).map(normalizeObject);
+  const relations = asArray(r.relations)
+    .filter(isRecord)
+    .map(normalizeRelation);
+  // 唯一性（I1）：重复 id 落盘读回必须被检出，不能静默通过。
+  assertUniqueIds(objects, relations);
   return {
     schemaVersion: WORKSPACE_SCHEMA_VERSION,
     id,
@@ -467,8 +569,8 @@ const normalizeWorkspace = (raw: unknown): WorkspaceFile => {
     revision: asNumber(r.revision, 0),
     contentRevision: asNumber(r.contentRevision, 0),
     boards: asArray(r.boards).filter(isRecord).map(normalizeBoard),
-    objects: asArray(r.objects).filter(isRecord).map(normalizeObject),
-    relations: asArray(r.relations).filter(isRecord).map(normalizeRelation),
+    objects,
+    relations,
     resources: asArray(r.resources).filter(isRecord).map(normalizeResource),
     activities: asArray(r.activities).filter(isRecord).map(normalizeActivity),
     history: {
@@ -477,6 +579,30 @@ const normalizeWorkspace = (raw: unknown): WorkspaceFile => {
     },
     audit: asArray(r.audit).filter(isRecord).map(normalizeAuditEntry),
   };
+};
+
+/** 唯一性检查：重复 id 是坏数据，必须在读回时就说清楚，而不是静默取第一个。 */
+const assertUniqueIds = (
+  objects: WorkspaceObject[],
+  relations: ObjectRelation[],
+) => {
+  const seen = new Map<string, string>();
+  for (const object of objects) {
+    if (!object.id) continue;
+    if (seen.has(object.id))
+      throw new WorkspaceCorruptError(
+        `workspace file contains duplicate object id "${object.id}"`,
+      );
+    seen.set(object.id, "object");
+  }
+  for (const relation of relations) {
+    if (!relation.id) continue;
+    if (seen.has(relation.id))
+      throw new WorkspaceCorruptError(
+        `workspace file contains duplicate id "${relation.id}" (object and relation share an id)`,
+      );
+    seen.set(relation.id, "relation");
+  }
 };
 
 /**
@@ -521,9 +647,7 @@ const readSchemaVersion = (raw: Record<string, unknown>): number => {
  */
 export function migrate(raw: unknown): WorkspaceFile {
   if (!isRecord(raw))
-    throw new WorkspaceCorruptError(
-      "workspace file must be a JSON object",
-    );
+    throw new WorkspaceCorruptError("workspace file must be a JSON object");
   let current: Record<string, unknown> = raw;
   let version = readSchemaVersion(current);
   if (version > WORKSPACE_SCHEMA_VERSION)
@@ -557,7 +681,8 @@ export function collectExternalDependencies(
     const uri = typeof locator.uri === "string" ? locator.uri : "";
     if (!uri) return;
     const kind = typeof locator.kind === "string" ? locator.kind : "unknown";
-    const fragment = typeof locator.fragment === "string" ? locator.fragment : "";
+    const fragment =
+      typeof locator.fragment === "string" ? locator.fragment : "";
     const revision = typeof locator.version === "string" ? locator.version : "";
     const key = `${kind}\u0000${uri}\u0000${fragment}\u0000${revision}`;
     const existing = found.get(key);
@@ -832,7 +957,8 @@ export class WorkspaceStore {
         }
       }
       workspaces.sort(
-        (a, b) => b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+        (a, b) =>
+          b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
       );
       this.lastError = null;
       return { workspaces, errors };
@@ -844,10 +970,7 @@ export class WorkspaceStore {
   /**
    * 导出为自包含 JSON 包。外部依赖单独列出，导入时需要提示「引用未随包迁移」。
    */
-  exportBundle(
-    id: string,
-    options?: { inlineAttachments?: boolean },
-  ): string {
+  exportBundle(id: string, options?: { inlineAttachments?: boolean }): string {
     let targetId = "";
     try {
       targetId = this.assertId(id);
@@ -876,10 +999,7 @@ export class WorkspaceStore {
    * 导入导出包。解析 + 迁移后落盘并返回工作空间内容。
    * 同 ID 已存在时抛 WorkspaceConflictError，除非显式传 overwrite。
    */
-  importBundle(
-    json: string,
-    options?: { overwrite?: boolean },
-  ): WorkspaceFile {
+  importBundle(json: string, options?: { overwrite?: boolean }): WorkspaceFile {
     try {
       const workspace = migrate(this.parseBundle(json));
       this.assertId(workspace.id);
@@ -1000,10 +1120,7 @@ export class WorkspaceStore {
     return isRecord(parsed.workspace) ? parsed.workspace : parsed;
   }
 
-  private collectAttachments(
-    id: string,
-    inline: boolean,
-  ): BundleAttachment[] {
+  private collectAttachments(id: string, inline: boolean): BundleAttachment[] {
     const directory = this.attachmentsDir(id);
     if (!this.fs.existsSync(directory)) return [];
     const names = this.fs

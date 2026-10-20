@@ -45,7 +45,7 @@ type HistoryStateMatchesShared = AssertTrue<
 
 /** 撤销单位内的一条实体快照。board 目标不能进 batch，故单列。 */
 export type UnitSnapshot = {
-  target: "object" | "presentation" | "relation" | "board";
+  target: "object" | "presentation" | "relation";
   id: string;
   value: unknown;
 };
@@ -53,10 +53,9 @@ export type UnitSnapshot = {
 /** 构造 History 的可选参数。 */
 export type HistoryOptions = {
   /**
-   * 严格模式：动作种类未声明或未登记的条目不进撤销栈。
+   * 严格模式：动作种类未声明的条目不进撤销栈。
    * 对应 core/objects.ts 中 HistoryEntry.kind 的注释（缺失时按未知处理，宁可漏撤销）。
-   * 默认关闭：core/store.ts 的现有接线尚未传 kind，此时开启会让撤销整体失效。
-   * 接线补齐 kind 之后建议开启。
+   * 默认关闭；core/store.ts 的接线已逐个动作声明 kind 并开启了严格模式。
    */
   requireKind?: boolean;
   /** 拒绝条目的时间戳来源，默认 Date.now。 */
@@ -73,7 +72,6 @@ export type HistoryRefusal = {
 const patchTargets: Patch["target"][] = [
   "object",
   "presentation",
-  "board",
   "relation",
   "batch",
 ];
@@ -144,9 +142,7 @@ const assertSnapshots = (raw: unknown, side: string): void => {
     throw new TypeError(`batch 补丁的 ${side} 必须是实体快照数组。`);
   for (const snap of raw) {
     if (!snap || typeof snap !== "object")
-      throw new TypeError(
-        `batch 补丁的 ${side} 里只能放实体快照对象。`,
-      );
+      throw new TypeError(`batch 补丁的 ${side} 里只能放实体快照对象。`);
     const s = snap as Partial<UnitSnapshot>;
     if (!snapshotTargets.includes(s.target as UnitSnapshot["target"]))
       throw new TypeError(
@@ -249,19 +245,10 @@ const mergeUnits = (first: Unit, latest: Unit): Unit => {
 
 /**
  * 把撤销单位还原成补丁。
- * 整组都是单目标补丁且只涉及一个实体时保持单目标形状；其余情况一律用 batch，
- * 因为 core/store.ts 的 applyPatch 只认快照数组，非数组会被静默忽略。
+ * 一律用 batch 形状：core/store.ts 的 applyPatch 只认快照数组，
+ * 单目标形状会被静默忽略——那会造成「撤销报成功、实际什么都没回退」。
  */
 const unitToPatch = (unit: Unit, intentId: string): Patch => {
-  if (unit.entities.length === 1 && !unit.batch) {
-    const entity = unit.entities[0];
-    return {
-      target: entity.target,
-      id: entity.id,
-      before: entity.before,
-      after: entity.after,
-    };
-  }
   const id = unit.entities.length === 1 ? unit.entities[0].id : intentId;
   return {
     target: "batch",
@@ -279,13 +266,9 @@ const unitToPatch = (unit: Unit, intentId: string): Patch => {
   };
 };
 
-/** 同一意图内是否可以合并。board 作用域的补丁不与别的实体混在一起。 */
-const canMerge = (top: HistoryEntry, entry: HistoryEntry): boolean => {
-  if (top.intentId !== entry.intentId) return false;
-  if (top.patch.target === "board" || entry.patch.target === "board")
-    return top.patch.target === entry.patch.target;
-  return true;
-};
+/** 同一意图内是否可以合并。 */
+const canMerge = (top: HistoryEntry, entry: HistoryEntry): boolean =>
+  top.intentId === entry.intentId;
 
 /** 深拷贝一个值。无法结构化克隆时退回原引用。 */
 const copyValue = (value: unknown): unknown => {
@@ -404,7 +387,10 @@ export class History {
     return [...this.refusals];
   }
 
-  /** 没有声明动作种类（kind）的条目。它们仍然可撤销，但接线应尽快补齐 kind。 */
+  /**
+   * 没有声明动作种类（kind）的条目。
+   * 严格模式下它们已被拒绝、不会出现在撤销栈里；这里记录的是被拒绝的条目，便于排查。
+   */
   get unclassified(): HistoryEntry[] {
     return [...this.unclassifiedEntries];
   }
@@ -419,6 +405,9 @@ export class History {
   record(entry: HistoryEntry): void {
     assertEntry(entry);
     const copy = copyEntry(entry);
+    // 统一成 batch 形状：core/store.ts 的 applyPatch 只认快照数组，
+    // 单目标形状会被静默忽略——「撤销报成功、实际什么都没回退」。
+    copy.patch = unitToPatch(unitFromPatch(copy.patch), copy.intentId);
     const kind = copy.kind;
     if (kind !== undefined && isExternalEffect(kind)) {
       this.refuse(
@@ -445,7 +434,10 @@ export class History {
     this.redoStack = [];
     const top = this.undoStack[this.undoStack.length - 1];
     if (this.mergeable && top && canMerge(top, copy)) {
-      const merged = mergeUnits(unitFromPatch(top.patch), unitFromPatch(copy.patch));
+      const merged = mergeUnits(
+        unitFromPatch(top.patch),
+        unitFromPatch(copy.patch),
+      );
       this.undoStack[this.undoStack.length - 1] = {
         ...top,
         kind: top.kind ?? copy.kind,
@@ -496,8 +488,7 @@ export function appendAudit(
   log: AuditEntry[],
   entry: AuditEntry,
 ): AuditEntry[] {
-  if (!Array.isArray(log))
-    throw new TypeError("审计日志必须是数组。");
+  if (!Array.isArray(log)) throw new TypeError("审计日志必须是数组。");
   if (!entry || typeof entry !== "object")
     throw new TypeError("审计条目必须是对象。");
   log.push(entry);
