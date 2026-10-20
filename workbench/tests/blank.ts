@@ -240,7 +240,9 @@ try {
   const pinned = b.instances[0].rect;
   await dragTo(-50, 30);
   b = await until(
-    (b) => b.instances[0].rect.pinned === false && b.instances[0].rect.x !== pinned.x,
+    (b) =>
+      b.instances[0].rect.pinned === false &&
+      b.instances[0].rect.x !== pinned.x,
   );
   assert.notEqual(
     b.instances[0].rect.x,
@@ -251,8 +253,7 @@ try {
   /* #9.4: the property panel's content field saves itself — no button.
      内容在对象上：断言要读解析后的内容，不是实例自己的空壳。 */
   const contentText = (board: any, instance: any) => {
-    const objectId =
-      (instance.binding || {}).objectId || instance.objectId;
+    const objectId = (instance.binding || {}).objectId || instance.objectId;
     const object = (board.contentObjects || []).find(
       (o: any) => o.id === objectId,
     );
@@ -314,9 +315,7 @@ try {
     "The undo reverts the last edit.",
   );
   await call("sand_redo", { boardId });
-  b = await until(
-    (b) => contentOf(b, b.instances[0])?.title === "我的计划",
-  );
+  b = await until((b) => contentOf(b, b.instances[0])?.title === "我的计划");
   assert.equal(
     contentOf(b, b.instances[0])?.data?.text,
     "先收集证据，再比较方案",
@@ -339,9 +338,7 @@ try {
     "先收集证据，再比较方案",
   );
   await call("sand_undo_to", { boardId, recordId: newest.id });
-  b = await until(
-    (b) => contentOf(b, b.instances[0])?.title === "我的计划",
-  );
+  b = await until((b) => contentOf(b, b.instances[0])?.title === "我的计划");
   assert.equal(
     contentOf(b, b.instances[0])?.data?.text,
     "先收集证据，再比较方案",
@@ -680,15 +677,21 @@ try {
     .getByRole("textbox", { name: "组件包 JSON" })
     .fill(JSON.stringify(pack));
   await frame.getByRole("button", { name: "从粘贴的 JSON 导入" }).click();
-  await frame.getByRole("button", { name: "目标与验收条件", exact: true }).waitFor();
+  await frame
+    .getByRole("button", { name: "目标与验收条件", exact: true })
+    .waitFor();
   await frame.getByRole("button", { name: "未来组件", exact: true }).waitFor();
   const packNotice = await frame.locator(".pack-notice").innerText();
   assert.ok(
     packNotice.includes("未知组件类型"),
     "The unknown type is reported to the person: " + packNotice,
   );
-  await frame.getByRole("button", { name: "目标与验收条件", exact: true }).click();
-  b = await until((b) => b.instances.some((i: any) => i.title === "目标与验收条件"));
+  await frame
+    .getByRole("button", { name: "目标与验收条件", exact: true })
+    .click();
+  b = await until((b) =>
+    b.instances.some((i: any) => i.title === "目标与验收条件"),
+  );
   const preset = b.instances.find((i: any) => i.title === "目标与验收条件");
   assert.equal(preset.type, "task", "The preset fills in a type that exists.");
   // 预设的原生内容进对象，实例只是展示（P2 的对象/展示分离）。
