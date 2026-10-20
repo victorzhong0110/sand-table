@@ -1765,3 +1765,13 @@ main.canvas-app { padding-left: 58px; }
 @media (max-width: 700px) { main.canvas-app { padding-left: 44px; } }
 .canvas-app .studio-layout, .canvas-app .studio-layout.has-inspector { width: auto; align-self: stretch; }
 .app-rail button[aria-pressed="true"], .appearance-controls button[aria-pressed="true"] { color: var(--ink); }
+@media (max-width: 700px) {
+ .canvas-app .canvas-topbar { display: grid; grid-template-columns: 24px minmax(0, 1fr); grid-template-rows: 24px 28px; height: 68px; min-height: 68px; gap: 2px 6px; padding: 6px 10px; flex-wrap: nowrap; }
+ .canvas-app .board-title { width: 100%; font-size: 12px; padding: 2px; }
+ .canvas-app .canvas-top-actions { grid-column: 1 / -1; margin: 0; justify-content: flex-end; }
+ .canvas-app .canvas-top-actions button { padding: 3px 6px; }
+ .canvas-app .floating-tool-toggle { top: 92px; font-size: 11px; padding: 8px; }
+ .canvas-app .stage-search { top: 92px; width: 130px; }
+ .canvas-app .agent-beacon { display: none; }
+ .canvas-app .floating-tool-wrap, .canvas-app .studio-inspector { top: 138px; }
+}
