@@ -104,6 +104,30 @@ try {
   const listed = await call("sand_list_boards");
   assert.equal(listed.boards.length, 1);
   assert.equal(listed.boards[0].boardId, browserId);
+  /** The UI writes to the server without waiting: "save note" and "focus a
+   *  guide step" both fire the write and move on, and reading the context
+   *  right after the click can land before the write does. Wait for the
+   *  expected state instead of reading once and hoping. */
+  const untilContext = async (
+    check: (ctx: any) => boolean,
+    describe: string,
+  ): Promise<any> => {
+    const deadline = Date.now() + 10000;
+    let last = "(no read yet)";
+    while (Date.now() < deadline) {
+      try {
+        const ctx = await call("sand_read_context", { boardId: browserId });
+        last = JSON.stringify(ctx.objects?.[0]?.title ?? null);
+        if (check(ctx)) return ctx;
+      } catch (e) {
+        last = String((e as Error).message);
+      }
+      await new Promise((r) => setTimeout(r, 80));
+    }
+    assert.fail(
+      `The context never reached the expected state (${describe}). Last read: ${last}`,
+    );
+  };
   let b = await call("sand_open_board", { boardId: browserId });
   assert.equal(b.id, browserId);
   const resource = await client.readResource({
@@ -120,8 +144,10 @@ try {
   await card.click();
   await frame().locator("textarea").fill("解释条件参数");
   await frame().getByRole("button", { name: "保存备注" }).click();
-  const context = await call("sand_read_context", { boardId: browserId });
-  assert.equal(context.notes[context.selection[0]], "解释条件参数");
+  const context = await untilContext(
+    (c) => c.notes[c.selection?.[0]] === "解释条件参数",
+    "the saved note on the selected object",
+  );
   assert.equal(context.objects[0].title, "clsx");
   b = await call("sand_read_board", { boardId: browserId });
   await call("sand_publish_guide", {
@@ -135,9 +161,9 @@ try {
   await frame()
     .getByRole("button", { name: /转换每个值/ })
     .click();
-  assert.equal(
-    (await call("sand_read_context", { boardId: browserId })).objects[0].title,
-    "toVal",
+  await untilContext(
+    (c) => c.objects?.[0]?.title === "toVal",
+    "the guide step focus",
   );
   await page.reload();
   await frame()
