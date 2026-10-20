@@ -132,9 +132,47 @@ try {
   );
   const noteId = b.instances[0].id;
   const expandedRect = { ...b.instances[0].rect };
+  // #17: the object is renamed while the presentation retains its old title.
+  const renamedTitle = "改名后的共享内容_" + "VeryLongUnbrokenTitle".repeat(5);
+  await frame.getByRole("textbox", { name: "编辑组件名称" }).fill(renamedTitle);
+  await frame.getByRole("button", { name: "保存组件", exact: true }).click();
+  b = await until((b) => contentOf(b, b.instances[0])?.title === renamedTitle);
+  assert.notEqual(b.instances[0].title, renamedTitle);
   await frame.getByRole("button", { name: "图标＋标题", exact: true }).click();
   b = await until((b) => b.instances[0].appearance?.detail === "label");
   let note = frame.locator('[data-instance-id="' + noteId + '"]');
+  await note.getByText(renamedTitle, { exact: true }).waitFor();
+  assert.equal(await note.getAttribute("aria-label"), renamedTitle);
+  assert.ok((await note.getAttribute("title"))!.startsWith(renamedTitle));
+  assert.equal(
+    await note.locator(".detail-toggle").getAttribute("aria-label"),
+    `切换 ${renamedTitle} 展开层级`,
+  );
+  const titleLayout = await note.evaluate((el) => {
+    const title = el.querySelector<HTMLElement>(".collapsed-title")!;
+    const chrome = el.querySelector<HTMLElement>(".component-chrome")!;
+    const toggle = el.querySelector<HTMLElement>(".detail-toggle")!;
+    const t = title.getBoundingClientRect(),
+      c = el.getBoundingClientRect();
+    const button = toggle.getBoundingClientRect();
+    return {
+      truncated: title.scrollWidth > title.clientWidth,
+      ellipsis: getComputedStyle(title).textOverflow,
+      fits:
+        t.left >= c.left && t.right <= button.left && button.right <= c.right,
+      noHorizontalScroll: chrome.scrollWidth <= chrome.clientWidth,
+    };
+  });
+  assert.deepEqual(
+    titleLayout,
+    {
+      truncated: true,
+      ellipsis: "ellipsis",
+      fits: true,
+      noHorizontalScroll: true,
+    },
+    "Long titles truncate without pushing controls outside the card",
+  );
   assert.equal(Math.round((await note.boundingBox())!.height), 48);
   assert.deepEqual(
     b.instances[0].rect,
@@ -148,9 +186,19 @@ try {
   await frame.getByRole("button", { name: "仅图标", exact: true }).click();
   await until((b) => b.instances[0].appearance?.detail === "icon");
   assert.equal(Math.round((await note.boundingBox())!.width), 48);
+  assert.equal(await note.getAttribute("aria-label"), renamedTitle);
   await frame.getByRole("button", { name: "完整界面", exact: true }).click();
   b = await until((b) => b.instances[0].appearance?.detail === "full");
   assert.deepEqual(b.instances[0].rect, expandedRect);
+  await note.getByText(renamedTitle, { exact: true }).waitFor();
+  await frame.getByRole("button", { name: "编排", exact: true }).click();
+  assert.equal(
+    await note.locator(".resize-handle").getAttribute("aria-label"),
+    `调整 ${renamedTitle} 大小`,
+  );
+  await frame.getByRole("textbox", { name: "编辑组件名称" }).fill("我的计划");
+  await frame.getByRole("button", { name: "保存组件", exact: true }).click();
+  await until((b) => contentOf(b, b.instances[0])?.title === "我的计划");
   assert.equal(
     contentOf(b, b.instances[0])?.data?.text,
     "先收集证据，再比较方案",
@@ -161,7 +209,70 @@ try {
   });
   await frame.getByRole("button", { name: "切换工具箱" }).click();
   assert.equal(await frame.locator(".floating-tool-wrap").isVisible(), false);
+  // Put actual content behind the zoom control, then exercise its click target.
+  const zoomIn = frame.getByRole("button", { name: "放大", exact: true });
+  const zoomBox = (await zoomIn.boundingBox())!;
+  const beforeDrag = (await note.boundingBox())!;
+  const target = {
+    x: zoomBox.x + zoomBox.width / 2,
+    y: zoomBox.y + zoomBox.height / 2,
+  };
+  await page.mouse.move(beforeDrag.x + 30, beforeDrag.y + 55);
+  await page.mouse.down();
+  await page.mouse.move(target.x, target.y, { steps: 12 });
+  await page.mouse.up();
+  await until(
+    (b) =>
+      b.instances.find((i: any) => i.id === noteId).rect.y !== expandedRect.y,
+  );
+  const afterDrag = (await note.boundingBox())!;
+  assert.ok(
+    target.x > afterDrag.x &&
+      target.x < afterDrag.x + afterDrag.width &&
+      target.y > afterDrag.y &&
+      target.y < afterDrag.y + afterDrag.height,
+    "The card must actually overlap the zoom control",
+  );
+  assert.ok(
+    await zoomIn.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(
+        r.x + r.width / 2,
+        r.y + r.height / 2,
+      );
+      return hit === el || el.contains(hit);
+    }),
+    "Zoom remains hit-testable above the overlapping card",
+  );
+  await zoomIn.click();
+  await frame.locator(".zoom span").filter({ hasText: "110%" }).waitFor();
+  await frame.getByRole("button", { name: "缩小", exact: true }).click();
+  await frame.locator(".zoom span").filter({ hasText: "100%" }).waitFor();
+  await page.screenshot({
+    path: "artifacts/chrome-zoom-overlap.png",
+    fullPage: true,
+  });
+  b = await read();
+  await call("sand_edit_space", {
+    boardId,
+    revision: b.revision,
+    viewId: b.focusedViewId,
+    operation: { kind: "place", items: [{ id: noteId, rect: expandedRect }] },
+  });
+  // MCP writes reach the UI asynchronously; wait before its next revisioned edit.
+  for (let i = 0; i < 150; i++) {
+    if (
+      await note.evaluate(
+        (el, y) => parseFloat((el as HTMLElement).style.top) === y,
+        expandedRect.y,
+      )
+    )
+      break;
+    if (i === 149) throw Error("Restored position did not reach the UI");
+    await new Promise((r) => setTimeout(r, 60));
+  }
   await frame.getByRole("button", { name: "切换工具箱" }).click();
+  await frame.getByRole("button", { name: "浏览", exact: true }).click();
   await frame.getByRole("button", { name: "关闭详情" }).click();
   await frame.getByRole("button", { name: "白板", exact: true }).click();
   b = await until((b) => b.instances.some((i: any) => i.type === "board"));

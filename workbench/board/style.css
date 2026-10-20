@@ -264,6 +264,7 @@ button[aria-pressed="true"] {
 }
 .zoom {
   position: absolute;
+  z-index: 2;
   bottom: 15px;
   left: 16px;
   display: flex;
@@ -550,7 +551,7 @@ footer p {
   white-space: pre-wrap;
   user-select: text;
 }
-.component-card strong {
+.component-card > strong {
   flex-shrink: 0;
 }
 .component-card button {
@@ -1604,7 +1605,9 @@ main.canvas-app {
 .detail-icon .component-chrome {
   margin: 0;
 }
-.collapsed-title {
+.component-chrome .collapsed-title {
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

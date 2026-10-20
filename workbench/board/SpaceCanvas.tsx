@@ -463,17 +463,20 @@ export function SpaceCanvas({
           )}
           {visible.map((c) => {
             const r = displayRect(c, draft[c.id] || c.rect);
+            const resolved = peekContent(c, b.contentObjects);
             return (
               <article
                 key={c.id}
                 tabIndex={0}
                 role="button"
-                aria-label={c.title}
+                aria-label={resolved.title}
                 title={[
-                  c.title,
+                  resolved.title,
                   componentTypes.find((t) => t.type === c.type)?.title ||
                     c.type,
-                  String(c.data.text || c.data.description || "").slice(0, 200),
+                  String(
+                    resolved.data.text || resolved.data.description || "",
+                  ).slice(0, 200),
                   c.objectId
                     ? b.objects.find((o) => o.id === c.objectId)?.source?.path
                     : "",
@@ -634,11 +637,13 @@ export function SpaceCanvas({
                   {c.appearance?.detail &&
                     c.appearance.detail !== "full" &&
                     c.appearance.detail !== "icon" && (
-                      <strong className="collapsed-title">{c.title}</strong>
+                      <strong className="collapsed-title">
+                        {resolved.title}
+                      </strong>
                     )}
                   <button
                     className="detail-toggle"
-                    aria-label={`切换 ${c.title} 展开层级`}
+                    aria-label={`切换 ${resolved.title} 展开层级`}
                     title="完整界面 → 图标和标题 → 仅图标"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -672,7 +677,7 @@ export function SpaceCanvas({
                   (!c.appearance?.detail || c.appearance.detail === "full") && (
                     <button
                       className="resize-handle"
-                      aria-label={`调整 ${c.title} 大小`}
+                      aria-label={`调整 ${resolved.title} 大小`}
                       onPointerDown={(e) => {
                         e.stopPropagation();
                         drag.current = {
