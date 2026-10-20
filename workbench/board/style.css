@@ -1761,6 +1761,7 @@ main.canvas-app {
     left: 52px;
   }
 }
-
 main.canvas-app { padding-left: 58px; }
 @media (max-width: 700px) { main.canvas-app { padding-left: 44px; } }
+.canvas-app .studio-layout, .canvas-app .studio-layout.has-inspector { width: auto; align-self: stretch; }
+.app-rail button[aria-pressed="true"], .appearance-controls button[aria-pressed="true"] { color: var(--ink); }
