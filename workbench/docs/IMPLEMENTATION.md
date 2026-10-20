@@ -43,7 +43,25 @@
 
 ## 生命周期和资源边界
 
-白板最多 8 个，闲置期限 30 分钟，显式结束／进程退出清空；视图最多 16 个。单板最多 80 空间、2,200 实例、500 人工关系；组件数据 40 KB，图表 100 点，表格 20 列／200 行。媒体每份 2 MB、每板 12 MB。没有状态数据库、事件历史或会话恢复。
+白板最多 8 个，闲置期限 30 分钟；已落盘工作空间的白板不因闲置回收，作品始终在文件里。视图最多 16 个。单板最多 80 空间、2,200 实例、500 人工关系；组件数据 40 KB，图表 100 点，表格 20 列／200 行。媒体每份 2 MB、每板 12 MB。
+
+## 通用工作空间内核（issue #11）
+
+契约与迁移映射：[工作空间内核契约](../../docs/architecture/workspace-kernel.zh-CN.md)。
+
+| 范围 | 实现 | 可重复证据 |
+|---|---|---|
+| 工作空间落盘 | `core/workspace.ts`：原子写、备份回退、版本迁移、导出／导入；`core/persistence.ts` 接线 | workspace、kernel |
+| 原生内容一等公民 | `core/content.ts`：对象／展示实例分离、版本冲突、引用策略、语义关系 | content、kernel |
+| 撤销与审计 | `core/history.ts`：按意图分组的撤销栈、只追加的审计日志、外部效果边界 | history、kernel |
+| 统一读回 | `sand_list_objects` / `sand_read_object`：原生内容与代码对象一起返回，用 `kind` 区分 | kernel、protocol |
+| 保存可观察 | 保存失败与读取失败都进入 `sand_workspace_status`，不显示虚假的「已保存」 | kernel |
+
+工作空间默认落在 `~/.sand-table/workspaces/<ID>/workspace.json`（`--workspace-dir` / `--workspace-id` 可改）。
+去掉 Git、源码索引和 AI 连接后，白板仍可创建内容、编辑、保存、重开。
+
+尚未完成：工作空间选择器与多工作空间管理、导出／导入的界面入口、领域包与连接器（issue #13）、
+小说／科研场景（issue #14）、真人验收（issue #15）。
 
 完整 App 数据置于 _meta.data，模型端整板调用只获摘要。空间分页与选区结果有数量限制，大组件按 ID 单独读取。intentDiff 只比较上次读取快照，不积累历史。
 

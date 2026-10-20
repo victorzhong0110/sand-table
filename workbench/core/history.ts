@@ -4,8 +4,13 @@
 //
 // 三个概念必须分开：
 //   1. 撤销单位 = 用户意图。一次拖动、一次连续输入、一批同意图的 Agent 修改算一个单位。
+//      一个单位可以覆盖多个实体，因此合并按实体做并集：每个实体的 before 取最早值、
+//      after 取最新值；涉及多个实体时补丁升级为 target: "batch"。
 //   2. 撤销栈 / 重做栈：可回退的状态。Undo 弹撤销栈压重做栈，Redo 反之。
 //   3. 审计日志：只追加。撤销本身也进审计，但审计与撤销栈游标互不影响。
+//
+// 外部效果（已发布的 PR、已运行的实验、已发送的内容）不进入白板撤销栈（I12）：
+// 它们的回滚属于补偿操作。record() 会拒绝这类条目，并把它们留在 refused 列表里。
 //
 // 本模块不含存储与 UI：调用方负责把 patch 应用到对象，并把 undo/redo 追加进审计日志。
 
@@ -13,6 +18,7 @@ import type {
   AuditEntry,
   HistoryEntry,
   HistoryState as SharedHistoryState,
+  Patch,
 } from "./objects.ts";
 
 /** 撤销栈与重做栈的完整状态。持久化层按此结构保存（workspace.json 的 history 字段）。 */
@@ -37,36 +43,310 @@ type HistoryStateMatchesShared = AssertTrue<
     : false
 >;
 
-/**
- * 合并同一意图的连续变更。
- * 保留最早的 before（撤销一次即回到该意图的最初状态），覆盖最新的 after（意图的最终结果）。
- * 其余字段沿用最早那条：id 标识「这个撤销单位由哪次编辑创建」，at 是意图开始的时间。
- * patch.target / patch.id 也沿用最早那条：before 属于该目标，撤销就是把它写回去。
- */
-const mergeEntries = (
-  first: HistoryEntry,
-  latest: HistoryEntry,
-): HistoryEntry => ({
-  ...first,
-  patch: { ...first.patch, after: latest.patch.after },
-});
+/** 撤销单位内的一条实体快照。board 目标不能进 batch，故单列。 */
+export type UnitSnapshot = {
+  target: "object" | "presentation" | "relation" | "board";
+  id: string;
+  value: unknown;
+};
 
-/** 记录前的形状检查：接线出错时立刻报错，而不是把坏数据写进撤销栈。 */
+/** 构造 History 的可选参数。 */
+export type HistoryOptions = {
+  /**
+   * 严格模式：动作种类未声明或未登记的条目不进撤销栈。
+   * 对应 core/objects.ts 中 HistoryEntry.kind 的注释（缺失时按未知处理，宁可漏撤销）。
+   * 默认关闭：core/store.ts 的现有接线尚未传 kind，此时开启会让撤销整体失效。
+   * 接线补齐 kind 之后建议开启。
+   */
+  requireKind?: boolean;
+  /** 拒绝条目的时间戳来源，默认 Date.now。 */
+  now?: () => number;
+};
+
+/** 被拒绝进入撤销栈的条目。外部效果不得进白板撤销栈（契约 I12）。 */
+export type HistoryRefusal = {
+  entry: HistoryEntry;
+  reason: string;
+  at: number;
+};
+
+const patchTargets: Patch["target"][] = [
+  "object",
+  "presentation",
+  "board",
+  "relation",
+  "batch",
+];
+
+/** batch 补丁里允许出现的实体目标（与 objects.ts 的 EntitySnapshot 一致）。 */
+const snapshotTargets: UnitSnapshot["target"][] = [
+  "object",
+  "presentation",
+  "relation",
+];
+
+/** 记录与拒绝列表的容量上限，避免长时间运行后无限增长。 */
+const refusalLimit = 50;
+
+const entityKey = (target: string, id: string): string => `${target}:${id}`;
+
+/** 撤销单位内的一个实体：变更前后的值。 */
+type UnitEntity = {
+  target: UnitSnapshot["target"];
+  id: string;
+  before: unknown;
+  after: unknown;
+};
+
+/** 一个撤销单位覆盖的实体集合。 */
+type Unit = {
+  entities: UnitEntity[];
+  /** 输入补丁是否是 batch。batch 形态的输出才能被 core/store.ts 的 applyPatch 应用。 */
+  batch: boolean;
+};
+
+/** 校验一条历史条目。形状不对立刻报错，不让坏数据进撤销栈。 */
 const assertEntry = (entry: HistoryEntry): void => {
   if (!entry || typeof entry !== "object")
     throw new TypeError("历史条目必须是对象。");
+  if (typeof entry.id !== "string" || !entry.id)
+    throw new TypeError("历史条目必须有非空 id。");
   if (typeof entry.intentId !== "string" || !entry.intentId)
     throw new TypeError("历史条目必须有非空 intentId（撤销按意图分组）。");
-  if (!entry.patch || typeof entry.patch !== "object")
+  if (typeof entry.label !== "string")
+    throw new TypeError("历史条目的 label 必须是字符串。");
+  if (typeof entry.at !== "number" || !Number.isFinite(entry.at))
+    throw new TypeError("历史条目的 at 必须是有限数字。");
+  if (typeof entry.author !== "string" || !entry.author)
+    throw new TypeError("历史条目必须有非空 author。");
+  if (
+    entry.kind !== undefined &&
+    (typeof entry.kind !== "string" || !entry.kind)
+  )
+    throw new TypeError("历史条目的 kind 必须是非空字符串。");
+  const patch = entry.patch;
+  if (!patch || typeof patch !== "object")
     throw new TypeError("历史条目必须有 patch（目标 + 变更前后的值）。");
+  if (!patchTargets.includes(patch.target))
+    throw new TypeError(
+      `patch.target 必须是 ${patchTargets.join(" / ")} 之一。`,
+    );
+  if (typeof patch.id !== "string" || !patch.id)
+    throw new TypeError("patch.id 必须是非空字符串。");
+  if (patch.target === "batch") {
+    assertSnapshots(patch.before, "before");
+    assertSnapshots(patch.after, "after");
+  }
+};
+
+const assertSnapshots = (raw: unknown, side: string): void => {
+  if (!Array.isArray(raw))
+    throw new TypeError(`batch 补丁的 ${side} 必须是实体快照数组。`);
+  for (const snap of raw) {
+    if (!snap || typeof snap !== "object")
+      throw new TypeError(
+        `batch 补丁的 ${side} 里只能放实体快照对象。`,
+      );
+    const s = snap as Partial<UnitSnapshot>;
+    if (!snapshotTargets.includes(s.target as UnitSnapshot["target"]))
+      throw new TypeError(
+        `batch 补丁的 ${side} 里的 target 必须是 ${snapshotTargets.join(" / ")} 之一。`,
+      );
+    if (typeof s.id !== "string" || !s.id)
+      throw new TypeError(`batch 补丁的 ${side} 里的快照必须有非空 id。`);
+  }
+};
+
+const readSnapshots = (raw: unknown): UnitSnapshot[] => {
+  if (!Array.isArray(raw)) return [];
+  const out: UnitSnapshot[] = [];
+  for (const snap of raw) {
+    const s = snap as Partial<UnitSnapshot>;
+    out.push({
+      target: s.target as UnitSnapshot["target"],
+      id: String(s.id ?? ""),
+      value: "value" in s ? s.value : null,
+    });
+  }
+  return out;
+};
+
+/**
+ * 把一个补丁拆成实体集合。
+ * batch 补丁的 before/after 是快照数组；单目标补丁的 before/after 是该目标的值。
+ * 只在一侧出现的实体，另一侧按 null（不存在）处理。
+ */
+const unitFromPatch = (patch: Patch): Unit => {
+  if (patch.target === "batch") {
+    const entities: UnitEntity[] = [];
+    const index = new Map<string, UnitEntity>();
+    for (const snap of readSnapshots(patch.before)) {
+      const key = entityKey(snap.target, snap.id);
+      if (index.has(key)) continue;
+      const entity: UnitEntity = {
+        target: snap.target,
+        id: snap.id,
+        before: snap.value,
+        after: null,
+      };
+      index.set(key, entity);
+      entities.push(entity);
+    }
+    for (const snap of readSnapshots(patch.after)) {
+      const key = entityKey(snap.target, snap.id);
+      const existing = index.get(key);
+      if (existing) {
+        existing.after = snap.value;
+        continue;
+      }
+      const entity: UnitEntity = {
+        target: snap.target,
+        id: snap.id,
+        before: null,
+        after: snap.value,
+      };
+      index.set(key, entity);
+      entities.push(entity);
+    }
+    return { entities, batch: true };
+  }
+  return {
+    entities: [
+      {
+        target: patch.target,
+        id: patch.id,
+        before: patch.before,
+        after: patch.after,
+      },
+    ],
+    batch: false,
+  };
+};
+
+/**
+ * 合并两个撤销单位：按实体取并集。
+ * 每个实体的 before 取最早值（撤销一次即回到该意图的最初状态），
+ * after 取最新值（重做能回到该意图的最终结果）。
+ */
+const mergeUnits = (first: Unit, latest: Unit): Unit => {
+  const entities = first.entities.map((entity) => ({ ...entity }));
+  const index = new Map(
+    entities.map((entity) => [entityKey(entity.target, entity.id), entity]),
+  );
+  for (const entity of latest.entities) {
+    const key = entityKey(entity.target, entity.id);
+    const existing = index.get(key);
+    if (existing) {
+      existing.after = entity.after;
+      continue;
+    }
+    const added = { ...entity };
+    entities.push(added);
+    index.set(key, added);
+  }
+  return { entities, batch: first.batch || latest.batch };
+};
+
+/**
+ * 把撤销单位还原成补丁。
+ * 整组都是单目标补丁且只涉及一个实体时保持单目标形状；其余情况一律用 batch，
+ * 因为 core/store.ts 的 applyPatch 只认快照数组，非数组会被静默忽略。
+ */
+const unitToPatch = (unit: Unit, intentId: string): Patch => {
+  if (unit.entities.length === 1 && !unit.batch) {
+    const entity = unit.entities[0];
+    return {
+      target: entity.target,
+      id: entity.id,
+      before: entity.before,
+      after: entity.after,
+    };
+  }
+  const id = unit.entities.length === 1 ? unit.entities[0].id : intentId;
+  return {
+    target: "batch",
+    id,
+    before: unit.entities.map((entity) => ({
+      target: entity.target,
+      id: entity.id,
+      value: entity.before,
+    })),
+    after: unit.entities.map((entity) => ({
+      target: entity.target,
+      id: entity.id,
+      value: entity.after,
+    })),
+  };
+};
+
+/** 同一意图内是否可以合并。board 作用域的补丁不与别的实体混在一起。 */
+const canMerge = (top: HistoryEntry, entry: HistoryEntry): boolean => {
+  if (top.intentId !== entry.intentId) return false;
+  if (top.patch.target === "board" || entry.patch.target === "board")
+    return top.patch.target === entry.patch.target;
+  return true;
+};
+
+/** 深拷贝一个值。无法结构化克隆时退回原引用。 */
+const copyValue = (value: unknown): unknown => {
+  if (value === null || typeof value !== "object") return value;
+  try {
+    return structuredClone(value);
+  } catch {
+    return value;
+  }
+};
+
+/** 复制一条历史条目：结构与快照值都复制，外部改动不影响撤销栈。 */
+const copyEntry = (entry: HistoryEntry): HistoryEntry => {
+  const patch = entry.patch;
+  const copied: HistoryEntry = {
+    id: entry.id,
+    intentId: entry.intentId,
+    label: entry.label,
+    at: entry.at,
+    author: entry.author,
+    patch: {
+      target: patch.target,
+      id: patch.id,
+      before: copyValue(patch.before),
+      after: copyValue(patch.after),
+    },
+  };
+  if (entry.kind !== undefined) copied.kind = entry.kind;
+  return copied;
+};
+
+/** 只复制结构、快照值按引用共享：用于高频读取的 state 快照。 */
+const copyEntryStructure = (entry: HistoryEntry): HistoryEntry => {
+  const patch = entry.patch;
+  const copied: HistoryEntry = {
+    id: entry.id,
+    intentId: entry.intentId,
+    label: entry.label,
+    at: entry.at,
+    author: entry.author,
+    patch: {
+      target: patch.target,
+      id: patch.id,
+      before: Array.isArray(patch.before)
+        ? patch.before.map((snap) => ({ ...(snap as object) }))
+        : patch.before,
+      after: Array.isArray(patch.after)
+        ? patch.after.map((snap) => ({ ...(snap as object) }))
+        : patch.after,
+    },
+  };
+  if (entry.kind !== undefined) copied.kind = entry.kind;
+  return copied;
 };
 
 /**
  * 撤销/重做栈。
  *
  * 状态机（undo 栈顶 U、redo 栈顶 R）：
- *   record(e)   → e 合并进 U（仅当 e.intentId === U.intentId 且上一次动作不是 undo/redo），
- *                 否则作为新单位压入 U；R 清空。
+ *   record(e)   → e 与栈顶合并（同一 intentId、连续、且上一次动作不是 undo/redo），
+ *                 否则作为新单位压入 U；R 清空。外部效果被拒绝，不进任何栈。
  *   undo()      → 弹出 U 压入 R，返回被撤销的条目；U 为空时返回 undefined。
  *   redo()      → 弹出 R 压回 U，返回被重做的条目；R 为空时返回 undefined。
  *   clearRedo() → R 清空。
@@ -79,8 +359,12 @@ export class History {
   private redoStack: HistoryEntry[];
   /** 上一次动作之后是否允许与栈顶合并。撤销/重做会打断意图分组。 */
   private mergeable: boolean;
+  private options: HistoryOptions;
+  private now: () => number;
+  private refusals: HistoryRefusal[];
+  private unclassifiedEntries: HistoryEntry[];
 
-  constructor(state?: HistoryState) {
+  constructor(state?: HistoryState, options?: HistoryOptions) {
     if (state !== undefined) {
       if (!Array.isArray(state.undo) || !Array.isArray(state.redo))
         throw new TypeError("历史状态必须包含 undo 与 redo 两个数组。");
@@ -88,11 +372,18 @@ export class History {
     this.undoStack = state ? [...state.undo] : [];
     this.redoStack = state ? [...state.redo] : [];
     this.mergeable = true;
+    this.options = options ?? {};
+    this.now = this.options.now ?? Date.now;
+    this.refusals = [];
+    this.unclassifiedEntries = [];
   }
 
-  /** 当前状态快照。数组是副本，条目本身按引用共享。 */
+  /** 当前状态快照。数组与条目是副本，改动它不会影响内部栈。 */
   get state(): HistoryState {
-    return { undo: [...this.undoStack], redo: [...this.redoStack] };
+    return {
+      undo: this.undoStack.map(copyEntryStructure),
+      redo: this.redoStack.map(copyEntryStructure),
+    };
   }
 
   /** 是否还有可撤销的意图。 */
@@ -106,19 +397,62 @@ export class History {
   }
 
   /**
+   * 被拒绝进入撤销栈的条目（外部效果等）。
+   * 调用方应把它们写进审计日志，而不是假装它们可以撤销。
+   */
+  get refused(): HistoryRefusal[] {
+    return [...this.refusals];
+  }
+
+  /** 没有声明动作种类（kind）的条目。它们仍然可撤销，但接线应尽快补齐 kind。 */
+  get unclassified(): HistoryEntry[] {
+    return [...this.unclassifiedEntries];
+  }
+
+  /**
    * 记录一次变更。
-   * 同一 intentId 的连续变更合并为一个撤销单位：保留最早的 before，覆盖最新的 after。
+   * 同一 intentId 的连续变更合并为一个撤销单位：按实体取并集，
+   * 每个实体的 before 取最早值、after 取最新值。
    * 新记录会清空重做栈（撤销过之后产生新编辑，重做不再有意义）。
-   * 条目按引用保存（undo 返回的就是同一个对象），调用方不应在 record 之后改写它。
+   * 外部效果（kind 命中 externalEffectKinds）被拒绝，不进撤销栈（契约 I12）。
    */
   record(entry: HistoryEntry): void {
     assertEntry(entry);
+    const copy = copyEntry(entry);
+    const kind = copy.kind;
+    if (kind !== undefined && isExternalEffect(kind)) {
+      this.refuse(
+        copy,
+        `外部效果「${kind}」不进入白板撤销栈（契约 I12）；回滚属于补偿操作，请写审计日志。`,
+      );
+      return;
+    }
+    if (kind === undefined) {
+      this.unclassifiedEntries.push(copy);
+      if (this.unclassifiedEntries.length > refusalLimit)
+        this.unclassifiedEntries.splice(
+          0,
+          this.unclassifiedEntries.length - refusalLimit,
+        );
+      if (this.options.requireKind) {
+        this.refuse(
+          copy,
+          "动作种类未声明，严格模式下不进入白板撤销栈（core/objects.ts 的 HistoryEntry.kind）。",
+        );
+        return;
+      }
+    }
     this.redoStack = [];
     const top = this.undoStack[this.undoStack.length - 1];
-    if (this.mergeable && top && top.intentId === entry.intentId) {
-      this.undoStack[this.undoStack.length - 1] = mergeEntries(top, entry);
+    if (this.mergeable && top && canMerge(top, copy)) {
+      const merged = mergeUnits(unitFromPatch(top.patch), unitFromPatch(copy.patch));
+      this.undoStack[this.undoStack.length - 1] = {
+        ...top,
+        kind: top.kind ?? copy.kind,
+        patch: unitToPatch(merged, top.intentId),
+      };
     } else {
-      this.undoStack.push(entry);
+      this.undoStack.push(copy);
     }
     this.mergeable = true;
   }
@@ -129,7 +463,7 @@ export class History {
     if (!entry) return undefined;
     this.redoStack.push(entry);
     this.mergeable = false;
-    return entry;
+    return copyEntry(entry);
   }
 
   /** 重做：弹重做栈并压回撤销栈。返回被重做的条目；没有可重做项时返回 undefined。 */
@@ -138,12 +472,18 @@ export class History {
     if (!entry) return undefined;
     this.undoStack.push(entry);
     this.mergeable = false;
-    return entry;
+    return copyEntry(entry);
   }
 
   /** 丢弃重做栈（新的编辑会调用）。 */
   clearRedo(): void {
     this.redoStack = [];
+  }
+
+  private refuse(entry: HistoryEntry, reason: string): void {
+    this.refusals.push({ entry, reason, at: this.now() });
+    if (this.refusals.length > refusalLimit)
+      this.refusals.splice(0, this.refusals.length - refusalLimit);
   }
 }
 
@@ -196,6 +536,43 @@ export const externalEffectKinds: string[] = [
  * 新增白板内动作时登记到这里，否则会被当成外部效果而无法撤销。
  */
 export const internalEffectKinds: string[] = [
+  "edit",
+  "update",
+  "create",
+  "delete",
+  "add",
+  "remove",
+  "change",
+  "modify",
+  "rename",
+  "drag",
+  "drop",
+  "type",
+  "input",
+  "paste",
+  "cut",
+  "duplicate",
+  "align",
+  "order",
+  "position",
+  "size",
+  "style",
+  "theme",
+  "layout",
+  "color",
+  "font",
+  "camera",
+  "zoom",
+  "focus",
+  "toggle",
+  "attach",
+  "detach",
+  "batch",
+  "bulk",
+  "bulk-edit",
+  "multi-edit",
+  "agent-edit",
+  "agent-batch",
   "edit-object",
   "edit-presentation",
   "create-object",
@@ -207,7 +584,6 @@ export const internalEffectKinds: string[] = [
   "resize",
   "fold",
   "unfold",
-  "rename",
   "reorder",
   "group",
   "ungroup",

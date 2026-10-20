@@ -32,6 +32,10 @@ const presentation = (input: {
   id: string;
   spaceId: string;
   objectId?: string;
+  /** 代码投影实例的旧字段：只写 objectId，不写 binding。 */
+  legacyObjectId?: string;
+  /** 显式声明为本地内容（不绑定对象）。 */
+  local?: boolean;
   title?: string;
   data?: Record<string, unknown>;
   rect?: Partial<Rect>;
@@ -42,6 +46,10 @@ const presentation = (input: {
   ...(input.objectId === undefined
     ? {}
     : { binding: { kind: "object" as const, objectId: input.objectId } }),
+  ...(input.legacyObjectId === undefined
+    ? {}
+    : { objectId: input.legacyObjectId }),
+  ...(input.local === undefined ? {} : { binding: { kind: "local" as const } }),
   title: input.title ?? "本地标题",
   data: input.data ?? {},
   rect: rect(input.rect),
@@ -51,7 +59,16 @@ const presentation = (input: {
 
 const note = (
   id: string,
-  over: { now?: number; title?: string; data?: Record<string, unknown> } = {},
+  over: {
+    now?: number;
+    title?: string;
+    data?: Record<string, unknown>;
+    source?: {
+      origin: "human" | "imported" | "ai-generated" | "ai-inferred";
+      basis?: string;
+      external?: { kind: "file"; uri: string };
+    };
+  } = {},
 ) =>
   createObject({
     id,
@@ -59,7 +76,7 @@ const note = (
     title: over.title ?? `${id} 标题`,
     body: `${id} 正文`,
     data: over.data ?? { text: "初稿" },
-    source: { origin: "human", author: "vic" },
+    source: over.source ?? { origin: "human", author: "vic" },
     now: over.now ?? 1000,
     author: "vic",
   });
@@ -164,9 +181,61 @@ test("updateObject: 版本不匹配抛 StaleVersionError，匹配时 version 自
   );
 });
 
+test("updateObject: 新版本不与旧版本共享可变 data/source（只改标题也不共享）", () => {
+  const original = note("obj-1", {
+    data: { nested: { count: 1 }, list: [1] },
+    source: {
+      origin: "human",
+      basis: "手写",
+      external: { kind: "file", uri: "a.ts" },
+    },
+  });
+  const updated = updateObject(
+    [original],
+    "obj-1",
+    { title: "只改标题" },
+    1,
+    2000,
+    "vic",
+  );
+  // 引用必须不同
+  assert.notEqual(updated.data, original.data);
+  assert.notEqual(updated.source, original.source);
+  assert.notEqual(
+    (updated.data as { nested: unknown }).nested,
+    (original.data as { nested: unknown }).nested,
+  );
+  assert.notEqual(
+    (updated.source as { external?: unknown }).external,
+    (original.source as { external?: unknown }).external,
+  );
+  // 改新版本不污染旧版本（撤销快照里的 before 不会被改坏）
+  (updated.data as { nested: { count: number } }).nested.count = 99;
+  (updated.source as { basis?: string }).basis = "篡改";
+  assert.equal(
+    (original.data as { nested: { count: number } }).nested.count,
+    1,
+  );
+  assert.equal((original.source as { basis?: string }).basis, "手写");
+  // 改旧版本也不污染新版本
+  (original.data as { nested: { count: number } }).nested.count = 42;
+  assert.equal(
+    (updated.data as { nested: { count: number } }).nested.count,
+    99,
+  );
+  // 内容一致但互不影响
+  assert.deepEqual(updated.data, { nested: { count: 99 }, list: [1] });
+  assert.deepEqual(original.data, { nested: { count: 42 }, list: [1] });
+});
+
 test("cloneObject: 产出独立副本，改副本不影响原对象", () => {
   const original = note("obj-1", {
     data: { nested: { count: 1 }, list: [1, 2] },
+    source: {
+      origin: "human",
+      basis: "手写",
+      external: { kind: "file", uri: "a.ts" },
+    },
   });
   const objects = [original];
   const copy = cloneObject(objects, "obj-1", "obj-2", 2000, "agent");
@@ -184,11 +253,17 @@ test("cloneObject: 产出独立副本，改副本不影响原对象", () => {
     (copy.data as { nested: unknown }).nested,
     (original.data as { nested: unknown }).nested,
   );
+  assert.notEqual(
+    (copy.source as { external?: unknown }).external,
+    (original.source as { external?: unknown }).external,
+  );
   (copy.data as { nested: { count: number } }).nested.count = 99;
+  (copy.source as { basis?: string }).basis = "副本改的";
   assert.equal(
     (original.data as { nested: { count: number } }).nested.count,
     1,
   );
+  assert.equal((original.source as { basis?: string }).basis, "手写");
   // 改副本不影响原对象
   const updatedCopy = updateObject(
     [copy],
@@ -304,6 +379,33 @@ test("deleteObject: 只有关系引用（无展示实例）时 refuse 同样拒�
   );
 });
 
+test("deleteObject: 代码投影实例（旧 objectId 字段）也算引用", () => {
+  const obj = note("obj-1");
+  const projection = presentation({
+    id: "p-legacy",
+    spaceId: "board-a",
+    legacyObjectId: "obj-1",
+  });
+  const state: ObjectState = {
+    objects: [obj],
+    presentations: [projection],
+    relations: [],
+  };
+  assert.throws(
+    () => deleteObject(state, "obj-1", { onReferenced: "refuse" }),
+    (err: unknown) => {
+      assert.ok(err instanceof ReferencedObjectError);
+      assert.deepEqual((err as ReferencedObjectError).presentationIds, [
+        "p-legacy",
+      ]);
+      return true;
+    },
+  );
+  const detached = deleteObject(state, "obj-1", { onReferenced: "detach" });
+  assert.deepEqual(detached.removed.presentationIds, ["p-legacy"]);
+  assert.deepEqual(detached.state.presentations, []);
+});
+
 test("relate: status 默认 confirmed，推测关系必须显式 inferred；unlink 移除关系", () => {
   const relations = relate([], {
     id: "r-1",
@@ -359,6 +461,28 @@ test("relate: status 默认 confirmed，推测关系必须显式 inferred；unli
   );
 });
 
+test("relate: attributes / evidence 写入时深拷贝，调用方改自己的输入不影响关系", () => {
+  const attributes = { confidence: 0.4, tags: ["x"] };
+  const evidence = [{ kind: "file" as const, uri: "a.ts" }];
+  const relations = relate([], {
+    id: "r-1",
+    source: "obj-1",
+    target: "obj-2",
+    kind: "支持",
+    attributes,
+    evidence,
+    now: 10,
+    author: "vic",
+  });
+  assert.notEqual(relations[0].attributes, attributes);
+  assert.notEqual(relations[0].evidence, evidence);
+  attributes.confidence = 0.99;
+  attributes.tags.push("y");
+  evidence[0].uri = "b.ts";
+  assert.deepEqual(relations[0].attributes, { confidence: 0.4, tags: ["x"] });
+  assert.deepEqual(relations[0].evidence, [{ kind: "file", uri: "a.ts" }]);
+});
+
 test("resolveContent: 绑定对象时取对象内容，未绑定时取本地 title/data", () => {
   const obj = note("obj-1", { title: "对象标题", data: { text: "对象内容" } });
   const bound = presentation({
@@ -389,6 +513,28 @@ test("resolveContent: 绑定对象时取对象内容，未绑定时取本地 tit
   assert.equal(localResolved.objectId, undefined);
   assert.equal(localResolved.body, undefined);
   assert.equal(localResolved.source, undefined);
+  // 显式声明 local 的展示实例不绑定对象
+  const declared = presentation({
+    id: "p-2b",
+    spaceId: "board-a",
+    local: true,
+    title: "声明本地",
+    data: { text: "本地内容" },
+  });
+  const declaredResolved = resolveContent(declared, [obj]);
+  assert.equal(declaredResolved.objectId, undefined);
+  assert.equal(declaredResolved.title, "声明本地");
+  // 代码投影实例（旧 objectId 字段）同样从对象取内容
+  const projection = presentation({
+    id: "p-2c",
+    spaceId: "board-a",
+    legacyObjectId: "obj-1",
+    title: "投影标题",
+    data: { view: "icon" },
+  });
+  const projectionResolved = resolveContent(projection, [obj]);
+  assert.equal(projectionResolved.objectId, "obj-1");
+  assert.equal(projectionResolved.title, "对象标题");
   // 绑定指向已删除对象：回退本地内容，但保留悬空 id 以便识别引用失效
   const dangling = presentation({
     id: "p-3",
@@ -400,6 +546,59 @@ test("resolveContent: 绑定对象时取对象内容，未绑定时取本地 tit
   const danglingResolved = resolveContent(dangling, [obj]);
   assert.equal(danglingResolved.objectId, "gone");
   assert.equal(danglingResolved.title, "悬空标题");
+});
+
+test("resolveContent: 返回内容快照，改快照不改对象（不能绕过 version 就地改写）", () => {
+  const obj = note("obj-1", { data: { nested: { count: 1 } } });
+  const bound = presentation({
+    id: "p-1",
+    spaceId: "board-a",
+    objectId: "obj-1",
+  });
+  const resolved = resolveContent(bound, [obj]);
+  // 内容一致
+  assert.deepEqual(resolved.data, obj.data);
+  // 但不是同一份引用：改快照不污染对象
+  assert.notEqual(resolved.data, obj.data);
+  (resolved.data as { nested: { count: number } }).nested.count = 99;
+  assert.equal((obj.data as { nested: { count: number } }).nested.count, 1);
+  // 未绑定时同样返回快照
+  const local = presentation({
+    id: "p-2",
+    spaceId: "board-a",
+    data: { text: "本地" },
+  });
+  const localResolved = resolveContent(local, [obj]);
+  assert.notEqual(localResolved.data, local.data);
+  (localResolved.data as { text: string }).text = "被改";
+  assert.equal((local.data as { text: string }).text, "本地");
+});
+
+test("展示实例之间互不污染：改一个实例的 data 不影响另一个实例与对象", () => {
+  const obj = note("obj-1", { data: { text: "对象内容" } });
+  const p1 = presentation({
+    id: "p-1",
+    spaceId: "board-a",
+    objectId: "obj-1",
+    data: { view: "full", tags: ["a"] },
+  });
+  const p2 = presentation({
+    id: "p-2",
+    spaceId: "board-b",
+    objectId: "obj-1",
+    data: { view: "icon", tags: ["b"] },
+  });
+  (p1.data as { tags: string[] }).tags.push("x");
+  (p1.data as { view: string }).view = "label";
+  // 另一个实例不受影响
+  assert.deepEqual(p2.data, { view: "icon", tags: ["b"] });
+  // 对象内容不受影响
+  assert.deepEqual(obj.data, { text: "对象内容" });
+  // 两个实例解析出的内容仍然一致（内容来自对象，不是实例）
+  assert.deepEqual(
+    resolveContent(p1, [obj]).data,
+    resolveContent(p2, [obj]).data,
+  );
 });
 
 test("presentationsFor: 同一对象在两块白板上有两个展示实例", () => {
@@ -428,6 +627,21 @@ test("presentationsFor: 同一对象在两块白板上有两个展示实例", ()
     presentationsFor([obj, other], presentations, "obj-x").length,
     0,
   );
+  // 代码投影实例（旧字段）也算这个对象的展示
+  const withProjection = [
+    ...presentations,
+    presentation({
+      id: "p-5",
+      spaceId: "board-b",
+      legacyObjectId: "obj-1",
+    }),
+  ];
+  assert.deepEqual(
+    presentationsFor([obj, other], withProjection, "obj-1").map((p) => p.id),
+    ["p-1", "p-2", "p-5"],
+  );
+  // 对象被删除后仍返回悬空展示，便于上层识别引用失效
+  assert.equal(presentationsFor([], withProjection, "obj-1").length, 3);
 });
 
 test("canNest: 自嵌套与祖先嵌套拒绝，兄弟嵌套允许", () => {
@@ -491,14 +705,12 @@ test("综合：改对象两处都变、移动其一另一个不动、移除展�
   assert.equal(afterRemoval.length, 1);
   assert.equal(objects.length, 1);
   assert.equal(resolveContent(afterRemoval[0], objects).title, "定稿");
-  // 移除展示不等于删除对象：对象仍在，且仍被剩下的展示引用
-  assert.equal(objects.length, 1);
+  // 移除展示后再删对象：仍被剩下的展示引用
   const state: ObjectState = {
     objects,
     presentations: afterRemoval,
     relations: [],
   };
-  // 仍被引用时必须显式策略，refuse 直接拒绝
   assert.throws(
     () => deleteObject(state, "obj-1", { onReferenced: "refuse" }),
     (err: unknown) => {

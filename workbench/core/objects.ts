@@ -154,6 +154,12 @@ export type HistoryEntry = {
   label: string;
   at: number;
   author: string;
+  /**
+   * 动作种类：白板内编辑（"edit-object"、"move"……）或外部效果
+   * （"publish"、"run-experiment"……）。外部效果不得进入撤销栈（契约 I12）。
+   * 缺失时按未知处理：白板撤销宁可漏撤销，也不得冒充外部回滚。
+   */
+  kind?: string;
   patch: Patch;
 };
 

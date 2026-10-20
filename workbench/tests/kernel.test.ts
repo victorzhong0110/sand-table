@@ -11,6 +11,7 @@ import { BoardStore } from "../core/store.ts";
 import { Spaces } from "../server/spaces.ts";
 import { openView } from "../core/space-state.ts";
 import { resolveContent } from "../core/content.ts";
+import { History } from "../core/history.ts";
 import { WorkspaceStore } from "../core/workspace.ts";
 import { workspacePort } from "../core/persistence.ts";
 import type { Projection } from "../core/model.ts";
@@ -369,4 +370,123 @@ test("保存失败必须可观察，不能显示虚假的「已保存」", () =>
   store.flushSave();
   assert.equal(store.lastSaveError, "disk is full");
   assert.ok(!store.lastSaveError === false, "失败原因被保留");
+});
+
+test("删除对象后撤销能把它连同引用一起放回来", () => {
+  const { store, op, boardId } = setup();
+  op({ kind: "create", type: "text", title: "林澈", data: { text: "原文" } });
+  const b0 = store.get(boardId);
+  const objectId = b0.contentObjects[0].id;
+  const instance = b0.instances.find((i) => i.binding?.objectId === objectId)!;
+  op({ kind: "create", type: "text", title: "港口", data: { text: "场景" } });
+  const b1 = store.get(boardId);
+  const other = b1.contentObjects.find((o) => o.id !== objectId)!;
+  op({ kind: "relate", source: objectId, target: other.id, relation: "参与" });
+
+  op({ kind: "deleteObject", objectId, onReferenced: "detach" });
+  const b2 = store.get(boardId);
+  assert.equal(b2.contentObjects.filter((o) => o.id === objectId).length, 0);
+  assert.equal(b2.objectRelations.length, 0, "引用一并移除");
+  assert.equal(b2.instances.filter((i) => i.binding?.objectId === objectId).length, 0);
+
+  op({ kind: "undo" });
+  const b3 = store.get(boardId);
+  assert.equal(
+    b3.contentObjects.filter((o) => o.id === objectId).length,
+    1,
+    "撤销后对象回来了",
+  );
+  assert.equal(
+    b3.contentObjects.find((o) => o.id === objectId)!.data!.text,
+    "原文",
+    "内容也是删除前的",
+  );
+  assert.equal(
+    b3.instances.filter((i) => i.binding?.objectId === objectId).length,
+    1,
+    "引用它的展示也回来了",
+  );
+  assert.equal(b3.objectRelations.length, 1, "关系也回来了");
+});
+
+test("空白预设不会抹掉已保存的作品：恢复的白板带着用户自己的内容", () => {
+  const root = mkdtempSync(join(tmpdir(), "sand-kernel-preset-"));
+  try {
+    const store = new BoardStore();
+    store.attachPersistence(workspacePort(new WorkspaceStore(root)), "default");
+    const spaces = new Spaces(store);
+    let board = store.open(empty, "空白工作区", { preset: "blank" });
+    openView(store.get(board.id), "view-a");
+    spaces.update(board.id, store.get(board.id).revision, "view-a", {
+      kind: "create",
+      type: "text",
+      title: "林澈",
+      data: { text: "在港口长大" },
+    });
+    store.flushSave();
+
+    // 重开：空白预设下，恢复出来的卡片必须还在
+    const restarted = new BoardStore();
+    restarted.attachPersistence(
+      workspacePort(new WorkspaceStore(root)),
+      "default",
+    );
+    const reopened = restarted.open(empty, "空白工作区", { preset: "blank" });
+    const restored = restarted.get(reopened.id);
+    assert.equal(
+      restored.instances.filter((i) => i.binding?.kind === "object").length,
+      1,
+      "空白预设只对新建的白板生效，不能抹掉已保存的展示",
+    );
+    assert.equal(restored.contentObjects.length, 1, "内容对象也在");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("每个可撤销的动作都声明了种类；外部效果进不了撤销栈", () => {
+  const { store, op, boardId } = setup();
+  op({ kind: "create", type: "text", title: "林澈", data: { text: "一稿" } });
+  op({
+    kind: "create",
+    type: "text",
+    title: "港口",
+    data: { text: "场景" },
+    intentId: "同一个意图",
+  });
+  const b = store.get(boardId);
+  assert.ok(b.history.undo.length > 0, "有可撤销的意图");
+  for (const entry of b.history.undo)
+    assert.ok(entry.kind, "每个撤销条目都声明了动作种类");
+  assert.ok(
+    b.history.undo.every((e) => e.kind !== "publish"),
+    "外部效果不在撤销栈里",
+  );
+  // 未声明种类的条目不进撤销栈：白板撤销宁可漏撤销，也不得冒充外部回滚。
+  const history = new History(undefined, { requireKind: true });
+  history.record({
+    id: "x",
+    intentId: "i",
+    label: "未声明种类",
+    at: 1,
+    author: "agent",
+    patch: { target: "object", id: "o", before: null, after: null },
+  });
+  assert.equal(history.canUndo, false, "被拒绝的条目没有进撤销栈");
+  assert.equal(history.refused.length, 1, "拒绝有记录，不是静默丢弃");
+  assert.match(history.refused[0].reason, /种类/);
+
+  // 外部效果同样不进撤销栈
+  const external = new History(undefined, { requireKind: true });
+  external.record({
+    id: "y",
+    intentId: "j",
+    label: "发布 PR",
+    at: 1,
+    author: "agent",
+    kind: "publish",
+    patch: { target: "object", id: "o", before: null, after: null },
+  });
+  assert.equal(external.canUndo, false, "外部效果不进入白板撤销栈");
+  assert.equal(external.refused.length, 1);
 });

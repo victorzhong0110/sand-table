@@ -106,8 +106,18 @@ export class BoardStore {
     );
     return b;
   }
-  open(p: Projection, title: string) {
+  open(
+    p: Projection,
+    title: string,
+    options?: { preset?: "blank" | "code" },
+  ) {
     this.sweep();
+    const preset = options?.preset;
+    const applyPreset = (b: Board) => {
+      if (!preset) return;
+      b.presentation = preset === "code" ? "code" : "canvas";
+      b.autoProjectSources = preset === "code";
+    };
     // 已有持久化工作空间：复用已保存的白板，而不是新建一张空板。
     // 重启、换浏览器、换 AI 客户端都不该让作品消失。
     if (this.persistence && this.workspaceId) {
@@ -115,13 +125,17 @@ export class BoardStore {
         (b) => b.workspaceId === this.workspaceId,
       );
       if (existing) {
-        if (p.objects.length || p.workspaces.length) this.refresh(existing.id, p);
+        applyPreset(existing);
+        if (p.objects.length || p.workspaces.length)
+          this.refresh(existing.id, p);
         return this.read(existing.id);
       }
       const snapshot = this.loadWorkspace(this.workspaceId);
       if (snapshot) {
         const restored = this.restore(snapshot);
-        if (p.objects.length || p.workspaces.length) this.refresh(restored.id, p);
+        applyPreset(restored);
+        if (p.objects.length || p.workspaces.length)
+          this.refresh(restored.id, p);
         return this.read(restored.id);
       }
     }
@@ -157,6 +171,10 @@ export class BoardStore {
       ...(this.workspaceId ? { workspaceId: this.workspaceId } : {}),
     };
     initializeSpaces(b);
+    applyPreset(b);
+    // 空白预设：只对**新建**的白板生效。恢复出来的白板带着用户自己的内容，
+    // 不能因为预设是 blank 就清空——那是把作品抹掉，不是"从空白开始"。
+    if (preset === "blank") b.instances = [];
     this.boards.set(b.id, b);
     this.touch();
     return this.read(b.id);
@@ -201,7 +219,7 @@ export class BoardStore {
       relations: [],
     };
     this.boards.set(b.id, b);
-    this.histories.set(b.id, new History(b.history));
+    this.histories.set(b.id, new History(b.history, { requireKind: true }));
     return b;
   }
   ids(b: Board, ids: string[]) {
@@ -593,7 +611,9 @@ export class BoardStore {
   private historyFor(b: Board) {
     let h = this.histories.get(b.id);
     if (!h) {
-      h = new History(b.history);
+      // 严格模式：没声明动作种类的条目不进撤销栈。
+      // 白板撤销宁可漏撤销，也不得冒充外部回滚（契约 I12）。
+      h = new History(b.history, { requireKind: true });
       this.histories.set(b.id, h);
     }
     return h;
@@ -607,6 +627,8 @@ export class BoardStore {
       label: string;
       author: string;
       authorKind?: "human" | "agent";
+      /** 动作种类：白板内编辑可撤销；外部效果不得进撤销栈（契约 I12）。 */
+      kind: string;
       patch: Patch;
     },
   ) {
@@ -617,6 +639,7 @@ export class BoardStore {
       label: entry.label,
       at: this.now(),
       author: entry.author,
+      kind: entry.kind,
       patch: entry.patch,
     });
     b.history = h.state;
@@ -729,6 +752,7 @@ export class BoardStore {
     b.contentRevision++;
     this.record(b, {
       intentId,
+      kind: "create-object",
       label: `新建「${object.title}」`,
       author,
       authorKind,
@@ -736,7 +760,13 @@ export class BoardStore {
         target: "batch",
         id: object.id,
         before: [{ target: "object", id: object.id, value: null }],
-        after: [{ target: "object", id: object.id, value: object }],
+        after: [
+          {
+            target: "object",
+            id: object.id,
+            value: structuredClone(object),
+          },
+        ],
       },
     });
     this.touch();
@@ -774,14 +804,27 @@ export class BoardStore {
     b.contentRevision++;
     this.record(b, {
       intentId,
+      kind: "edit-object",
       label: `编辑「${next.title}」`,
       author,
       authorKind,
       patch: {
         target: "batch",
         id: objectId,
-        before: [{ target: "object", id: objectId, value: before }],
-        after: [{ target: "object", id: objectId, value: next }],
+        before: [
+          {
+            target: "object",
+            id: objectId,
+            value: structuredClone(before),
+          },
+        ],
+        after: [
+          {
+            target: "object",
+            id: objectId,
+            value: structuredClone(next),
+          },
+        ],
       },
     });
     this.touch();
@@ -806,13 +849,20 @@ export class BoardStore {
     b.contentRevision++;
     this.record(b, {
       intentId,
+      kind: "duplicate",
       label: `复制出「${clone.title}」`,
       author,
       patch: {
         target: "batch",
         id: clone.id,
         before: [{ target: "object", id: clone.id, value: null }],
-        after: [{ target: "object", id: clone.id, value: clone }],
+        after: [
+          {
+            target: "object",
+            id: clone.id,
+            value: structuredClone(clone),
+          },
+        ],
       },
     });
     this.touch();
@@ -830,6 +880,38 @@ export class BoardStore {
     author: string,
     intentId = randomUUID(),
   ) {
+    // 撤销快照要在删除**之前**取：删完再取就只剩「已不存在」，
+    // 撤销时无法把对象、引用它的展示和关系放回去。
+    const before: {
+      target: "object" | "presentation" | "relation";
+      id: string;
+      value: unknown;
+    }[] = [
+      {
+        target: "object",
+        id: objectId,
+        value: b.contentObjects.find((o) => o.id === objectId) ?? null,
+      },
+    ];
+    const bound = b.instances.filter(
+      (i) => i.binding?.kind === "object" && i.binding.objectId === objectId,
+    );
+    for (const instance of bound)
+      before.push({
+        target: "presentation",
+        id: instance.id,
+        value: structuredClone(instance),
+      });
+    const related = b.objectRelations.filter(
+      (r) => r.source === objectId || r.target === objectId,
+    );
+    for (const relation of related)
+      before.push({
+        target: "relation",
+        id: relation.id,
+        value: structuredClone(relation),
+      });
+
     const removed = deleteWorkspaceObject(
       {
         objects: b.contentObjects,
@@ -843,17 +925,6 @@ export class BoardStore {
     b.instances = removed.state.presentations;
     b.objectRelations = removed.state.relations;
     b.contentRevision++;
-    const before: {
-      target: "object" | "presentation" | "relation";
-      id: string;
-      value: unknown;
-    }[] = [
-      {
-        target: "object",
-        id: objectId,
-        value: b.contentObjects.find((o) => o.id === objectId) ?? null,
-      },
-    ];
     const after = before.map((s) => ({ ...s, value: null }));
     for (const id of removed.removed.presentationIds)
       after.push({ target: "presentation", id, value: null });
@@ -861,6 +932,7 @@ export class BoardStore {
       after.push({ target: "relation", id, value: null });
     this.record(b, {
       intentId,
+      kind: "delete-object",
       label: "删除内容对象",
       author,
       patch: { target: "batch", id: objectId, before, after },
@@ -899,13 +971,20 @@ export class BoardStore {
     b.contentRevision++;
     this.record(b, {
       intentId,
+      kind: "create-relation",
       label: `建立关系「${input.kind}」`,
       author,
       patch: {
         target: "batch",
         id: added.id,
         before: [{ target: "relation", id: added.id, value: null }],
-        after: [{ target: "relation", id: added.id, value: added }],
+        after: [
+          {
+            target: "relation",
+            id: added.id,
+            value: structuredClone(added),
+          },
+        ],
       },
     });
     this.touch();
@@ -925,12 +1004,19 @@ export class BoardStore {
     b.contentRevision++;
     this.record(b, {
       intentId,
+      kind: "delete-relation",
       label: "移除关系",
       author,
       patch: {
         target: "batch",
         id: relationId,
-        before: [{ target: "relation", id: relationId, value: before }],
+        before: [
+          {
+            target: "relation",
+            id: relationId,
+            value: structuredClone(before),
+          },
+        ],
         after: [{ target: "relation", id: relationId, value: null }],
       },
     });

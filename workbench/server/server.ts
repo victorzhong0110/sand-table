@@ -147,12 +147,12 @@ export function createServer(
     },
     (a) => {
       if (a.boardId) return store.read(a.boardId);
-      const opened = store.open(scan(bindings), a.title),
-        b = store.get(opened.id);
-      b.presentation = a.preset === "code" ? "code" : "canvas";
-      b.autoProjectSources = a.preset === "code";
-      if (a.preset === "blank") b.instances = [];
-      return store.read(b.id);
+      // 空白／代码预设在存储层处理：只有**新建**的白板才会被清空，
+      // 恢复出来的工作空间带着用户自己的内容，不能被预设抹掉。
+      const opened = store.open(scan(bindings), a.title, {
+        preset: a.preset,
+      });
+      return store.read(opened.id);
     },
   );
   tool(
