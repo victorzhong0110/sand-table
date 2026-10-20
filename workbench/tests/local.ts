@@ -77,11 +77,46 @@ try {
   });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => {
+    if (m.type() === "error") console.log("BROWSER CONSOLE ERROR:", m.text());
+  });
   await page.goto(connection.url + "#session=" + connection.token);
   const frame = () => page.frameLocator("iframe");
-  await frame()
-    .getByRole("heading", { name: "项目总览", exact: true })
-    .waitFor();
+  try {
+    await frame()
+      .getByRole("heading", { name: "项目总览", exact: true })
+      .waitFor({ timeout: 15000 });
+  } catch (e) {
+    // 诊断：把宿主页面与白板页面的实际状态打出来，别只留一句超时。
+    console.log(
+      "DIAG outer #error:",
+      await page
+        .locator("#error")
+        .innerText()
+        .catch(() => "(none)"),
+    );
+    console.log(
+      "DIAG outer body:",
+      (
+        await page
+          .locator("body")
+          .innerText()
+          .catch(() => "")
+      ).slice(0, 600),
+    );
+    console.log(
+      "DIAG frame body:",
+      (
+        await page
+          .frameLocator("iframe")
+          .locator("body")
+          .innerText()
+          .catch(() => "(no frame)")
+      ).slice(0, 600),
+    );
+    console.log("DIAG pageerrors:", JSON.stringify(errors));
+    throw e;
+  }
   const publicHtml = await (await page.request.get(connection.url)).text();
   assert.ok(!publicHtml.includes(connection.token));
   assert.equal(new URL(page.url()).hash, "");
