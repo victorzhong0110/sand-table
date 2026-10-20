@@ -335,6 +335,45 @@ export function unlink(
  * 拿到快照后就地改写会绕过 version 冲突检测，也会污染撤销栈里的旧快照。
  * 要改内容必须走 updateObject。
  */
+/**
+ * 只读视图：**不复制**内容。
+ *
+ * 渲染与检索路径用它。一块装了几百个组件的代码白板，每次渲染都深拷贝一遍
+ * 文件内容，会把浏览器主线程拖垮（初始渲染迟迟出不来）。
+ *
+ * 返回值是内核状态的引用：只读，不要改。
+ * 需要可改的副本时用 resolveContent()。
+ */
+export function peekContent(
+  presentation: Presentation,
+  objects: WorkspaceObject[],
+): {
+  title: string;
+  body?: string;
+  data: Record<string, unknown>;
+  objectId?: string;
+  source?: ObjectSource;
+} {
+  const objectId = boundId(presentation);
+  if (objectId) {
+    const object = findObject(objects, objectId);
+    if (object)
+      return {
+        title: object.title,
+        ...(object.body === undefined ? {} : { body: object.body }),
+        data: object.data ?? {},
+        objectId: object.id,
+        ...(object.source === undefined ? {} : { source: object.source }),
+      };
+    return {
+      title: presentation.title,
+      data: presentation.data ?? {},
+      objectId,
+    };
+  }
+  return { title: presentation.title, data: presentation.data ?? {} };
+}
+
 export function resolveContent(
   presentation: Presentation,
   objects: WorkspaceObject[],

@@ -4,7 +4,7 @@ import { Icon } from "./Icon.tsx";
 import { componentTypes, displayRect, material } from "../core/spaces.ts";
 import type { Camera, ComponentInstance, Rect } from "../core/spaces.ts";
 import { ComponentRenderer } from "./ComponentRenderer.tsx";
-import { resolveContent } from "../core/content.ts";
+import { peekContent } from "../core/content.ts";
 type Props = {
   board: Board;
   viewId: string;
@@ -69,7 +69,7 @@ export function SpaceCanvas({
   const matches = (c: ComponentInstance) => {
     const o = b.objects.find((o) => o.id === c.objectId);
     // 绑定了内容对象的组件：搜索用对象里的实际内容。
-    const resolved = resolveContent(c, b.contentObjects);
+    const resolved = peekContent(c, b.contentObjects);
     return (
       c.spaceId === view?.spaceId &&
       (!o || kind === "all" || o.kind === kind) &&

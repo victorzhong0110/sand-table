@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Board } from "../core/model.ts";
 import type { ComponentInstance } from "../core/spaces.ts";
 import { componentTypes, safeUrl } from "../core/spaces.ts";
-import { resolveContent } from "../core/content.ts";
+import { peekContent } from "../core/content.ts";
 const text = (v: unknown) => (v === undefined || v === null ? "" : String(v));
 export function ComponentRenderer({
   instance: c,
@@ -19,7 +19,7 @@ export function ComponentRenderer({
 }) {
   // 绑定了内容对象的组件：内容来自对象，不是这张卡自己的副本。
   // 同一对象在别处的展示会同步更新（内容共享、布局独立）。
-  const resolved = resolveContent(c, board.contentObjects);
+  const resolved = peekContent(c, board.contentObjects);
   const d = resolved.data;
   const title = resolved.title;
   const object = board.objects.find((o) => o.id === c.objectId);
