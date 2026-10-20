@@ -56,7 +56,7 @@ export function registerRepositoryImport(
       } else {
         const base =
           basename(a.path!)
-            .replace(/[^\\w-]/g, "-")
+            .replace(/[^a-zA-Z0-9_-]/g, "-")
             .slice(0, 32) || "project";
         const label = bindings.some((w) => w.label === base)
           ? base + "-" + randomUUID().slice(0, 4)
@@ -90,11 +90,15 @@ export function registerRepositoryImport(
       b.autoProjectSources = false;
       store.refresh(b.id, projection);
       const spaces = new Spaces(store),
-        view = openView(b, a.viewId),
-        original = view.spaceId;
+        view = openView(b, a.viewId);
       const op = (operation: unknown) =>
         spaces.update(b.id, b.revision, a.viewId, operation, "human-import");
-      op({ kind: "create", type: "board", title: binding.label, data: {} });
+      op({
+        kind: "create",
+        type: "board",
+        title: (basename(binding.root) || binding.label).slice(0, 120),
+        data: {},
+      });
       const container = b.instances.find((i) => i.id === view.selection[0])!,
         target = String(container.data.spaceId);
       op({ kind: "navigate", spaceId: target });

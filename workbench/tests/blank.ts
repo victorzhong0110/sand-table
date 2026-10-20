@@ -91,11 +91,25 @@ try {
     0,
   );
   await page.getByRole("button", { name: "返回白板" }).click();
+  const canvasBeforeDrop = await frame.locator(".canvas").boundingBox();
   await frame
     .getByRole("button", { name: "说明／便签", exact: true })
     .dragTo(frame.locator(".canvas"), { targetPosition: { x: 300, y: 240 } });
   b = await until((b) => b.instances.some((i: any) => i.type === "text"));
   assert.ok(b.instances[0].rect.x > 100);
+  const placed = await frame
+    .locator('[data-instance-id="' + b.instances[0].id + '"]')
+    .boundingBox();
+  assert.ok(placed && canvasBeforeDrop);
+  assert.ok(
+    Math.abs(placed.x - (canvasBeforeDrop.x + 300)) < 4,
+    "Drop preserves the requested horizontal position.",
+  );
+  assert.ok(
+    Math.abs(placed.y - (canvasBeforeDrop.y + 240)) < 4,
+    "Drop accounts for the world origin, not just the camera.",
+  );
+
   await frame.getByRole("textbox", { name: "编辑组件名称" }).fill("我的计划");
   await frame
     .getByRole("textbox", { name: "内容", exact: true })
@@ -159,6 +173,23 @@ try {
     },
   });
   await frame.getByText("AI 搭建的比较", { exact: true }).first().waitFor();
+  b = await read();
+  const comparison = b.instances.find((i: any) => i.title === "AI 搭建的比较");
+  await call("sand_report_space_activity", {
+    boardId,
+    agentId: "Protocol probe",
+    spaceId: comparison.spaceId,
+    instanceIds: [comparison.id],
+    task: "Arrange the comparison",
+    action: "Checking component data",
+    state: "running",
+  });
+  await frame.getByText("● Agent 有活动报告", { exact: true }).waitFor();
+  await frame
+    .getByRole("button", { name: "和 AI 一起搭", exact: false })
+    .first()
+    .click();
+  await frame.getByText("Arrange the comparison", { exact: true }).waitFor();
   if (process.env.SAND_EXTERNAL_REPO) {
     await frame.getByRole("tab", { name: "仓库", exact: true }).click();
     await frame
@@ -201,6 +232,32 @@ try {
       .getByRole("button", { name: "查看源码依据", exact: true })
       .click();
     await frame.locator(".source-inspector pre.source").waitFor();
+    await frame.getByRole("button", { name: "组件属性", exact: true }).click();
+    await frame
+      .getByRole("button", { name: "复制展示", exact: true })
+      .waitFor();
+    await frame
+      .getByRole("button", { name: "源码与理解", exact: true })
+      .click();
+    await frame
+      .getByRole("button", { name: "表达代码改动", exact: true })
+      .click();
+    await frame
+      .getByRole("textbox", { name: "改动请求", exact: true })
+      .fill("讨论这份文档的补充说明；先提出具体方案。");
+    await frame
+      .getByRole("button", { name: "提交改动意图", exact: true })
+      .click();
+    b = await until((b) => b.intents.length === 1);
+    assert.equal(b.intents[0].arrangement.viewId, viewId);
+    const intent = b.intents[0],
+      allowed = intent.allowedFiles[0];
+    const actualTarget = await call("sand_read_target", {
+      boardId,
+      intentId: intent.id,
+      ...allowed,
+    });
+    assert.ok(actualTarget.hash);
   }
   await frame.getByRole("button", { name: "外观", exact: true }).click();
   await frame.locator('input[type="color"]').first().fill("#edf2ed");

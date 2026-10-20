@@ -48,6 +48,16 @@ export class BoardStore {
     b.assets.forEach((a) => delete a.dataUrl);
     b.proposals.forEach((p) => p.baseline.forEach((s) => (s.files = {})));
     b.activities.forEach((a) => (a.stale = this.now() - a.reportedAt > 60_000));
+    b.spaceActivities?.forEach(
+      (a) =>
+        (a.stale =
+          this.now() - a.reportedAt > 60_000 ||
+          !b.spaces.some((s) => s.id === a.spaceId) ||
+          a.instanceIds.some(
+            (id) =>
+              !b.instances.some((i) => i.id === id && i.spaceId === a.spaceId),
+          )),
+    );
     return b;
   }
   open(p: Projection, title: string) {
@@ -256,6 +266,9 @@ export class BoardStore {
           "Use sand_read_spaces / sand_read_component and sand_find_objects for omitted details.",
       },
       focusedView: active,
+      spaceActivities: b.spaceActivities
+        ?.filter((a) => a.spaceId === active?.spaceId)
+        .map((a) => ({ ...a, stale: this.now() - a.reportedAt > 60_000 })),
       instances: chosen.slice(0, 30).map((i) => ({
         ...i,
         data:

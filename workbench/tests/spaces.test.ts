@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { registerSpaceTools } from "../server/spaces.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BoardStore } from "../core/store.ts";
@@ -158,4 +160,42 @@ test("containment cannot cycle even beyond twenty nested spaces", () => {
     () => op({ kind: "move", instanceId: first, spaceId: last }),
     /cycle/,
   );
+});
+
+test("space activity works without code roots, validates instance location and becomes last-known", () => {
+  let now = Date.now();
+  const store = new BoardStore(() => now);
+  let b = store.open({ ...p, objects: [], workspaces: [] }, "blank");
+  const spaces = new Spaces(store),
+    tools: Record<string, (args: any) => any> = {};
+  registerSpaceTools((name, _description, shape, fn) => {
+    tools[name] = (args) => fn(z.object(shape).parse(args));
+  }, spaces);
+  openView(store.get(b.id), "v");
+  b = spaces.update(b.id, b.revision, "v", {
+    kind: "create",
+    type: "text",
+    title: "Note",
+    data: { text: "" },
+  });
+  const instance = b.instances.at(-1)!;
+  const args = {
+    boardId: b.id,
+    agentId: "Unit probe",
+    spaceId: "overview",
+    instanceIds: [instance.id],
+    task: "Arrange note",
+    action: "Check data",
+    state: "running",
+  };
+  assert.throws(
+    () => tools.sand_report_space_activity({ ...args, spaceId: "missing" }),
+    /actual space/,
+  );
+  b = tools.sand_report_space_activity(args);
+  assert.equal(b.workspaces.length, 0);
+  assert.equal(b.spaceActivities?.[0].stale, false);
+  now = Date.now() + 61000;
+  assert.equal(store.read(b.id).spaceActivities?.[0].stale, true);
+  assert.equal(store.context(b.id).spaceActivities?.[0].stale, true);
 });

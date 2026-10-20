@@ -28,6 +28,7 @@ export function boardSummary(b: Board) {
       stepCount: g.steps.length,
     })),
     activities: b.activities,
+    spaceActivities: b.spaceActivities,
     intents: b.intents.map((i) => ({
       id: i.id,
       version: i.version,

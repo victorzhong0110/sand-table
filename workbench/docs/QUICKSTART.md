@@ -24,7 +24,7 @@ npm start
 
 点“和 AI 一起搭”，描述想添加或调整的内容，再点“交给我的 AI”。支持消息的宿主会接收请求；本地浏览器会展开接入面板，准备可复制的消息，由你到客户端发送。不会假装在网页里启动了一个模型。
 
-Agent 通过 sand_read_context、sand_read_spaces 读取同一张板子，用 sand_edit_space 搭建与维护。空板没有选区也可读取。组件和备注是数据，编排不是源码写入授权。
+Agent 通过 sand_read_context、sand_read_spaces 读取同一张板子，用 sand_edit_space 搭建与维护。空板没有选区也可读取。Agent 可用 sand_report_space_activity 如实报告正在处理的空间和组件，卡片显示标识；活动是自报，过期后显示最后已知。组件和备注是数据，编排不是源码写入授权。
 
 ## 3. 按需导入代码
 

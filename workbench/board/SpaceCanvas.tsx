@@ -238,6 +238,9 @@ export function SpaceCanvas({
               return;
             const size = componentTypes.find((c) => c.type === item.type);
             const box = e.currentTarget.getBoundingClientRect();
+            const worldTop =
+              (e.currentTarget.querySelector(".world") as HTMLElement)
+                ?.offsetTop || 0;
             void operate({
               kind: "create",
               type: item.type,
@@ -246,7 +249,7 @@ export function SpaceCanvas({
               ...(item.objectId ? { objectId: item.objectId } : {}),
               rect: {
                 x: (e.clientX - box.left - camera.x) / camera.zoom,
-                y: (e.clientY - box.top - camera.y) / camera.zoom,
+                y: (e.clientY - box.top - worldTop - camera.y) / camera.zoom,
                 width: size?.width || 280,
                 height: size?.height || 180,
                 pinned: false,
@@ -325,8 +328,15 @@ export function SpaceCanvas({
             });
             void operate({ kind: "select", ids: picked.map((c) => c.id) });
             setLasso(undefined);
-          } else if (d)
-            void operate({ kind: "camera", camera: live.current.camera });
+          } else if (d) {
+            if (
+              Math.abs(live.current.camera.x - d.base.x) +
+                Math.abs(live.current.camera.y - d.base.y) <
+              4
+            )
+              void operate({ kind: "select", ids: [] });
+            else void operate({ kind: "camera", camera: live.current.camera });
+          }
         }}
       >
         <div className="canvas-hint">
@@ -561,6 +571,26 @@ export function SpaceCanvas({
                   }
                 }}
               >
+                {b.spaceActivities
+                  ?.filter((a) => a.instanceIds.includes(c.id))
+                  .slice(0, 1)
+                  .map((a) => (
+                    <span
+                      className="spatial-activity"
+                      key={a.agentId}
+                      title={a.task + " · " + a.action + " · Agent 自报"}
+                    >
+                      ●{" "}
+                      {a.stale
+                        ? "最后已知"
+                        : a.state === "running"
+                          ? "处理中"
+                          : a.state === "done"
+                            ? "已完成"
+                            : "等待"}{" "}
+                      · {a.agentId}
+                    </span>
+                  ))}
                 {r.pinned && <span className="pin-badge">已固定</span>}
                 {focusedGuide && c.objectId && routeIds.has(c.objectId) && (
                   <span className="step-badge">

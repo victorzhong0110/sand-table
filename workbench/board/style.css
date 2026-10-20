@@ -1331,3 +1331,52 @@ main.canvas-app {
 .canvas-app .component-categories button[aria-pressed="true"] {
   color: var(--ink);
 }
+.canvas-toolbox {
+  overflow: hidden;
+}
+.canvas-toolbox > .tool-modes,
+.canvas-toolbox > .toolbox-nav,
+.canvas-toolbox > .toolbox-bottom {
+  flex-shrink: 0;
+}
+.toolbox-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+.toolbox-bottom {
+  margin-top: 0;
+  padding-top: 8px;
+}
+.spatial-activity {
+  position: absolute;
+  left: 12px;
+  bottom: 7px;
+  max-width: calc(100% - 40px);
+  font-size: 10px;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--surface);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.inspector-heading .inspector-switch {
+  font-size: 11px;
+  margin-left: auto;
+  margin-right: 9px;
+  border: 1px solid var(--line);
+  padding: 4px 7px;
+  line-height: 1.4;
+}
+.canvas-top-actions button:last-child {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}

@@ -51,6 +51,7 @@ export function CanvasShell({
     setSource(undefined);
     if (selected)
       setPanel(selected.type === "object" ? "source" : "properties");
+    else if (panel === "source" || panel === "properties") setPanel("");
   }, [selected?.id]);
   const custom = theme === "custom" ? b.theme : undefined;
   const style = custom
@@ -88,15 +89,26 @@ export function CanvasShell({
     });
   };
   async function read(o: Item) {
-    setSource(await action("sand_read_source", { objectId: o.id }));
+    const result = await action("sand_read_source", { objectId: o.id });
+    if (result) setSource({ ...result, objectId: o.id });
   }
   async function handToAI() {
+    if (view)
+      await operate({
+        kind: "select",
+        ids: [...view.selection],
+        keepGuide: true,
+      });
     const message =
       '使用 Sand Table 已有白板 boardId="' +
       b.id +
-      '"，不要另建板子。先 sand_read_context 和 sand_read_spaces，读清当前空间、选区和我的编排，再按这个请求配置组件：' +
+      '"，viewId="' +
+      viewId +
+      '"，当前 spaceId="' +
+      (view?.spaceId || "overview") +
+      '"。不要另建板子。先 sand_read_context 和 sand_read_spaces，读清当前空间、选区和我的编排，再按这个请求配置组件：' +
       prompt +
-      "。使用 sand_edit_space 维护白板；不得把编排请求当作修改源码授权。需要源码修改时先读取明确意图并提交具体提案，等待我确认。";
+      "。使用 sand_edit_space 维护白板，用 sand_report_space_activity 如实报告你在这个空间做什么；不得把编排请求当作修改源码授权。需要源码修改时先读取明确意图并提交具体提案，等待我确认。";
     try {
       await sendMessage(message);
       setHandoff(
@@ -188,9 +200,10 @@ export function CanvasShell({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
-            {b.activities.some((a) => a.state === "running") && (
-              <span className="agent-beacon">● Agent 有活动报告</span>
-            )}
+            {(b.activities.some((a) => a.state === "running" && !a.stale) ||
+              b.spaceActivities?.some(
+                (a) => a.state === "running" && !a.stale,
+              )) && <span className="agent-beacon">● Agent 有活动报告</span>}
           </div>
           <SpaceCanvas
             board={b}
@@ -238,6 +251,16 @@ export function CanvasShell({
                   )[panel]
                 }
               </span>
+              {object && (panel === "source" || panel === "properties") && (
+                <button
+                  className="inspector-switch"
+                  onClick={() =>
+                    setPanel(panel === "source" ? "properties" : "source")
+                  }
+                >
+                  {panel === "source" ? "组件属性" : "源码与理解"}
+                </button>
+              )}
               <button aria-label="关闭详情" onClick={() => setPanel("")}>
                 ×
               </button>
@@ -291,6 +314,39 @@ export function CanvasShell({
                 <p className="muted">
                   不内置模型。连接入口在页面顶部；本地浏览器会准备好消息供你复制到客户端。
                 </p>
+                {(b.spaceActivities?.length || 0) > 0 && (
+                  <>
+                    <h3>Agent 在哪里</h3>
+                    {b.spaceActivities!.map((a) => (
+                      <div className="report" key={a.agentId}>
+                        <b>{a.agentId}</b>
+                        <p>{a.task}</p>
+                        <small>
+                          {a.stale ? "最后已知" : a.state} · {a.action}
+                          <br />
+                          来源：Agent 自报
+                        </small>
+                        <button
+                          onClick={async () => {
+                            await operate({
+                              kind: "navigate",
+                              spaceId: a.spaceId,
+                            });
+                            if (a.instanceIds.length)
+                              await operate({
+                                kind: "select",
+                                ids: a.instanceIds,
+                              });
+                          }}
+                        >
+                          查看：
+                          {b.spaces.find((s) => s.id === a.spaceId)?.title ||
+                            "空间已缺失"}
+                        </button>
+                      </div>
+                    ))}
+                  </>
+                )}
                 <h3>它当前能读取什么</h3>
                 <p>
                   {b.spaces.find((s) => s.id === view?.spaceId)?.title} ·{" "}
@@ -326,13 +382,16 @@ export function CanvasShell({
                     </button>
                     {source && (
                       <>
+                        <small>
+                          {source.reference?.path}:{source.reference?.startLine}
+                        </small>
                         <pre className="source">{source.text}</pre>
                         {source.nextLine && (
                           <button
                             onClick={async () =>
                               setSource(
                                 await action("sand_read_source", {
-                                  objectId: object.id,
+                                  objectId: source.objectId || object.id,
                                   startLine: source.nextLine,
                                 }),
                               )

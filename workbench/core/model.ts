@@ -88,6 +88,16 @@ export type Group = {
   objectIds: string[];
   instanceIds?: string[];
 };
+export type SpaceActivity = {
+  agentId: string;
+  spaceId: string;
+  instanceIds: string[];
+  task: string;
+  action: string;
+  state: "running" | "waiting" | "done" | "unknown";
+  reportedAt: number;
+  stale?: boolean;
+};
 export type Board = Projection & {
   id: string;
   revision: number;
@@ -100,6 +110,7 @@ export type Board = Projection & {
   notes: Record<string, string>;
   groups: Group[];
   activities: Activity[];
+  spaceActivities?: SpaceActivity[];
   explanations: Explanation[];
   guides: Guide[];
   spaces: Space[];
