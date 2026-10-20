@@ -18,10 +18,7 @@ import {
   WorkspaceVersionError,
 } from "../core/workspace.ts";
 import type { TestContext } from "node:test";
-import type {
-  WorkspaceFile,
-  WorkspaceFileSystem,
-} from "../core/workspace.ts";
+import type { WorkspaceFile, WorkspaceFileSystem } from "../core/workspace.ts";
 
 /** 每个用例一个临时目录，用例结束即清理。 */
 const tempRoot = (t: TestContext): string => {
@@ -217,8 +214,14 @@ test("原子写：上一份保留为 .bak，目录里不留 .tmp", (t) => {
   const backup = path.join(root, "ws-atomic", "workspace.json.bak");
   assert.equal((readJson(main) as WorkspaceFile).title, "第二版");
   assert.equal((readJson(backup) as WorkspaceFile).title, "第一版");
-  assert.equal(fs.existsSync(path.join(root, "ws-atomic", "workspace.json.tmp")), false);
-  assert.equal(fs.existsSync(path.join(root, "ws-atomic", "workspace.json.bak.tmp")), false);
+  assert.equal(
+    fs.existsSync(path.join(root, "ws-atomic", "workspace.json.tmp")),
+    false,
+  );
+  assert.equal(
+    fs.existsSync(path.join(root, "ws-atomic", "workspace.json.bak.tmp")),
+    false,
+  );
 });
 
 test("写失败：抛错、主文件内容不变、无半截文件、lastError 可观察", (t) => {
@@ -467,7 +470,10 @@ test("非法工作空间 ID 被拒绝，不能越出 root 目录", (t) => {
   const store = new WorkspaceStore(root);
   for (const id of ["../escape", "a/b", ".hidden", "", ".."]) {
     assert.throws(() => store.load(id), WorkspaceIdError, `id ${id} 应被拒绝`);
-    assert.throws(() => store.save({ ...sampleWorkspace("x"), id }), WorkspaceIdError);
+    assert.throws(
+      () => store.save({ ...sampleWorkspace("x"), id }),
+      WorkspaceIdError,
+    );
   }
   assert.equal(fs.existsSync(path.join(path.dirname(root), "escape")), false);
 });

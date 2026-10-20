@@ -168,10 +168,24 @@ test("同一意图内创建两个对象：一次 undo 全部回退，redo 全部
   const objectA = { id: "o1", title: "A" };
   const objectB = { id: "o2", title: "B" };
   h.record(
-    entry("agent-batch", batch("o1", [snap("object", "o1", null)], [snap("object", "o1", objectA)])),
+    entry(
+      "agent-batch",
+      batch(
+        "o1",
+        [snap("object", "o1", null)],
+        [snap("object", "o1", objectA)],
+      ),
+    ),
   );
   h.record(
-    entry("agent-batch", batch("o2", [snap("object", "o2", null)], [snap("object", "o2", objectB)])),
+    entry(
+      "agent-batch",
+      batch(
+        "o2",
+        [snap("object", "o2", null)],
+        [snap("object", "o2", objectB)],
+      ),
+    ),
   );
   applyValues(board, [
     { id: "o1", value: objectA },
@@ -246,17 +260,21 @@ test("同一意图内混合单目标补丁与 batch 补丁：合并成覆盖全�
   h.record(
     entry(
       "mixed",
-      batch("p1", [snap("presentation", "p1", null)], [snap("presentation", "p1", { id: "p1" })]),
+      batch(
+        "p1",
+        [snap("presentation", "p1", null)],
+        [snap("presentation", "p1", { id: "p1" })],
+      ),
     ),
   );
   const merged = h.state.undo[0];
   assert.equal(merged.patch.target, "batch");
   const before = merged.patch.before as { target: string; id: string }[];
   assert.equal(before.length, 2);
-  assert.deepEqual(
-    before.map((s) => `${s.target}:${s.id}`).sort(),
-    ["object:o1", "presentation:p1"],
-  );
+  assert.deepEqual(before.map((s) => `${s.target}:${s.id}`).sort(), [
+    "object:o1",
+    "presentation:p1",
+  ]);
 });
 
 test("不连续的同一 intentId 不合并，各算一个撤销单位", () => {
@@ -294,7 +312,10 @@ test("undo 后 redo 恢复，再 undo 能再次撤销，不来回震荡", () => 
 
   assert.equal(h.redo()!.id, b.id, "redo 恢复最近被撤销的条目");
   assert.equal(h.state.undo.length, 2);
-  assert.equal(h.state.undo.some((e) => e.id === b.id), true);
+  assert.equal(
+    h.state.undo.some((e) => e.id === b.id),
+    true,
+  );
 
   assert.equal(h.undo()!.id, b.id, "redo 之后必须能再次撤销它");
   assert.equal(h.undo()!.id, a.id);
@@ -358,7 +379,11 @@ test("外部效果不进撤销栈，只留在拒绝列表里", () => {
   assert.equal(h.refused[0].entry.kind, "publish");
   assert.match(h.refused[0].reason, /I12/);
 
-  h.record(entry("edit", single("object", "o2", null, { id: "o2" }), { kind: "edit-object" }));
+  h.record(
+    entry("edit", single("object", "o2", null, { id: "o2" }), {
+      kind: "edit-object",
+    }),
+  );
   assert.equal(h.canUndo, true, "白板内编辑照常进撤销栈");
   assert.equal(h.state.undo.length, 1);
   assert.equal(h.state.undo[0].kind, "edit-object");
@@ -367,10 +392,16 @@ test("外部效果不进撤销栈，只留在拒绝列表里", () => {
 
 test("外部效果被拒绝后不会进入重做栈，也不影响已有撤销栈", () => {
   const h = new History();
-  h.record(entry("edit", single("object", "o1", 0, 1), { kind: "edit-object" }));
+  h.record(
+    entry("edit", single("object", "o1", 0, 1), { kind: "edit-object" }),
+  );
   h.undo();
   assert.equal(h.canRedo, true);
-  h.record(entry("publish", single("object", "o2", null, { id: "o2" }), { kind: "publish" }));
+  h.record(
+    entry("publish", single("object", "o2", null, { id: "o2" }), {
+      kind: "publish",
+    }),
+  );
   assert.equal(h.canRedo, true, "被拒绝的外部效果不得清空重做栈");
   assert.equal(h.state.redo.length, 1);
   assert.equal(h.state.undo.length, 0);
@@ -421,12 +452,7 @@ test("审计日志只追加不删除，撤销本身由调用方写进审计", ()
 });
 
 test("isExternalEffect 区分外部效果与白板内操作", () => {
-  for (const kind of [
-    "publish",
-    "run-experiment",
-    "send",
-    "commit-external",
-  ]) {
+  for (const kind of ["publish", "run-experiment", "send", "commit-external"]) {
     assert.equal(isExternalEffect(kind), true, `${kind} 是外部效果`);
     assert.equal(externalEffectKinds.includes(kind), true);
   }
@@ -472,7 +498,11 @@ test("可以从持久化状态恢复，state 返回副本", () => {
   const snapshot = h.state;
   snapshot.undo.push(entry("i4", single("object", "o4", 2, 9)));
   snapshot.redo.length = 0;
-  assert.equal(h.state.undo.length, 1, "state 必须是副本，外部改动不得影响内部状态");
+  assert.equal(
+    h.state.undo.length,
+    1,
+    "state 必须是副本，外部改动不得影响内部状态",
+  );
   assert.equal(h.state.redo.length, 2);
 });
 

@@ -52,7 +52,9 @@ export async function startLocal(options: {
         "--experimental-strip-types",
         fileURLToPath(new URL("../server/main.ts", import.meta.url)),
         ...options.workspaces.flatMap((w) => ["--workspace", w]),
-        ...(options.workspaceDir ? ["--workspace-dir", options.workspaceDir] : []),
+        ...(options.workspaceDir
+          ? ["--workspace-dir", options.workspaceDir]
+          : []),
         ...(options.workspaceId ? ["--workspace-id", options.workspaceId] : []),
       ],
     }),
