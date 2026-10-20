@@ -1,12 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { BoardStore } from "../core/store.ts";
 import { Spaces } from "../server/spaces.ts";
 import { openView } from "../core/space-state.ts";
 import { registerPackTools } from "../server/packs.ts";
 import { parsePackManifest } from "../core/packs.ts";
 import { checkComponentData } from "../core/spaces.ts";
+import { WorkspaceStore } from "../core/workspace.ts";
+import { workspacePort } from "../core/persistence.ts";
 import {
   assertPublicHttpsUrl,
   fetchPackManifest,
@@ -160,7 +165,9 @@ test("invalid data for a known type is refused by the editor's check", async () 
           ],
         }),
       ),
-    /Checklist values are invalid/,
+    /* The message names the offending field: items[0].done must be a
+       boolean — not one flat sentence about the whole checklist. */
+    /items\[0\]\.done must be a boolean/,
   );
 });
 
@@ -358,7 +365,7 @@ test("a known type in a pack goes through checkComponentData", async () => {
   /* The one function the editor uses. */
   assert.throws(
     () => checkComponentData("task", data),
-    /Checklist values are invalid/,
+    /items\[0\]\.done must be a boolean/,
   );
   /* And the pack path refuses the same data with the same reason. */
   await assert.rejects(
@@ -371,7 +378,7 @@ test("a known type in a pack goes through checkComponentData", async () => {
           ],
         }),
       ),
-    /Checklist values are invalid/,
+    /items\[0\]\.done must be a boolean/,
   );
 });
 
@@ -531,6 +538,141 @@ test("an imported pack is a board change, so it can be undone", async () => {
     0,
     "the pack goes with the undo",
   );
+});
+
+test("an import can be redone: the whole pack comes back, not an empty shell", async () => {
+  const { store, id, importJson } = setup();
+  await importJson(JSON.stringify(manifest));
+  const spaces = new Spaces(store);
+  spaces.undo(id, undefined, "human");
+  assert.equal((store.get(id).componentPacks ?? []).length, 0, "撤销后包没了");
+  spaces.redo(id, undefined, "human");
+  const packs = store.get(id).componentPacks ?? [];
+  assert.equal(packs.length, 1, "重做后包回来了");
+  assert.equal(packs[0].id, "com.example.review");
+  assert.equal(packs[0].name, "评审包");
+  assert.deepEqual(
+    packs[0].components.map((c: any) => c.key),
+    ["goal", "unknown"],
+    "回来的是完整的包，预设一个不少",
+  );
+});
+
+test("removing a pack is undoable too", async () => {
+  const { store, id, rev, call, importJson } = setup();
+  await importJson(JSON.stringify(manifest));
+  await call("sand_remove_component_pack", {
+    boardId: id,
+    revision: rev(),
+    packId: "com.example.review",
+  });
+  assert.equal((store.get(id).componentPacks ?? []).length, 0);
+  const spaces = new Spaces(store);
+  spaces.undo(id, undefined, "human");
+  const packs = store.get(id).componentPacks ?? [];
+  assert.equal(packs.length, 1, "撤销移除后包回来了");
+  assert.equal(packs[0].id, "com.example.review");
+  assert.deepEqual(
+    packs[0].components.map((c: any) => c.key),
+    ["goal", "unknown"],
+  );
+});
+
+test("the import is recorded as a board-level edit, not as an external effect", async () => {
+  const { store, id, importJson } = setup();
+  await importJson(JSON.stringify(manifest));
+  const snapshot = store.history(id);
+  assert.equal(snapshot.canUndo, true, "导入是可撤销的");
+  assert.equal(snapshot.records[0].label, "导入组件包「评审包」");
+  const entry = store.get(id).history.undo[0];
+  /* 白板内编辑的种类才会进撤销栈；外部效果会被拒绝。 */
+  assert.equal(entry.kind, "import");
+  assert.equal(entry.patch.target, "batch");
+  assert.deepEqual(
+    entry.patch.before,
+    [{ target: "board", id: "componentPacks", value: [] }],
+    "板级快照按键记录：撤销只动 componentPacks 这一键",
+  );
+  assert.deepEqual(
+    store.historyRefusals(id),
+    [],
+    "没有任何动作被拒绝进撤销栈",
+  );
+});
+
+test("undoing an import does not roll back a theme change made before it", async () => {
+  const { store, id, rev, importJson } = setup();
+  const spaces = new Spaces(store);
+  /* 先改主题，再导入包：撤销导入只该动 componentPacks 这一键。 */
+  spaces.update(id, rev(), "view-a", {
+    kind: "theme",
+    theme: {
+      base: "paper",
+      background: "#ffffff",
+      surface: "#f5f5f0",
+      ink: "#1b1b1b",
+      muted: "#6b6b6b",
+      line: "#e2e2dc",
+      accent: "#3a6ea5",
+      font: "system",
+      density: "comfortable",
+      radius: 8,
+      reduceMotion: false,
+    },
+  });
+  await importJson(JSON.stringify(manifest));
+  const themed = store.get(id).theme;
+  assert.ok(themed, "主题改过了");
+  spaces.undo(id, undefined, "human");
+  assert.equal(
+    (store.get(id).componentPacks ?? []).length,
+    0,
+    "包被撤销了",
+  );
+  assert.deepEqual(
+    store.get(id).theme,
+    themed,
+    "别处的改动没有被连带回滚：板级内容按键记录",
+  );
+});
+
+test("an imported pack is saved with the board and is still there after a restart", async () => {
+  const root = mkdtempSync(join(tmpdir(), "sand-packs-"));
+  try {
+    const store = new BoardStore();
+    store.attachPersistence(workspacePort(new WorkspaceStore(root)), "default");
+    const handlers = register(store);
+    const opened = store.open(projection, "空白工作区");
+    openView(store.get(opened.id), "view-a");
+    await handlers.get("sand_import_component_pack")!({
+      boardId: opened.id,
+      revision: store.get(opened.id).revision,
+      viewId: "view-a",
+      source: { json: JSON.stringify(manifest) },
+    });
+    store.flushSave();
+    assert.ok(!store.lastSaveError, "保存没有失败：" + store.lastSaveError);
+
+    // 换一个新的 store 实例，模拟重启
+    const restarted = new BoardStore();
+    restarted.attachPersistence(
+      workspacePort(new WorkspaceStore(root)),
+      "default",
+    );
+    const reopened = restarted.open(projection, "空白工作区");
+    const restored = restarted.get(reopened.id);
+    const packs = restored.componentPacks ?? [];
+    assert.equal(packs.length, 1, "重启后组件包还在");
+    assert.equal(packs[0].id, "com.example.review");
+    assert.equal(packs[0].name, "评审包");
+    assert.deepEqual(
+      packs[0].components.map((c: any) => c.key),
+      ["goal", "unknown"],
+      "连预设一起恢复了",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("a url that is not https never reaches the network", async () => {

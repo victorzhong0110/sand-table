@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import type { BoardStore } from "../core/store.ts";
 import {
   MAX_MANIFEST_BYTES,
@@ -12,6 +13,8 @@ import type { RegisterTool } from "./tool-types.ts";
 
 const id = z.string().min(1).max(500);
 const board = { boardId: id };
+/** 意图分组键：同一个 intentId 的连续变更合为一个撤销单位。 */
+const intentId = z.string().min(1).max(200).optional();
 
 /* The manifest arrives either as text or as an address the server fetches. */
 const source = z.union(
@@ -29,12 +32,13 @@ const source = z.union(
 export function registerPackTools(tool: RegisterTool, store: BoardStore) {
   tool(
     "sand_import_component_pack",
-    "Import a component pack into the board. A pack is DATA, not code: it is a JSON manifest of presets for component types that already exist. It cannot add a component type, change source code, write files or grant permission, and its prefilled data goes through the same check as hand-written edits. Importing the same id again upgrades that pack.",
+    "Import a component pack into the board. A pack is DATA, not code: it is a JSON manifest of presets for component types that already exist. It cannot add a component type, change source code, write files or grant permission, and its prefilled data goes through the same check as hand-written edits. Importing the same id again upgrades that pack. Importing is a board content change: it is undoable and it is saved with the board.",
     {
       ...board,
       revision: z.number().int(),
       viewId: id,
       author: z.string().min(1).max(100).default("human"),
+      intentId,
       source,
     },
     async (a) => {
@@ -63,6 +67,8 @@ export function registerPackTools(tool: RegisterTool, store: BoardStore) {
         importedAt: Date.now(),
         importedBy,
       });
+      /* 导入前的完整值：撤销靠它把白板恢复回去（板级快照按键记录）。 */
+      const before = structuredClone(packs);
       b.componentPacks =
         at < 0
           ? [...packs, pack]
@@ -70,11 +76,19 @@ export function registerPackTools(tool: RegisterTool, store: BoardStore) {
       if (b.views[a.viewId]) b.focusedViewId = a.viewId;
       b.revision++;
       /* Importing a pack is a board content change, so it goes on the board
-         history and can be undone like any other change. */
-      store.recordEdit(a.boardId, {
-        label: `导入组件包「${pack.name}」`,
-        author: importedBy,
-      });
+         history and can be undone like any other change. The kind is a
+         board-internal edit ("import"), never an external effect: a pack is
+         data that lives on this board. */
+      store.recordBoardState(
+        b,
+        "componentPacks",
+        before,
+        b.componentPacks,
+        importedBy,
+        a.intentId ?? randomUUID(),
+        "import",
+        `导入组件包「${pack.name}」`,
+      );
       return {
         pack: {
           id: pack.id,
@@ -92,12 +106,13 @@ export function registerPackTools(tool: RegisterTool, store: BoardStore) {
   );
   tool(
     "sand_remove_component_pack",
-    "Remove an imported component pack from the board. Components already placed on the canvas stay where they are; only the toolbox presets go away.",
+    "Remove an imported component pack from the board. Components already placed on the canvas stay where they are; only the toolbox presets go away. Removing is a board content change too: it is undoable.",
     {
       ...board,
       revision: z.number().int(),
       packId: id,
       author: z.string().min(1).max(100).default("human"),
+      intentId,
     },
     (a) => {
       const b = store.get(a.boardId);
@@ -106,12 +121,20 @@ export function registerPackTools(tool: RegisterTool, store: BoardStore) {
       const packs = b.componentPacks ?? [];
       const pack = packs.find((p) => p.id === a.packId);
       if (!pack) throw Error("这张白板上没有这个组件包。");
+      /* 移除前的完整值：撤销靠它把包放回白板。 */
+      const before = structuredClone(packs);
       b.componentPacks = packs.filter((p) => p.id !== a.packId);
       b.revision++;
-      store.recordEdit(a.boardId, {
-        label: `移除组件包「${pack.name}」`,
-        author: a.author || "human",
-      });
+      store.recordBoardState(
+        b,
+        "componentPacks",
+        before,
+        b.componentPacks,
+        a.author || "human",
+        a.intentId ?? randomUUID(),
+        "remove",
+        `移除组件包「${pack.name}」`,
+      );
       return { removed: true, packId: a.packId };
     },
   );

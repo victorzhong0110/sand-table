@@ -9,7 +9,11 @@
 //      renderer already shows for an unknown type, never a new renderer.
 //   2. Prefilled data goes through exactly the same check as data typed into
 //      the editor — the same `checkComponentData` function from core/spaces.ts,
-//      not a copy of it — so an import is not a way around that check.
+//      not a copy of it — so an import is not a way around that check. A type
+//      this version does not know is checked by that same function too: it has
+//      no type-specific rules in the editor either, so only the general
+//      limits (size, link fields) apply to it. There is no second shape
+//      checker anywhere in this file.
 //
 // docs/COMPONENT-PACK-PROTOCOL.md is the authority; this file is its
 // machine-readable form, and every message here is meant for the person
@@ -115,22 +119,6 @@ function knownDataKeys(type: string) {
     ...(EXTRA_DATA_KEYS[type] ?? []),
   ]);
 }
-
-/**
- * The limits every component data has to meet whatever the type: the same
- * head of the check the editor runs — total size and link fields. This is what
- * a type this version does not know is held to: it has no rules of its own in
- * the editor either, so only the general limits apply.
- */
-export function checkGenericData(data: Record<string, unknown>) {
-  if (JSON.stringify(data).length > 40000)
-    throw Error("Component data exceeds 40 KB.");
-  if (data.url && !safeUrl(data.url))
-    throw Error("Resource URL must use HTTP(S).");
-  if (data.sourceUrl && !safeUrl(data.sourceUrl))
-    throw Error("Source URL must use HTTP(S).");
-}
-
 
 function schemaError(error: z.ZodError) {
   const first = error.issues[0];
@@ -240,10 +228,12 @@ export function parsePackManifest(text: string): {
     let data = c.data;
     if (data !== undefined) {
       /* The data is checked as it was handed over, before anything is
-         dropped: a pack cannot smuggle past the editor's check. */
+         dropped: a pack cannot smuggle past the editor's check. One entry
+         for every type — a type this version does not know has no rules of
+         its own in the editor either, so the general limits are all that
+         apply to it. */
       try {
-        if (knownType) checkComponentData(c.type, data);
-        else checkGenericData(data);
+        checkComponentData(c.type, data);
       } catch (e) {
         throw Error(
           `组件「${c.title}」的预填数据没有通过校验：${e instanceof Error ? e.message : String(e)}`,
