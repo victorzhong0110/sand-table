@@ -164,6 +164,20 @@ dsh-plugin/
 **不**手写 profile 的 `package.json` / `cordis.patch.yml`。
 README 写清步骤与**未验证项**。
 
+## 3.4 插件结果映射
+
+插件结果不一定自带可嵌入的白板 UI。映射是**降级优先**的
+（`core/host-bridge.ts` 的 `mapHostResult`）：
+
+| 结果种类 | 目标组件 | 说明 |
+|---|---|---|
+| 文献（`document` / `paper`） | 证据卡（`evidence`） | 带页码级引用与来源 |
+| 数据（`dataset` / `data`） | 表格（`table`）或图表（`chart`） | 有行就表格，没有就图表占位 |
+| 文件（`file` / `resource`） | 资源引用（`resource`） | 保留 uri 与片段定位 |
+| 其他 | 基础文本（`text`） | 通用降级：结果可以看不懂，来源不能丢 |
+
+**来源与资源定位一律保留**——映射丢的是呈现细节，不是可追溯性。
+
 ## 4. 独立模式与 MCP 保留
 
 - 不依赖 DSH 也能创建、编辑、保存、重开（内核不依赖宿主）✓。

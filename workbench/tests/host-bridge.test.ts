@@ -177,3 +177,47 @@ test("resolveBridge 优先用宿主注入，没有才退回本地模式", () => 
   assert.equal(injected.host, "dsh");
   assert.equal(canShowTaskEntry(injected), true);
 });
+
+// ── 插件结果映射（#18 阶段 D）──
+
+test("插件结果按种类映射到组件，认不出的走通用降级", async () => {
+  const { mapHostResult } = await import("../core/host-bridge.ts");
+  const paper = mapHostResult({
+    kind: "document",
+    title: "Attention Is All You Need",
+    text: "摘要片段",
+    resource: { uri: "file:///papers/a.pdf", fragment: "p.42" },
+    source: "DSH 插件：文献检索",
+  });
+  assert.equal(paper.type, "evidence");
+  assert.equal(paper.data.citation.uri, "file:///papers/a.pdf");
+  assert.equal((paper.data.citation as { fragment?: string }).fragment, "p.42");
+  assert.equal(paper.source, "DSH 插件：文献检索");
+
+  const data = mapHostResult({
+    kind: "dataset",
+    title: "实验数据",
+    rows: [
+      ["轮次", "准确率"],
+      ["1", "0.81"],
+    ],
+  });
+  assert.equal(data.type, "table");
+  assert.equal((data.data.rows as string[][]).length, 1);
+
+  const file = mapHostResult({
+    kind: "file",
+    title: "报告.pdf",
+    resource: { uri: "file:///out/report.pdf" },
+  });
+  assert.equal(file.type, "resource");
+  assert.equal(file.data.uri, "file:///out/report.pdf");
+
+  const other = mapHostResult({
+    kind: "whatever",
+    title: "一段话",
+    text: "正文",
+  });
+  assert.equal(other.type, "text", "认不出的种类降级成基础组件");
+  assert.equal(other.data.text, "正文");
+});

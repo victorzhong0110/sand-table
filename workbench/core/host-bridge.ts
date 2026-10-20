@@ -134,3 +134,112 @@ export function resolveBridge(
 export function canShowTaskEntry(bridge: HostBridge): boolean {
   return bridge.capabilities().taskSubmit === true;
 }
+
+/**
+ * 宿主插件结果的呈现映射。
+ *
+ * 插件结果不一定自带可嵌入的白板 UI：文献结果要变成文献卡与来源引用，
+ * 数据结果要变成表格或图表，文件结果要变成资源引用，
+ * 剩下的通用文本/链接走基础组件降级。
+ *
+ * 契约见 docs/architecture/dsh-integration.zh-CN.md 第 7.2 节。
+ */
+export type HostResult = {
+  kind: string;
+  title?: string;
+  /** 通用文本内容。 */
+  text?: string;
+  /** 链接。 */
+  url?: string;
+  /** 表格数据：首行是表头。 */
+  rows?: (string | number)[][];
+  /** 资源定位。 */
+  resource?: { uri: string; fragment?: string };
+  /** 来源说明：结果从哪来。 */
+  source?: string;
+};
+
+export type MappedResult = {
+  /** 目标组件类型。 */
+  type: string;
+  title: string;
+  data: Record<string, unknown>;
+  /** 原始结果的来源说明，保留可追溯性。 */
+  source?: string;
+};
+
+/**
+ * 把宿主结果映射成白板组件。
+ *
+ * 映射是**降级优先**的：认得的类型给专门组件，认不出的走基础文本组件，
+ * 但来源与资源引用一律保留——结果可以看不懂，来源不能丢。
+ */
+export function mapHostResult(result: HostResult): MappedResult {
+  const title = result.title || result.kind;
+  if (result.kind === "document" || result.kind === "paper") {
+    return {
+      type: "evidence",
+      title,
+      data: {
+        summary: result.text ?? "",
+        ...(result.resource
+          ? {
+              citation: {
+                uri: result.resource.uri,
+                ...(result.resource.fragment
+                  ? { fragment: result.resource.fragment }
+                  : {}),
+              },
+            }
+          : {}),
+      },
+      ...(result.source ? { source: result.source } : {}),
+    };
+  }
+  if (result.kind === "dataset" || result.kind === "data") {
+    if (result.rows?.length)
+      return {
+        type: "table",
+        title,
+        data: {
+          columns: result.rows[0].map((_, i) => `col${i + 1}`),
+          rows: result.rows.slice(1).map((r) => r.map((v) => String(v))),
+        },
+        ...(result.source ? { source: result.source } : {}),
+      };
+    return {
+      type: "chart",
+      title,
+      data: { points: [] },
+      ...(result.source ? { source: result.source } : {}),
+    };
+  }
+  if (result.kind === "file" || result.kind === "resource") {
+    return {
+      type: "resource",
+      title,
+      data: {
+        ...(result.resource
+          ? {
+              uri: result.resource.uri,
+              ...(result.resource.fragment
+                ? { fragment: result.resource.fragment }
+                : {}),
+            }
+          : {}),
+        ...(result.text ? { text: result.text } : {}),
+      },
+      ...(result.source ? { source: result.source } : {}),
+    };
+  }
+  // 通用降级：文本或链接。
+  return {
+    type: "text",
+    title,
+    data: {
+      text: result.text ?? (result.url ? result.url : ""),
+      ...(result.url ? { url: result.url } : {}),
+    },
+    ...(result.source ? { source: result.source } : {}),
+  };
+}
