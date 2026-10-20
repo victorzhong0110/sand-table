@@ -26,7 +26,7 @@ async function rpc(method: string, params: unknown) {
 async function main() {
   const result = await rpc("tools/call", {
     name: "sand_open_board",
-    arguments: { title: "代码如何协作" },
+    arguments: { title: "代码如何协作", preset: "code" },
   });
   window.__boardId = resultData(result).id;
   const resource = await rpc("resources/read", {

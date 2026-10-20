@@ -19,6 +19,7 @@ const service = spawn(
     "--experimental-strip-types",
     "local/main.ts",
     "--no-open",
+    "--code-board",
     "--session-file",
     sessionFile,
     "--workspace",

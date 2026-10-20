@@ -31,7 +31,7 @@ test(
       };
       const tools = await client.listTools();
       assert.ok(tools.tools.some((t) => t.name === "sand_read_context"));
-      const opened = await raw("sand_open_board", {});
+      const opened = await raw("sand_open_board", { preset: "code" });
       assert.ok(
         !(opened.structuredContent as any).data.objects,
         "Model result must be a compact summary",

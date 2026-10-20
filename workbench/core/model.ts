@@ -93,6 +93,8 @@ export type Board = Projection & {
   revision: number;
   title: string;
   expiresAt: number;
+  presentation?: "canvas" | "code";
+  autoProjectSources?: boolean;
   selection: string[];
   placements: Record<string, Placement>;
   notes: Record<string, string>;

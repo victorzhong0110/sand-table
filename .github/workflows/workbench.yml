@@ -42,6 +42,10 @@ jobs:
         env:
           SAND_EXTERNAL_REPO: /tmp/sand-clsx
 
+      - run: npm run test:blank
+        env:
+          SAND_EXTERNAL_REPO: /tmp/sand-clsx
+
       - run: npm run test:local
         env:
           SAND_EXTERNAL_REPO: /tmp/sand-clsx
@@ -61,3 +65,7 @@ jobs:
             workbench/artifacts/performance.json
             workbench/artifacts/confirmed-change.png
             workbench/artifacts/nested-custom-workbench.png
+
+            workbench/artifacts/blank-canvas.png
+            workbench/artifacts/composed-canvas.png
+            workbench/artifacts/blank-mobile.png

@@ -1,3 +1,4 @@
+import { CanvasShell } from "./CanvasShell.tsx";
 import React, { useState, useEffect, useRef, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
@@ -83,7 +84,7 @@ function Workbench() {
   }
   async function action(name: string, args: Record<string, unknown> = {}) {
     setBusy(true);
-    setError("");
+    if (name !== "sand_read_board") setError("");
     try {
       const data = await call(name, args);
       if (
@@ -247,6 +248,27 @@ function Workbench() {
               : "system-ui,sans-serif",
       } as CSSProperties)
     : undefined;
+  if (board.presentation !== "code")
+    return (
+      <CanvasShell
+        board={board}
+        viewId={viewId}
+        busy={busy}
+        error={error || connectionError?.message || ""}
+        action={action}
+        call={call}
+        operate={operate}
+        openLink={(url) => void app?.openLink({ url })}
+        sendMessage={async (text) => {
+          if (!app) throw Error("Not connected");
+          const result = await app.sendMessage({
+            role: "user",
+            content: [{ type: "text", text }],
+          });
+          if (result.isError) throw Error("Host rejected message.");
+        }}
+      />
+    );
   return (
     <main
       className={`${theme === "custom" ? board.theme?.base || "paper" : theme} ${custom?.density === "compact" ? "compact" : ""} ${custom?.reduceMotion ? "reduce-motion" : ""}`}

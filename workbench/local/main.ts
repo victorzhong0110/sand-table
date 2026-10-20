@@ -5,12 +5,14 @@ import { startLocal } from "./service.ts";
 import { defaultSessionFile } from "./session.ts";
 let open = true,
   port = 0,
-  sessionFile = defaultSessionFile;
+  sessionFile = defaultSessionFile,
+  preset: "blank" | "code" = "blank";
 const roots: string[] = [];
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
-  if (arg === "--no-open") open = false;
+  if (arg === "--code-board") preset = "code";
+  else if (arg === "--no-open") open = false;
   else if (["--workspace", "--port", "--session-file"].includes(arg)) {
     const value = args[++i];
     if (!value) throw Error(`Missing value for ${arg}`);
@@ -33,18 +35,13 @@ for (let i = 0; i < args.length; i++) {
     );
   }
 }
-if (!roots.length) {
-  console.error(
-    "Usage: npm start -- /absolute/path/to/repository\nOr: npm start -- --workspace name=/absolute/repo [--workspace other=/absolute/worktree]",
-  );
-  process.exit(1);
-}
-const bindings = bind(roots);
+const bindings = roots.length ? bind(roots) : [];
 try {
   const local = await startLocal({
     workspaces: bindings.map((w) => `${w.label}=${w.root}`),
     sessionFile,
     port,
+    preset,
   });
   console.log(
     `\nSand Table 已就绪：${local.url}\n在页面点击「连接我的 AI」安装 MCP 连接。保持这个终端运行；Ctrl+C 结束会话。\nREADY ${local.url}`,

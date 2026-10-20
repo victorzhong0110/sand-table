@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Board } from "../core/model.ts";
+import { componentTypes } from "../core/spaces.ts";
 import type { Camera, ComponentInstance, Rect } from "../core/spaces.ts";
 import { ComponentRenderer } from "./ComponentRenderer.tsx";
 type Props = {
@@ -221,6 +222,39 @@ export function SpaceCanvas({
         ref={canvas}
         className="canvas"
         aria-label="项目白板"
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("application/x-sand-component")) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          }
+        }}
+        onDrop={(e) => {
+          const raw = e.dataTransfer.getData("application/x-sand-component");
+          if (!raw) return;
+          e.preventDefault();
+          try {
+            const item = JSON.parse(raw);
+            if (typeof item.type !== "string" || typeof item.title !== "string")
+              return;
+            const size = componentTypes.find((c) => c.type === item.type);
+            const box = e.currentTarget.getBoundingClientRect();
+            void operate({
+              kind: "create",
+              type: item.type,
+              title: item.title,
+              data: item.data || {},
+              ...(item.objectId ? { objectId: item.objectId } : {}),
+              rect: {
+                x: (e.clientX - box.left - camera.x) / camera.zoom,
+                y: (e.clientY - box.top - camera.y) / camera.zoom,
+                width: size?.width || 280,
+                height: size?.height || 180,
+                pinned: false,
+              },
+            });
+            clearFilters();
+          } catch {}
+        }}
         onPointerDown={(e) => {
           if (e.target !== e.currentTarget) return;
           drag.current = {
@@ -425,8 +459,7 @@ export function SpaceCanvas({
                   height: r.height,
                 }}
                 onClick={(e) => {
-                  if (mode !== "arrange" && !busy)
-                    void select(c.id, e.shiftKey);
+                  if (mode !== "arrange") void select(c.id, e.shiftKey);
                 }}
                 onDoubleClick={() => {
                   if (c.type === "board" || c.type === "space-link")
@@ -570,11 +603,12 @@ export function SpaceCanvas({
             );
           })}
         </div>
-        {!filtered.length && (
-          <p className="empty">
-            没有匹配对象。尝试切换到文件或清除筛选，或从组件面板添加内容。
-          </p>
-        )}
+        {!filtered.length &&
+          (query || b.instances.some((c) => c.spaceId === view.spaceId)) && (
+            <p className="empty">
+              没有匹配对象。尝试切换到文件或清除筛选，或从组件面板添加内容。
+            </p>
+          )}
         {lasso && (
           <div
             className="lasso"

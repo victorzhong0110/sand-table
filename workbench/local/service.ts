@@ -14,6 +14,7 @@ export async function startLocal(options: {
   workspaces: string[];
   sessionFile: string;
   port?: number;
+  preset?: "blank" | "code";
 }) {
   if (existsSync(options.sessionFile)) {
     const previous = readConnection(options.sessionFile);
@@ -75,7 +76,10 @@ export async function startLocal(options: {
     }
     const r = await client.callTool({
       name: "sand_open_board",
-      arguments: { title: "项目总览" },
+      arguments: {
+        title: options.preset === "code" ? "项目总览" : "未命名白板",
+        preset: options.preset || "blank",
+      },
     });
     if (r.isError)
       throw Error((r.content as any)?.[0]?.text || "Cannot index repository.");
@@ -119,7 +123,7 @@ export async function startLocal(options: {
           "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; frame-src 'self'; img-src 'self' data:; media-src data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
         );
         res.end(
-          `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sand Table · 本地工作台</title><style>${css}</style></head><body><nav><b>Sand Table</b><span id="connection">正在连接工作台…</span><button id="setup">连接我的 AI</button><button id="new-board">重新打开白板</button></nav><section id="setup-panel" hidden><h1>和你自己的 AI 共用这张白板</h1><p>在本机 MCP 客户端中安装一次，然后在它的对话里提问。白板不自带模型，也不需要新的 API Key。</p><label>Codex CLI 安装命令<textarea id="codex" readonly></textarea></label><button data-copy="codex">复制命令</button><details><summary>通用 MCP JSON / Codex TOML</summary><label>JSON<textarea id="json" readonly></textarea></label><button data-copy="json">复制 JSON</button><label>TOML<textarea id="toml" readonly></textarea></label><button data-copy="toml">复制 TOML</button></details><label>安装后，在 AI 对话中发送<textarea id="prompt" readonly></textarea></label><button id="ask">复制当前选区提问</button><p id="setup-status" role="status"></p><p class="muted">这里显示 MCP 接入进程与工具通信，不代表 AI 正在思考。浏览器聊天网页不能直接读取本机 stdio 配置；请使用本机 MCP 客户端。无需把此服务暴露到公网。</p><button id="close-setup">返回白板</button></section><div id="error" role="alert" hidden></div><iframe title="Sand Table 白板" sandbox="allow-scripts"></iframe><script src="/host.js"></script></body></html>`,
+          `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sand Table · 本地工作台</title><style>${css}</style></head><body><nav><b>本地会话</b><span id="connection">正在连接工作台…</span><button id="setup">连接我的 AI</button><button id="new-board">重新打开白板</button></nav><section id="setup-panel" hidden><h1>和你自己的 AI 共用这张白板</h1><p>在本机 MCP 客户端中安装一次，然后在它的对话里提问。白板不自带模型，也不需要新的 API Key。</p><label>Codex CLI 安装命令<textarea id="codex" readonly></textarea></label><button data-copy="codex">复制命令</button><details><summary>通用 MCP JSON / Codex TOML</summary><label>JSON<textarea id="json" readonly></textarea></label><button data-copy="json">复制 JSON</button><label>TOML<textarea id="toml" readonly></textarea></label><button data-copy="toml">复制 TOML</button></details><label>安装后，在 AI 对话中发送<textarea id="prompt" readonly></textarea></label><button id="ask">复制当前选区提问</button><p id="setup-status" role="status"></p><p class="muted">这里显示 MCP 接入进程与工具通信，不代表 AI 正在思考。浏览器聊天网页不能直接读取本机 stdio 配置；请使用本机 MCP 客户端。无需把此服务暴露到公网。</p><button id="close-setup">返回白板</button></section><div id="error" role="alert" hidden></div><iframe title="Sand Table 白板" sandbox="allow-scripts"></iframe><script src="/host.js"></script></body></html>`,
         );
         return;
       }
@@ -245,4 +249,4 @@ export async function startLocal(options: {
     sessionFile: options.sessionFile,
   };
 }
-const css = `*[hidden]{display:none!important}*{box-sizing:border-box}body{margin:0;background:#f6f1e6;color:#322f28;font:14px/1.6 system-ui,sans-serif}nav{display:flex;align-items:center;gap:16px;padding:10px 20px;background:#322f28;color:#fffdf7;min-height:54px}nav span{flex:1;font-size:12px}button{cursor:pointer;border:1px solid #d9d0be;border-radius:6px;padding:7px 12px;background:#fffdf7;color:#322f28;font:inherit}button:focus-visible,textarea:focus-visible{outline:2px solid #b67547;outline-offset:3px}iframe{border:0;width:100%;height:calc(100vh - 54px);display:block}section{padding:28px;max-width:900px;margin:auto}textarea{display:block;width:100%;min-height:84px;padding:12px;border:1px solid #ddd5c4;border-radius:8px;background:#fffdf7;font:12px/1.6 ui-monospace,monospace;color:inherit;resize:vertical;margin:6px 0 10px}label{display:block;margin-top:18px}details{margin-top:20px}summary{cursor:pointer}.muted{color:#777366;font-size:12px}#error{padding:16px;background:#fbe7e1;color:#833c28}#setup-status{min-height:24px}h1{font-weight:500;font-size:28px}@media(max-width:600px){nav{flex-wrap:wrap;gap:8px}nav span{flex-basis:70%}iframe{height:calc(100vh - 90px)}section{padding:18px}}`;
+const css = `*[hidden]{display:none!important}*{box-sizing:border-box}body{margin:0;background:#f6f1e6;color:#322f28;font:14px/1.6 system-ui,sans-serif}nav{display:flex;align-items:center;gap:16px;padding:10px 20px;background:#fffdf7;color:#322f28;border-bottom:1px solid #ddd5c4;min-height:44px}nav span{flex:1;font-size:12px}button{cursor:pointer;border:1px solid #d9d0be;border-radius:6px;padding:7px 12px;background:#fffdf7;color:#322f28;font:inherit}button:focus-visible,textarea:focus-visible{outline:2px solid #b67547;outline-offset:3px}iframe{border:0;width:100%;height:calc(100vh - 44px);display:block}section{padding:28px;max-width:900px;margin:auto}textarea{display:block;width:100%;min-height:84px;padding:12px;border:1px solid #ddd5c4;border-radius:8px;background:#fffdf7;font:12px/1.6 ui-monospace,monospace;color:inherit;resize:vertical;margin:6px 0 10px}label{display:block;margin-top:18px}details{margin-top:20px}summary{cursor:pointer}.muted{color:#777366;font-size:12px}#error{padding:16px;background:#fbe7e1;color:#833c28}#setup-status{min-height:24px}h1{font-weight:500;font-size:28px}@media(max-width:600px){nav{flex-wrap:wrap;gap:8px}nav span{flex-basis:70%}iframe{height:calc(100vh - 90px)}section{padding:18px}}`;

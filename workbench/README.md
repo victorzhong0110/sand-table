@@ -2,10 +2,10 @@
 
 源码只读 MCP 服务器、MCP App 与本地浏览器呈现入口。使用已有 Agent，不包含模型运行时。实现位置、约束及验收边界见 [IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。
 
-日常从仓库根目录执行：
+日常从仓库根目录执行（不必绑定仓库）：
 
 ~~~bash
-npm start -- /absolute/external-repository
+npm start
 ~~~
 
 在页面“连接我的 AI”中复制通用 MCP JSON，安装到本机客户端；复制当前选区提问，开始共享同一会话。具体步骤见 [QUICKSTART.md](docs/QUICKSTART.md)。
@@ -82,3 +82,10 @@ npm run package:mcpb
 完整测试会把安装包解压到新目录，以其 manifest 配置创建独立 SDK 客户端完成同板改动链路。此检查证明包可独立运行，不能替代用户实际客户端的安装和界面验收。
 
 npm run test:performance 使用固定 Hugging Face Hub 场景：1440×1000、120 个索引文件、1,153 实例、1,781 源码边、默认层级，无模型调用。预算为服务就绪 30 秒、首卡显示 15 秒、搜索可见 10 秒，首屏少于 100 实例；输出 artifacts/performance.json。帧间隔为交互后的样本，hostHeapBytes 只测测试进程 JS，不当作全系统内存。
+
+
+## 空白画布入口
+
+默认是没有组件的画布与侧边工具箱；MCP 也默认创建空白板。AI 可在没有选区、没有工作区的情况下读取 context 并搭建组件。仓库由人通过工具箱主动导入，成为当前空间中的文件夹／文件子白板；刷新不会把源码重新铺到总览。
+
+npm run test:blank 检查无仓库启动、拖入和编辑、嵌套、AI 消息交接、独立 MCP 编排、可选外部仓库导入、源码读取、主题和窄屏。旧的代码场景回归通过显式 --code-board 或 sand_open_board 的 preset=code 进入，不能代替默认入口验收。

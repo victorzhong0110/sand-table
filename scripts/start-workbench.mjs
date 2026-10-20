@@ -16,12 +16,6 @@ if (major < 22 || (major === 22 && minor < 18)) {
   console.error("Sand Table 需要 Node.js 22.18 或更新版本。请先更新 Node.js。");
   process.exit(1);
 }
-if (!process.argv.slice(2).length) {
-  console.error(
-    "用法：npm start -- /absolute/path/to/repository\n或：npm start -- --workspace name=/absolute/path/to/repository",
-  );
-  process.exit(1);
-}
 let active;
 for (const signal of ["SIGINT", "SIGTERM"])
   process.on(signal, () => active?.kill(signal));

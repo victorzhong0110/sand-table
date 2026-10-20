@@ -184,7 +184,11 @@ export class BoardStore {
   context(id: string) {
     const b = this.get(id);
     const active = b.focusedViewId ? b.views[b.focusedViewId] : undefined;
-    if (!b.selection.length && !active?.selection.length)
+    if (
+      b.presentation !== "canvas" &&
+      !b.selection.length &&
+      !active?.selection.length
+    )
       throw Error("Select objects or components on the board first.");
     const parts: Record<string, string> = {};
     for (const i of b.instances)

@@ -25,6 +25,7 @@ async function launch() {
       "--experimental-strip-types",
       "../scripts/start-workbench.mjs",
       "--no-open",
+      "--code-board",
       "--session-file",
       sessionFile,
       "--workspace",
