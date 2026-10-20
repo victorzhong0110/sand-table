@@ -15,6 +15,10 @@ if (!external)
   throw Error("Set SAND_EXTERNAL_REPO to a checkout of lukeed/clsx.");
 const dir = mkdtempSync(join(tmpdir(), "sand-local-")),
   sessionFile = join(dir, "connection.json");
+// A fixed port, the way the documentation tells people to run it: the
+// address stays the same across restarts, so a restart rotates only the
+// credential and the tab has to pick the new one up.
+const port = 45000 + Math.floor(Math.random() * 3000);
 let service: ReturnType<typeof spawn> | undefined,
   browser,
   client: Client | undefined;
@@ -26,6 +30,8 @@ async function launch() {
       "../scripts/start-workbench.mjs",
       "--no-open",
       "--code-board",
+      "--port",
+      String(port),
       "--session-file",
       sessionFile,
       "--workspace",
@@ -143,6 +149,30 @@ try {
   const listed = await call("sand_list_boards");
   assert.equal(listed.boards.length, 1);
   assert.equal(listed.boards[0].boardId, browserId);
+  /** The UI writes to the server without waiting: "save note" and "focus a
+   *  guide step" both fire the write and move on, and reading the context
+   *  right after the click can land before the write does. Wait for the
+   *  expected state instead of reading once and hoping. */
+  const untilContext = async (
+    check: (ctx: any) => boolean,
+    describe: string,
+  ): Promise<any> => {
+    const deadline = Date.now() + 10000;
+    let last = "(no read yet)";
+    while (Date.now() < deadline) {
+      try {
+        const ctx = await call("sand_read_context", { boardId: browserId });
+        last = JSON.stringify(ctx.objects?.[0]?.title ?? null);
+        if (check(ctx)) return ctx;
+      } catch (e) {
+        last = String((e as Error).message);
+      }
+      await new Promise((r) => setTimeout(r, 80));
+    }
+    assert.fail(
+      `The context never reached the expected state (${describe}). Last read: ${last}`,
+    );
+  };
   let b = await call("sand_open_board", { boardId: browserId });
   assert.equal(b.id, browserId);
   const resource = await client.readResource({
@@ -159,8 +189,10 @@ try {
   await card.click();
   await frame().locator("textarea").fill("解释条件参数");
   await frame().getByRole("button", { name: "保存备注" }).click();
-  const context = await call("sand_read_context", { boardId: browserId });
-  assert.equal(context.notes[context.selection[0]], "解释条件参数");
+  const context = await untilContext(
+    (c) => c.notes[c.selection?.[0]] === "解释条件参数",
+    "the saved note on the selected object",
+  );
   assert.equal(context.objects[0].title, "clsx");
   b = await call("sand_read_board", { boardId: browserId });
   await call("sand_publish_guide", {
@@ -174,8 +206,14 @@ try {
   await frame()
     .getByRole("button", { name: /转换每个值/ })
     .click();
-  const afterStep = await call("sand_read_context", { boardId: browserId });
-  if (afterStep.objects[0]?.title !== "toVal") {
+  /* UI 的写入是即发即走：点完就读可能落在写入之前，所以等状态，不赌一次读取。 */
+  try {
+    await untilContext(
+      (c) => c.objects?.[0]?.title === "toVal",
+      "the guide step focus",
+    );
+  } catch (e) {
+    // 诊断输出留在测试里：下次再坏时直接能看，不用重新推。
     const b2 = await call("sand_read_board", { boardId: browserId });
     console.log("DIAG guide:", JSON.stringify(b2.guides));
     console.log("DIAG selection:", JSON.stringify(b2.selection));
@@ -191,8 +229,8 @@ try {
         .innerText()
         .catch(() => "(none)"),
     );
+    throw e;
   }
-  assert.equal(afterStep.objects[0]?.title, "toVal");
   await page.reload();
   await frame()
     .getByRole("heading", { name: "项目总览", exact: true })
@@ -244,10 +282,41 @@ try {
     name: "sand_read_board",
     arguments: { boardId: browserId },
   });
+  /* 持久化：白板落盘了，重启后恢复的是**同一块**白板——
+     作品不随进程消失（issue #11 的 P1）。
+     注意这与凭据轮换是两件事：白板还在，但旧凭据不再有效。 */
   assert.notEqual(old.isError, true, "重启后旧 boardId 仍然可读");
   const restored = resultData(old) as any;
   assert.equal(restored.title, "项目总览", "恢复出来的白板还是原来那块");
   assert.ok(restored.instances.length > 0, "重启后白板上的东西还在，不是空板");
+  /* #6-A: the address stayed the same, the credential did not. The tab
+     still holds the old one, so every request comes back unauthorized —
+     until the new link is pasted into it. Pasting changes only the
+     fragment, so the page is never reloaded and has to read the new
+     credential from there; otherwise the tab stays broken until it is
+     reloaded by hand. */
+  await page.waitForFunction(
+    () =>
+      Boolean(
+        document.getElementById("connection")?.textContent?.includes("断开"),
+      ),
+    undefined,
+    { timeout: 20000 },
+  );
+  await page.evaluate((token) => {
+    location.hash = "#session=" + token;
+  }, connection.token);
+  await page.waitForFunction(
+    () =>
+      !document
+        .getElementById("connection")
+        ?.textContent?.includes("断开"),
+    undefined,
+    { timeout: 20000 },
+  );
+  await frame()
+    .getByRole("heading", { name: "项目总览", exact: true })
+    .waitFor({ timeout: 20000 });
   assert.deepEqual(errors, []);
   console.log(
     "Local workbench passed: real launcher, generated MCP config, independent stdio client, shared selection/guide, reload, auth, clean shutdown, token rotation and bridge reconnect.",

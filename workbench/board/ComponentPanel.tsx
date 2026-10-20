@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { Board } from "../core/model.ts";
 import type { ComponentInstance, ThemeConfig } from "../core/spaces.ts";
+import { componentTypes, defaultData } from "../core/spaces.ts";
 import { Icon } from "./Icon.tsx";
-import { componentTypes, defaultData, componentIcons } from "../core/spaces.ts";
-import { resolveContent } from "../core/content.ts";
+import { editIntent, endEditSession } from "./edit-session.ts";
 export function ComponentPanel({
   board: b,
   viewId,
@@ -98,118 +98,51 @@ export function ComponentPanel({
           >
             添加研究比较白板
           </button>
-          <p className="muted">
-            进入子白板后可加入任务、行为约定、对比、图表或文件引用。组件也可由你的
-            Agent 配置。
-          </p>
         </>
       )}
       {selected.length > 0 && (
-        <section className="appearance-controls">
-          <h3>显示方式</h3>
-          <div className="detail-options">
-            {[
-              ["full", "完整界面"],
-              ["label", "图标＋标题"],
-              ["icon", "仅图标"],
-            ].map(([detail, label]) => (
-              <button
-                key={detail}
-                aria-pressed={selected.every(
-                  (c) => (c.appearance?.detail || "full") === detail,
-                )}
-                onClick={async () => {
-                  for (const c of selected)
-                    await operate({
-                      kind: "update",
-                      instanceId: c.id,
-                      appearance: { detail },
-                    });
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <h3>图标库</h3>
-          <div className="icon-library">
-            {componentIcons.map((icon) => (
-              <button
-                key={icon}
-                aria-label={`使用 ${icon} 图标`}
-                title={
-                  componentTypes.find((t) => t.type === icon)?.title || icon
-                }
-                aria-pressed={selected.every(
-                  (c) => (c.appearance?.icon || c.type) === icon,
-                )}
-                onClick={async () => {
-                  for (const c of selected)
-                    await operate({
-                      kind: "update",
-                      instanceId: c.id,
-                      appearance: { icon },
-                    });
-                }}
-              >
-                <Icon name={icon} />
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-      {selected.length > 0 && (
         <>
-          <h3>选中的展示实例</h3>
+          <h3>选中组件</h3>
           {selected.map((c) => (
             <div key={c.id} className="report">
-              <b>{c.title}</b>
-              <button
-                disabled={busy}
-                onClick={() =>
-                  void operate({ kind: "duplicate", instanceId: c.id })
-                }
-              >
-                复制展示
-              </button>
-              {c.binding?.kind === "object" && (
-                <>
+              <div className="report-head">
+                <b title={c.title}>{c.title}</b>
+                <div className="report-actions">
                   <button
+                    className="icon-button"
+                    title={`复制 ${c.title}`}
+                    aria-label="复制"
                     disabled={busy}
-                    title="同一个对象在当前白板再放一份：内容共享，布局独立"
+                    onClick={() =>
+                      void operate({ kind: "duplicate", instanceId: c.id })
+                    }
+                  >
+                    <Icon name="copy" size={15} />
+                  </button>
+                  <button
+                    className="icon-button"
+                    title={
+                      c.rect.pinned ? `取消固定 ${c.title}` : `固定位置 ${c.title}`
+                    }
+                    aria-label={c.rect.pinned ? "取消固定" : "固定位置"}
+                    aria-pressed={c.rect.pinned}
+                    disabled={busy}
                     onClick={() =>
                       void operate({
-                        kind: "present",
-                        objectId: c.binding!.objectId,
+                        kind: "place",
+                        items: [
+                          {
+                            id: c.id,
+                            rect: { ...c.rect, pinned: !c.rect.pinned },
+                          },
+                        ],
                       })
                     }
                   >
-                    再放一份
+                    <Icon name="pin" size={15} />
                   </button>
-                  <button
-                    disabled={busy}
-                    title="复制出独立对象：内容深拷贝，此后互不影响"
-                    onClick={() =>
-                      void operate({ kind: "copyObject", instanceId: c.id })
-                    }
-                  >
-                    复制出独立对象
-                  </button>
-                </>
-              )}
-              <button
-                disabled={busy}
-                onClick={() =>
-                  void operate({
-                    kind: "place",
-                    items: [
-                      { id: c.id, rect: { ...c.rect, pinned: !c.rect.pinned } },
-                    ],
-                  })
-                }
-              >
-                {c.rect.pinned ? "取消固定" : "固定位置"}
-              </button>
+                </div>
+              </div>
               <select
                 aria-label={`移动 ${c.title} 到白板`}
                 value={c.spaceId}
@@ -233,20 +166,16 @@ export function ComponentPanel({
                   void operate({ kind: "remove", instanceId: c.id })
                 }
               >
-                移除展示
+                移除
               </button>
             </div>
           ))}
-          <small>
-            移除展示不会删除对象或真实文件。白板中有内容时，需要先处理其成员。
-          </small>
         </>
       )}
       {selected.length === 1 && (
         <ComponentEditor
           key={selected[0].id}
           instance={selected[0]}
-          board={b}
           busy={busy}
           operate={operate}
           action={action}
@@ -325,50 +254,136 @@ export function ComponentPanel({
 }
 function ComponentEditor({
   instance: c,
-  board,
   busy,
   operate,
   action,
 }: {
   instance: ComponentInstance;
-  board: Board;
   busy: boolean;
   operate: (op: any) => Promise<any>;
   action: (name: string, args?: Record<string, unknown>) => Promise<any>;
 }) {
-  // 绑定了内容对象的组件：编辑的是对象，同一对象在别处的展示一起变。
-  const resolved = resolveContent(c, board.contentObjects);
-  const bound = c.binding?.kind === "object" ? c.binding.objectId : undefined;
-  const object = bound
-    ? board.contentObjects.find((o) => o.id === bound)
-    : undefined;
-  const [title, setTitle] = useState(resolved.title),
-    [data, setData] = useState<Record<string, any>>(resolved.data),
-    [json, setJson] = useState(JSON.stringify(resolved.data, null, 2)),
-    [error, setError] = useState("");
-  // 同一次编辑会话里的连续保存算一个撤销单位。
-  const intentId = useMemo(
-    () => `ui-${c.id}-${Date.now().toString(36)}`,
-    [c.id],
-  );
+  const [title, setTitle] = useState(c.title),
+    [data, setData] = useState<Record<string, any>>(c.data),
+    [json, setJson] = useState(JSON.stringify(c.data, null, 2)),
+    [error, setError] = useState(""),
+    [failed, setFailed] = useState("");
+  /* #9.4: content fields save themselves. A field that changes starts a short
+     timer; when the person stops typing the change is written back, with the
+     same intent token for the whole run of typing, so the server merges it
+     into one history step. The explicit button stays as a fallback.
+
+     Only the fields the person actually touched are written back, and they
+     are merged into the data the server holds — so an agent's change to
+     another field of the same component is not overwritten by an auto-save. */
+  const timer = useRef(0);
+  const pending = useRef(new Set<string>());
+  const edits = useRef<Record<string, unknown>>({});
+  const pendingLabel = useRef("");
+  const server = useRef({ title: c.title, data: c.data });
+  const serverData = useRef(c.data);
+  serverData.current = c.data;
   useEffect(() => {
-    const current = resolveContent(c, board.contentObjects);
-    setData(current.data);
-    setJson(JSON.stringify(current.data, null, 2));
-    setTitle(current.title);
-  }, [c.updatedAt, object?.updatedAt]);
+    /* The server is the source of truth for what has been saved. Local edits
+       that have not been saved are kept: the person is still typing. */
+    const clean =
+      title === server.current.title &&
+      JSON.stringify(data) === JSON.stringify(server.current.data);
+    server.current = { title: c.title, data: c.data };
+    if (clean) {
+      setTitle(c.title);
+      setData(c.data);
+      setJson(JSON.stringify(c.data, null, 2));
+    }
+  }, [c.updatedAt]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  /* Leaving the component ends the editing session: the next edit is a new
+     intent and therefore a new step. Moving between two fields of the same
+     component does not — that is one continuous edit and stays one step, so
+     one undo takes the whole edit back. */
+  useEffect(() => () => endEditSession(c.id), [c.id]);
+  const commit = async () => {
+    clearTimeout(timer.current);
+    if (!pending.current.size) return;
+    const keys = [...pending.current];
+    const next = { ...serverData.current };
+    for (const key of keys)
+      if (key !== "title") setPath(next, key, edits.current[key]);
+    const op: any = {
+      kind: "update",
+      instanceId: c.id,
+      intent: editIntent(c.id),
+    };
+    if (keys.includes("title")) op.title = edits.current.title;
+    if (!["object", "board"].includes(c.type)) op.data = next;
+    const result = await operate(op);
+    if (result === undefined) {
+      /* Keep the change pending so the next attempt tries again, and say
+         which field did not make it — a failed write that looks like a
+         success is the failure mode this is here to remove. */
+      setFailed(
+        `「${pendingLabel.current || "内容"}」没有保存成功：服务端拒绝了这次写入，原因见页面上方的提示。`,
+      );
+      return;
+    }
+    pending.current.clear();
+    setFailed("");
+  };
+  /* Leaving a field is not the end of the session: the auto-save writes the
+     change but keeps the intent, so one run of editing stays one step
+     however many times it is written. */
+  const leave = () => void commit();
+  const schedule = () => {
+    clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => void commit(), 600);
+  };
+  const touch = (key: string, label: string, value: unknown) => {
+    pending.current.add(key);
+    edits.current[key] = value;
+    pendingLabel.current = label;
+    schedule();
+  };
+  const revert = (key: string) => {
+    pending.current.delete(key);
+    delete edits.current[key];
+    if (key === "title") setTitle(server.current.title);
+    else setData({ ...data, [key]: server.current.data?.[key] });
+    endEditSession(c.id);
+  };
   const field = (key: string, label: string, multiline = false) => (
     <label key={key}>
       {label}
       {multiline ? (
         <textarea
           value={String(data[key] ?? "")}
-          onChange={(e) => setData({ ...data, [key]: e.target.value })}
+          onChange={(e) => {
+            setData({ ...data, [key]: e.target.value });
+            touch(key, label, e.target.value);
+          }}
+          onBlur={leave}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              revert(key);
+              (e.target as HTMLElement).blur();
+            }
+          }}
         />
       ) : (
         <input
           value={String(data[key] ?? "")}
-          onChange={(e) => setData({ ...data, [key]: e.target.value })}
+          onChange={(e) => {
+            setData({ ...data, [key]: e.target.value });
+            touch(key, label, e.target.value);
+          }}
+          onBlur={leave}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              revert(key);
+              (e.target as HTMLElement).blur();
+            }
+          }}
         />
       )}
     </label>
@@ -379,22 +394,32 @@ function ComponentEditor({
       instanceId: c.id,
       title,
       data,
-      ...(object ? { expectedVersion: object.version } : {}),
-      intentId,
+      intent: editIntent(c.id),
     });
   return (
     <section className="component-editor">
-      <h3>配置这个组件</h3>
+      <h3>配置</h3>
       <label>
         名称
         <input
           aria-label="编辑组件名称"
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => {
+            setTitle(e.target.value);
+            touch("title", "名称", e.target.value);
+          }}
+          onBlur={leave}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              revert("title");
+              (e.target as HTMLElement).blur();
+            }
+          }}
         />
       </label>
       {["text", "heading", "code"].includes(c.type) &&
-        field("text", c.type === "code" ? "展示的代码" : "内容", true)}
+        field("text", c.type === "code" ? "代码" : "内容", true)}
       {c.type === "code" && field("language", "语言")}
       {c.type === "resource" && (
         <>
@@ -543,21 +568,41 @@ function ComponentEditor({
               <input
                 aria-label={`方案 ${i + 1} 名称`}
                 value={data[key]?.title || ""}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const value = e.target.value;
                   setData({
                     ...data,
-                    [key]: { ...data[key], title: e.target.value },
-                  })
-                }
+                    [key]: { ...data[key], title: value },
+                  });
+                  touch(`${key}.title`, `方案 ${i + 1} 名称`, value);
+                }}
+                onBlur={leave}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    revert(`${key}.title`);
+                    (e.target as HTMLElement).blur();
+                  }
+                }}
               />
               <textarea
                 value={data[key]?.text || ""}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const value = e.target.value;
                   setData({
                     ...data,
-                    [key]: { ...data[key], text: e.target.value },
-                  })
-                }
+                    [key]: { ...data[key], text: value },
+                  });
+                  touch(`${key}.text`, `方案 ${i + 1} 内容`, value);
+                }}
+                onBlur={leave}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    revert(`${key}.text`);
+                    (e.target as HTMLElement).blur();
+                  }
+                }}
               />
             </fieldset>
           ))}
@@ -620,7 +665,7 @@ function ComponentEditor({
       )}
       {!["object", "board"].includes(c.type) && (
         <details>
-          <summary>高级配置／由 AI 编辑的数据</summary>
+          <summary>高级</summary>
           <textarea
             aria-label="组件高级配置"
             value={json}
@@ -653,19 +698,38 @@ function ComponentEditor({
           </button>
         </details>
       )}
-      {error && <p role="alert">{error}</p>}
+      {(error || failed) && <p role="alert">{error || failed}</p>}
       <button
         disabled={busy}
         onClick={() =>
-          void (["object", "board"].includes(c.type)
-            ? operate({ kind: "update", instanceId: c.id, title })
-            : save())
+          void (
+            ["object", "board"].includes(c.type)
+              ? operate({ kind: "update", instanceId: c.id, title })
+              : save()
+          ).then((result) => {
+            if (result !== undefined) {
+              pending.current.clear();
+              setFailed("");
+              endEditSession(c.id);
+            }
+          })
         }
       >
         保存组件
       </button>
     </section>
   );
+}
+/** Write one field into the data, following a dotted path. */
+function setPath(target: Record<string, any>, path: string, value: unknown) {
+  const parts = path.split(".");
+  let node = target;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const key = parts[i];
+    if (!node[key] || typeof node[key] !== "object") node[key] = {};
+    node = node[key];
+  }
+  node[parts[parts.length - 1]] = value;
 }
 const palettes = {
   paper: {
@@ -719,10 +783,7 @@ export function ThemePanel({
   );
   return (
     <section>
-      <h2>自定义外观</h2>
-      <p className="muted">
-        正文对比度 {contrast(config.ink, config.surface).toFixed(1)}:1
-      </p>
+      <h2>自定义</h2>
       {contrast(config.ink, config.surface) < 4.5 && (
         <p role="status">
           当前正文和组件背景接近，阅读可能吃力。建议提高对比度或恢复基础皮肤。
@@ -821,7 +882,6 @@ export function ThemePanel({
       <button onClick={() => void operate({ kind: "theme", theme: null })}>
         重置自定义外观
       </button>
-      <small>设置只保留在本次白板会话中。</small>
     </section>
   );
 }

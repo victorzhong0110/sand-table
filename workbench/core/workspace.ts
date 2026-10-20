@@ -65,6 +65,8 @@ export type PersistedBoard = {
   groups: unknown[];
   spaceLinks: unknown[];
   assets: unknown[];
+  /** 导入的组件包：白板级内容，重启后仍在。 */
+  componentPacks?: unknown[];
   activities: unknown[];
   spaceActivities?: unknown[];
   guides: unknown[];
@@ -391,6 +393,7 @@ const normalizeBoard = (raw: unknown): PersistedBoard => {
     groups: asArray(r.groups),
     spaceLinks: asArray(r.spaceLinks),
     assets: asArray(r.assets),
+    componentPacks: asArray(r.componentPacks),
     activities: asArray(r.activities),
     guides: asArray(r.guides),
     intents: asArray(r.intents),

@@ -520,7 +520,8 @@ test("绑定了内容的卡片：改外观落在这一次展示上，不动对�
   const b = store.get(boardId);
   const after = b.instances.find((i) => i.id === instance.id)!;
   assert.equal(after.appearance?.detail, "icon");
-  assert.equal(after.appearance?.icon, "task");
+  // 类型图标在创建时定下，之后不能改：内置类型用固定图标（#5 的决定，不倒退）。
+  assert.equal(after.appearance?.icon, undefined);
   // 对象内容没有被外观改动波及，也没有被写脏版本。
   const object = b.contentObjects.find((o) => o.id === objectId)!;
   assert.equal(object.version, version, "改外观不算改内容");

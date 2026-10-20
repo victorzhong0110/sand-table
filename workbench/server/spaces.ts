@@ -1,7 +1,8 @@
-import { viewResult } from "../core/results.ts";
+import { boardSummary, viewResult } from "../core/results.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { BoardStore } from "../core/store.ts";
+import type { BoardStateKey } from "../core/objects.ts";
 import type { Board } from "../core/model.ts";
 import type { ComponentInstance, Rect, View } from "../core/spaces.ts";
 import {
@@ -10,6 +11,7 @@ import {
   safeUrl,
   isNativeContent,
   isReferenceContent,
+  checkComponentData,
 } from "../core/spaces.ts";
 import { canNest } from "../core/content.ts";
 import { openView } from "../core/space-state.ts";
@@ -36,68 +38,130 @@ const theme = z.object({
   radius: z.number().min(0).max(24),
   reduceMotion: z.boolean(),
 });
-/** 标题长度与内容检查。原生对象的标题同样受约束。 */
+/** 标题长度检查。原生对象的标题同样受约束。 */
 function checkTitle(title: string) {
   if (!title || !title.trim() || title.length > 120)
     throw Error("Title must be 1–120 characters.");
 }
 
-function checkData(type: string, data: Record<string, unknown>) {
-  if (JSON.stringify(data).length > 40000)
-    throw Error("Component data exceeds 40 KB.");
-  if (data.url && !safeUrl(data.url))
-    throw Error("Resource URL must use HTTP(S).");
-  if (data.sourceUrl && !safeUrl(data.sourceUrl))
-    throw Error("Source URL must use HTTP(S).");
-  if (type === "chart") {
-    const p = data.points;
-    if (
-      !Array.isArray(p) ||
-      p.length > 100 ||
-      p.some(
-        (v: any) =>
-          !v ||
-          typeof v.label !== "string" ||
-          v.label.length > 100 ||
-          !Number.isFinite(v.value),
-      )
-    )
-      throw Error("Chart needs up to 100 finite labeled values.");
-  }
-  if (type === "table") {
-    if (
-      !Array.isArray(data.columns) ||
-      data.columns.length > 20 ||
-      data.columns.some((v) => typeof v !== "string") ||
-      !Array.isArray(data.rows) ||
-      data.rows.length > 200 ||
-      data.rows.some(
-        (row) =>
-          !Array.isArray(row) ||
-          row.length !== (data.columns as unknown[]).length ||
-          row.some(
-            (v) =>
-              !["string", "number", "boolean"].includes(typeof v) && v !== null,
-          ),
-      )
-    )
-      throw Error("Table dimensions or values are invalid.");
-  }
-  if (
-    type === "task" &&
-    (!Array.isArray(data.items) ||
-      data.items.length > 100 ||
-      data.items.some(
-        (v: any) => typeof v?.text !== "string" || typeof v.done !== "boolean",
-      ))
-  )
-    throw Error("Checklist values are invalid.");
-  if (
-    type === "events" &&
-    (!Array.isArray(data.events) || data.events.length > 100)
-  )
-    throw Error("At most 100 current events.");
-}
+/** 意图分组键：同一 intentId 的连续变更合为一个撤销单位。 */
+const intentId = z.string().min(1).max(200).optional();
+const operation = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("select"),
+    ids: z.array(id).max(2200),
+    keepGuide: z.boolean().optional(),
+  }),
+  z.object({
+    kind: z.literal("camera"),
+    camera: z.object({
+      x: z.number().min(-100000).max(100000),
+      y: z.number().min(-100000).max(100000),
+      zoom: z.number().min(0.05).max(3),
+    }),
+  }),
+  z.object({ kind: z.literal("navigate"), spaceId: id }),
+  z.object({
+    kind: z.literal("create"),
+    type: z.string().min(1).max(80),
+    title: z.string().min(1).max(120),
+    data: z.record(z.string(), z.unknown()).optional(),
+    objectId: id.optional(),
+    icon: z.string().max(80).optional(),
+    rect: rect.optional(),
+    /** 意图分组键：同一 intentId 的连续编辑合为一个撤销单位。 */
+    intentId: z.string().min(1).max(200).optional(),
+  }),
+  z.object({
+    kind: z.literal("update"),
+    instanceId: id,
+    appearance: z
+      .object({
+        detail: z.enum(["full", "label", "icon"]).optional(),
+      })
+      .optional(),
+    title: z.string().min(1).max(120).optional(),
+    data: z.record(z.string(), z.unknown()).optional(),
+    /** 期望的对象版本；不匹配时拒绝写入，不静默覆盖。 */
+    expectedVersion: z.number().int().positive().optional(),
+    intentId: z.string().min(1).max(200).optional(),
+    /**
+     * 客户端编辑时看到的基线数据。带上它，服务端才能只应用真正改动的字段，
+     * 并对「同一字段被别人改过」报冲突（集成契约 D5）。
+     */
+    baseData: z.record(z.string(), z.unknown()).optional(),
+  }),
+  z.object({
+    kind: z.literal("place"),
+    items: z.array(z.object({ id, rect })).min(1).max(500),
+    intentId,
+  }),
+  z.object({ kind: z.literal("duplicate"), instanceId: id, intentId }),
+  z.object({ kind: z.literal("move"), instanceId: id, spaceId: id, intentId }),
+  z.object({ kind: z.literal("remove"), instanceId: id, intentId }),
+  z.object({
+    kind: z.literal("link"),
+    source: id,
+    target: id,
+    relation: z.enum([
+      "related",
+      "depends-on",
+      "supports",
+      "compares",
+      "belongs-to",
+    ]),
+    description: z.string().max(1000),
+    intentId,
+  }),
+  z.object({ kind: z.literal("unlink"), linkId: id, intentId }),
+  z.object({
+    kind: z.literal("group"),
+    ids: z.array(id).min(2).max(500),
+    title: z.string().min(1).max(80),
+    intentId,
+  }),
+  z.object({ kind: z.literal("theme"), theme: theme.nullable(), intentId }),
+  z.object({
+    kind: z.literal("present"),
+    objectId: id,
+    type: z.string().min(1).max(80).optional(),
+    /** 放到哪块白板；不填表示当前白板。 */
+    spaceId: id.optional(),
+    intentId: z.string().min(1).max(200).optional(),
+  }),
+  z.object({
+    kind: z.literal("copyObject"),
+    instanceId: id,
+    intentId: z.string().min(1).max(200).optional(),
+  }),
+  z.object({
+    kind: z.literal("deleteObject"),
+    objectId: id,
+    onReferenced: z.enum(["refuse", "detach"]).optional(),
+    intentId: z.string().min(1).max(200).optional(),
+  }),
+  z.object({
+    kind: z.literal("relate"),
+    source: id,
+    target: id,
+    relation: z.string().min(1).max(60),
+    status: z.enum(["confirmed", "inferred"]).optional(),
+    basis: z.string().max(1000).optional(),
+    intentId: z.string().min(1).max(200).optional(),
+  }),
+  z.object({
+    kind: z.literal("unlinkRelation"),
+    relationId: id,
+    intentId: z.string().min(1).max(200).optional(),
+  }),
+
+  z.object({ kind: z.literal("undo") }),
+  z.object({ kind: z.literal("redo") }),
+]);
+
+/** 一次白板操作。op 的形状由 zod 校验，这里用同一份推导，避免 op 退化成 any。 */
+export type Operation = z.infer<typeof operation>;
+
 export class Spaces {
   store: BoardStore;
   constructor(store: BoardStore) {
@@ -107,17 +171,108 @@ export class Spaces {
     boardId: string,
     revision: number,
     viewId: string,
-    op: any,
+    op: Operation,
     author = "human",
   ) {
     const b = this.store.get(boardId);
     if (b.revision !== revision)
       throw Error("Board changed. Read current board and retry.");
+    if (op.kind === "undo" || op.kind === "redo")
+      return op.kind === "undo"
+        ? this.store.undo(boardId, author).board
+        : this.store.redo(boardId, author).board;
     const v = openView(b, viewId);
     const item = (instanceId: string) => {
       const c = b.instances.find((c) => c.id === instanceId);
       if (!c) throw Error("Unknown component instance.");
       return c;
+    };
+    /* The label is read after the write, so "修改「X」" names the title the
+       component has *now*. A removal takes the title with it, so that one is
+       captured before. */
+    const historyLabel = (removedTitle?: string): string | undefined => {
+      switch (op.kind) {
+        case "create":
+          return `新建「${op.title}」`;
+        case "update":
+          return `修改「${item(op.instanceId).title}」`;
+        case "place":
+          return `移动 ${op.items.length} 个组件`;
+        case "duplicate":
+          return `复制「${item(op.instanceId).title}」`;
+        case "move":
+          return `移动「${item(op.instanceId).title}」`;
+        case "remove":
+          return `删除「${removedTitle}」`;
+        case "link":
+          return "建立关系";
+        case "unlink":
+          return "删除关系";
+        case "group":
+          return `分组「${op.title}」`;
+        case "theme":
+          return "切换外观";
+        default:
+          return undefined;
+      }
+    };
+    const removedTitle =
+      op.kind === "remove" ? item(op.instanceId).title : undefined;
+    /* 一次操作里的多处变更合为一个撤销单位：同一次拖动改了三个卡片，
+       撤销时应当一起回去，而不是分三步。 */
+    const intentKey =
+      "intentId" in op && typeof op.intentId === "string"
+        ? op.intentId
+        : randomUUID();
+    /** 记录展示实例的变化：只记录真正变了的（值为 null 表示该侧不存在）。 */
+    const recordInstances = (
+      ids: string[],
+      before: Map<string, ComponentInstance | null>,
+      kind: string,
+      label: string,
+    ) => {
+      const changes = ids
+        .map((id) => {
+          const was = before.get(id) ?? null;
+          const now = b.instances.find((i) => i.id === id) ?? null;
+          if (was && now && JSON.stringify(was) === JSON.stringify(now))
+            return null;
+          return { id, before: was, after: now };
+        })
+        .filter((c): c is { id: string; before: ComponentInstance | null; after: ComponentInstance | null } => c !== null);
+      if (changes.length)
+        this.store.recordPresentations(b, changes, author, intentKey, kind, label);
+    };
+    /** 记录板级内容的变化（嵌套白板、关系、分组、布局锚点、主题、组件包）。 */
+    const recordBoard = (
+      key: BoardStateKey,
+      before: unknown,
+      kind: string,
+      label: string,
+    ) => {
+      const after = (b as unknown as Record<string, unknown>)[key];
+      if (JSON.stringify(before) === JSON.stringify(after)) return;
+      this.store.recordBoardState(
+        b,
+        key,
+        before,
+        after,
+        author,
+        intentKey,
+        kind,
+        label,
+      );
+    };
+    /** 外观只改显示档位：类型图标在创建时定下，之后不能改（#5 的决定）。 */
+    const applyAppearance = (c: ComponentInstance) => {
+      if (!("appearance" in op) || !op.appearance) return;
+      const next = { ...c.appearance };
+      if (op.appearance.detail) next.detail = op.appearance.detail;
+      c.appearance = next;
+    };
+    const snapshotOf = (id: string) => {
+      const c = b.instances.find((i) => i.id === id);
+      return c ? structuredClone(c) : null;
     };
     const validSpace = (spaceId: string) => {
       if (!b.spaces.some((s) => s.id === spaceId))
@@ -177,7 +332,7 @@ export class Spaces {
       if (b.instances.length + 1 + definitions.length > 2200)
         throw Error("Component limit reached.");
       let data = op.data ?? defaultData(type);
-      checkData(type, data);
+      checkComponentData(type, data);
       if (op.objectId && !b.objects.some((o) => o.id === op.objectId))
         throw Error("Unknown object.");
       if (type === "board") {
@@ -223,7 +378,7 @@ export class Spaces {
           b,
           { type, title: op.title, data },
           author,
-          op.intentId,
+          intentKey,
         );
         binding = { kind: "object", objectId: object.id };
         data = {};
@@ -245,7 +400,7 @@ export class Spaces {
             },
           },
           author,
-          op.intentId,
+          intentKey,
         );
         binding = { kind: "object", objectId: object.id };
         data = {};
@@ -256,6 +411,9 @@ export class Spaces {
         type,
         objectId: binding?.objectId || op.objectId,
         ...(binding ? { binding } : {}),
+        ...(op.icon && !componentTypes.some((c) => c.type === type)
+          ? { appearance: { icon: op.icon } }
+          : {}),
         title: op.title,
         data: structuredClone(data),
         rect: op.rect || {
@@ -269,6 +427,7 @@ export class Spaces {
         author,
       });
       const created = b.instances[b.instances.length - 1];
+      const createdIds = [created.id];
       v.selection = [created.id];
       b.selection = binding
         ? [binding.objectId]
@@ -284,7 +443,7 @@ export class Spaces {
                 b,
                 { type, title, data: defaultData(type) },
                 "preset",
-                op.intentId,
+                intentKey,
               )
             : undefined;
         b.instances.push({
@@ -306,7 +465,14 @@ export class Spaces {
           author: "preset",
           updatedAt: Date.now(),
         });
+        createdIds.push(b.instances[b.instances.length - 1].id);
       });
+      recordInstances(
+        createdIds,
+        new Map(createdIds.map((id) => [id, null])),
+        "create-presentation",
+        `新建「${op.title}」`,
+      );
     }
     if (op.kind === "update") {
       const c = item(op.instanceId);
@@ -324,7 +490,7 @@ export class Spaces {
             throw Error(
               "Use reference/whiteboard actions to change the target.",
             );
-          checkData(c.type, op.data);
+          checkComponentData(c.type, op.data);
         }
         // 标题与内容属于对象；外观属于这一次展示。
         // 两者要分开落地：外观被内容分支吞掉的话，绑定了对象的卡片就没法改显示方式。
@@ -338,10 +504,10 @@ export class Spaces {
             },
             op.expectedVersion ?? object.version,
             author,
-            op.intentId,
+            intentKey,
           );
         }
-        if (op.appearance) c.appearance = { ...c.appearance, ...op.appearance };
+        applyAppearance(c);
         c.updatedAt = Date.now();
         c.author = author;
       } else {
@@ -357,16 +523,19 @@ export class Spaces {
             throw Error(
               "Use reference/whiteboard actions to change the target.",
             );
-          checkData(c.type, op.data);
+          checkComponentData(c.type, op.data);
           if (c.type === "space-link") validSpace(String(op.data.spaceId));
           c.data = structuredClone(op.data);
         }
-        if (op.appearance) c.appearance = { ...c.appearance, ...op.appearance };
+        applyAppearance(c);
         c.updatedAt = Date.now();
         c.author = author;
       }
     }
     if (op.kind === "place") {
+      const placeBefore = new Map<string, ComponentInstance | null>();
+      for (const change of op.items) placeBefore.set(change.id, snapshotOf(change.id));
+      const placementsBefore = structuredClone(b.placements);
       for (const change of op.items) {
         const c = item(change.id),
           r = change.rect;
@@ -384,6 +553,16 @@ export class Spaces {
             pinned: c.rect.pinned,
           };
       }
+      // op 是参数：类型收窄不会带进回调里，先取成 const 再用。
+      const placeItems = op.items;
+      const placeIds = placeItems.map((change) => change.id);
+      recordInstances(
+        placeIds,
+        placeBefore,
+        "move",
+        `移动 ${op.items.length} 个组件`,
+      );
+      recordBoard("placements", placementsBefore, "move", "移动布局锚点");
     }
     if (op.kind === "duplicate") {
       const c = item(op.instanceId);
@@ -400,9 +579,17 @@ export class Spaces {
       copy.updatedAt = Date.now();
       copy.author = author;
       b.instances.push(copy);
+      recordInstances(
+        [copy.id],
+        new Map([[copy.id, null]]),
+        "duplicate",
+        `复制「${c.title}」`,
+      );
     }
     if (op.kind === "move") {
       const c = item(op.instanceId);
+      const moveBefore = snapshotOf(c.id);
+      const spacesBefore = structuredClone(b.spaces);
       validSpace(op.spaceId);
       if (c.rect.pinned)
         throw Error("Unpin before moving to another whiteboard.");
@@ -416,9 +603,19 @@ export class Spaces {
       c.spaceId = op.spaceId;
       c.rect = { ...c.rect, x: 24, y: 24 };
       v.selection = v.selection.filter((id) => id !== c.id);
+      recordInstances(
+        [c.id],
+        new Map([[c.id, moveBefore]]),
+        "move",
+        `移动「${c.title}」`,
+      );
+      recordBoard("spaces", spacesBefore, "move", "调整白板层级");
     }
     if (op.kind === "remove") {
       const c = item(op.instanceId);
+      const removeBefore = snapshotOf(c.id);
+      const spacesBefore = structuredClone(b.spaces);
+      const linksBefore = structuredClone(b.spaceLinks);
       if (
         c.type === "board" &&
         b.instances.some((i) => i.spaceId === c.data.spaceId)
@@ -441,8 +638,17 @@ export class Spaces {
             view.selection = [];
           } /* existing navigation references remain visibly unresolved */
       }
+      recordInstances(
+        [c.id],
+        new Map([[c.id, removeBefore]]),
+        "delete-presentation",
+        `删除「${removedTitle ?? c.title}」`,
+      );
+      recordBoard("spaces", spacesBefore, "delete-presentation", "删除白板");
+      recordBoard("spaceLinks", linksBefore, "delete-presentation", "删除关系");
     }
     if (op.kind === "link") {
+      const linksBefore = structuredClone(b.spaceLinks);
       const source = item(op.source),
         target = item(op.target);
       if (source.spaceId !== target.spaceId)
@@ -456,10 +662,15 @@ export class Spaces {
         description: op.description,
         author,
       });
+      recordBoard("spaceLinks", linksBefore, "create-relation", "建立关系");
     }
-    if (op.kind === "unlink")
+    if (op.kind === "unlink") {
+      const linksBefore = structuredClone(b.spaceLinks);
       b.spaceLinks = b.spaceLinks.filter((l) => l.id !== op.linkId);
+      recordBoard("spaceLinks", linksBefore, "delete-relation", "删除关系");
+    }
     if (op.kind === "group") {
+      const groupsBefore = structuredClone(b.groups);
       const ids: string[] = [...new Set<string>(op.ids)];
       if (ids.length < 2) throw Error("Select two or more components.");
       if (ids.some((id) => item(id).spaceId !== v.spaceId))
@@ -476,8 +687,13 @@ export class Spaces {
           ),
         ],
       });
+      recordBoard("groups", groupsBefore, "group", `分组「${op.title}」`);
     }
-    if (op.kind === "theme") b.theme = op.theme;
+    if (op.kind === "theme") {
+      const themeBefore = structuredClone(b.theme);
+      b.theme = op.theme;
+      recordBoard("theme", themeBefore, "theme", "切换外观");
+    }
     if (op.kind === "present") {
       // 再放一份展示：同一个对象在指定（或当前）白板新增一个展示实例。
       // 内容共享、布局独立；这与「复制出独立对象」是两件事。
@@ -509,6 +725,12 @@ export class Spaces {
       };
       b.instances.push(instance);
       v.selection = [instance.id];
+      recordInstances(
+        [instance.id],
+        new Map([[instance.id, null]]),
+        "create-presentation",
+        `再放一份「${object.title}」`,
+      );
     }
     if (op.kind === "copyObject") {
       // 复制出独立对象：内容深拷贝、新 ID，与「再放一份展示」不同。
@@ -517,7 +739,7 @@ export class Spaces {
         c.binding?.kind === "object" ? c.binding.objectId : undefined;
       if (!bound) throw Error("This component has no independent content.");
       if (b.instances.length >= 2200) throw Error("Component limit reached.");
-      const clone = this.store.cloneContent(b, bound, author, op.intentId);
+      const clone = this.store.cloneContent(b, bound, author, intentKey);
       const config = componentTypes.find((t) => t.type === c.type);
       const index = b.instances.filter((x) => x.spaceId === v.spaceId).length;
       const instance = {
@@ -540,6 +762,12 @@ export class Spaces {
       };
       b.instances.push(instance);
       v.selection = [instance.id];
+      recordInstances(
+        [instance.id],
+        new Map([[instance.id, null]]),
+        "create-presentation",
+        `复制出独立对象「${clone.title}」`,
+      );
     }
     if (op.kind === "deleteObject") {
       // 删除对象与移除展示是两回事。仍被引用时默认拒绝。
@@ -548,7 +776,7 @@ export class Spaces {
         op.objectId,
         op.onReferenced || "refuse",
         author,
-        op.intentId,
+        intentKey,
       );
     }
     if (op.kind === "relate") {
@@ -570,141 +798,54 @@ export class Spaces {
           ...(op.basis ? { basis: op.basis } : {}),
         },
         author,
-        op.intentId,
+        intentKey,
       );
     }
     if (op.kind === "unlinkRelation")
-      this.store.unlinkContent(b, op.relationId, author, op.intentId);
-    if (op.kind === "undo") return this.store.undo(boardId, author).board;
-    if (op.kind === "redo") return this.store.redo(boardId, author).board;
+      this.store.unlinkContent(b, op.relationId, author, intentKey);
+
     b.focusedViewId = viewId;
     v.updatedAt = Date.now();
     b.revision++;
     return this.store.read(boardId);
   }
+  /** Board-level undo. It pushes a new reversible record instead of
+   * popping a stack, so an undo can itself be undone. */
+  undo(
+    boardId: string,
+    revision: number | undefined,
+    author = "human",
+  ) {
+    const b = this.store.get(boardId);
+    if (revision !== undefined && b.revision !== revision)
+      throw Error("Board changed. Read current board and retry.");
+    return this.store.undo(boardId, author).board;
+  }
+  redo(
+    boardId: string,
+    revision: number | undefined,
+    author = "human",
+  ) {
+    const b = this.store.get(boardId);
+    if (revision !== undefined && b.revision !== revision)
+      throw Error("Board changed. Read current board and retry.");
+    return this.store.redo(boardId, author).board;
+  }
+  history(boardId: string) {
+    return this.store.history(boardId);
+  }
+  undoTo(
+    boardId: string,
+    revision: number | undefined,
+    recordId: string,
+    author = "human",
+  ) {
+    const b = this.store.get(boardId);
+    if (revision !== undefined && b.revision !== revision)
+      throw Error("Board changed. Read current board and retry.");
+    return this.store.jumpTo(boardId, recordId, author).board;
+  }
 }
-const operation = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("select"),
-    ids: z.array(id).max(2200),
-    keepGuide: z.boolean().optional(),
-  }),
-  z.object({
-    kind: z.literal("camera"),
-    camera: z.object({
-      x: z.number().min(-100000).max(100000),
-      y: z.number().min(-100000).max(100000),
-      zoom: z.number().min(0.05).max(3),
-    }),
-  }),
-  z.object({ kind: z.literal("navigate"), spaceId: id }),
-  z.object({
-    kind: z.literal("create"),
-    type: z.string().min(1).max(80),
-    title: z.string().min(1).max(120),
-    data: z.record(z.string(), z.unknown()).optional(),
-    objectId: id.optional(),
-    rect: rect.optional(),
-    /** 意图分组键：同一 intentId 的连续编辑合为一个撤销单位。 */
-    intentId: z.string().min(1).max(200).optional(),
-  }),
-  z.object({
-    kind: z.literal("update"),
-    instanceId: id,
-    appearance: z
-      .object({
-        icon: z
-          .enum([
-            "text",
-            "board",
-            "code",
-            "resource",
-            "chart",
-            "table",
-            "task",
-            "reasoning",
-            "comparison",
-            "events",
-            "metric",
-            "status",
-            "ai",
-            "intent",
-            "proposal",
-            "validation",
-          ])
-          .optional(),
-        detail: z.enum(["full", "label", "icon"]).optional(),
-      })
-      .optional(),
-    title: z.string().min(1).max(120).optional(),
-    data: z.record(z.string(), z.unknown()).optional(),
-    /** 期望的对象版本；不匹配时拒绝写入，不静默覆盖。 */
-    expectedVersion: z.number().int().positive().optional(),
-    intentId: z.string().min(1).max(200).optional(),
-  }),
-  z.object({
-    kind: z.literal("place"),
-    items: z.array(z.object({ id, rect })).min(1).max(500),
-  }),
-  z.object({ kind: z.literal("duplicate"), instanceId: id }),
-  z.object({ kind: z.literal("move"), instanceId: id, spaceId: id }),
-  z.object({ kind: z.literal("remove"), instanceId: id }),
-  z.object({
-    kind: z.literal("link"),
-    source: id,
-    target: id,
-    relation: z.enum([
-      "related",
-      "depends-on",
-      "supports",
-      "compares",
-      "belongs-to",
-    ]),
-    description: z.string().max(1000),
-  }),
-  z.object({ kind: z.literal("unlink"), linkId: id }),
-  z.object({
-    kind: z.literal("group"),
-    ids: z.array(id).min(2).max(500),
-    title: z.string().min(1).max(80),
-  }),
-  z.object({ kind: z.literal("theme"), theme: theme.nullable() }),
-  z.object({
-    kind: z.literal("present"),
-    objectId: id,
-    type: z.string().min(1).max(80).optional(),
-    /** 放到哪块白板；不填表示当前白板。 */
-    spaceId: id.optional(),
-    intentId: z.string().min(1).max(200).optional(),
-  }),
-  z.object({
-    kind: z.literal("copyObject"),
-    instanceId: id,
-    intentId: z.string().min(1).max(200).optional(),
-  }),
-  z.object({
-    kind: z.literal("deleteObject"),
-    objectId: id,
-    onReferenced: z.enum(["refuse", "detach"]).optional(),
-    intentId: z.string().min(1).max(200).optional(),
-  }),
-  z.object({
-    kind: z.literal("relate"),
-    source: id,
-    target: id,
-    relation: z.string().min(1).max(60),
-    status: z.enum(["confirmed", "inferred"]).optional(),
-    basis: z.string().max(1000).optional(),
-    intentId: z.string().min(1).max(200).optional(),
-  }),
-  z.object({
-    kind: z.literal("unlinkRelation"),
-    relationId: id,
-    intentId: z.string().min(1).max(200).optional(),
-  }),
-  z.object({ kind: z.literal("undo") }),
-  z.object({ kind: z.literal("redo") }),
-]);
 export function registerSpaceTools(tool: RegisterTool, spaces: Spaces) {
   tool(
     "sand_read_asset",
@@ -823,7 +964,7 @@ export function registerSpaceTools(tool: RegisterTool, spaces: Spaces) {
   );
   tool(
     "sand_edit_space",
-    "Arrange/configure components only when requested. Does not edit code, change source ownership or grant write permission; pinned components and containment cycles are checked.",
+    "Arrange/configure components only when requested. Does not edit code, change source ownership or grant write permission; pinned components and containment cycles are checked. The result names the instances it created or changed, so you can read them back with sand_find_objects (instances) or sand_read_spaces without guessing.",
     {
       ...board,
       revision: z.number().int(),
@@ -831,8 +972,83 @@ export function registerSpaceTools(tool: RegisterTool, spaces: Spaces) {
       author: z.string().max(100).default("agent"),
       operation,
     },
-    (a) =>
-      spaces.update(a.boardId, a.revision, a.viewId, a.operation, a.author),
+    (a) => {
+      const operation = a.operation;
+      const before = new Set(
+        spaces.store.get(a.boardId).instances.map((i) => i.id),
+      );
+      const result = spaces.update(
+        a.boardId,
+        a.revision,
+        a.viewId,
+        operation,
+        a.author,
+      );
+      const created = result.instances.filter((i) => !before.has(i.id));
+      const changed =
+        operation.kind === "update"
+          ? result.instances.find((i) => i.id === operation.instanceId)
+          : undefined;
+      return viewResult(
+        {
+          ...boardSummary(result),
+          createdInstances: created.map((i) => ({
+            id: i.id,
+            title: i.title,
+            type: i.type,
+            spaceId: i.spaceId,
+          })),
+          ...(changed
+            ? {
+                changedInstance: {
+                  id: changed.id,
+                  title: changed.title,
+                  type: changed.type,
+                  spaceId: changed.spaceId,
+                },
+              }
+            : {}),
+        },
+        result,
+      );
+    },
+  );
+  tool(
+    "sand_history",
+    "List the board's reversible content history. Undo pushes a new record instead of popping a stack, so undoing an undo brings the change back. Scope is board content only — intents, proposals and files are never reverted.",
+    { ...board },
+    (a) => spaces.history(a.boardId),
+  );
+  tool(
+    "sand_undo",
+    "Revert the newest board content change by pushing a new reversible record (not by popping a stack). Undo it again to bring the change back. Omit revision to act on the server's current board.",
+    {
+      ...board,
+      revision: z.number().int().optional(),
+      author: z.string().max(100).default("agent"),
+    },
+    (a) => spaces.undo(a.boardId, a.revision, a.author),
+  );
+  tool(
+    "sand_redo",
+    "Re-apply the change that the newest undo record reverted. Only available when the newest record is an undo or redo.",
+    {
+      ...board,
+      revision: z.number().int().optional(),
+      author: z.string().max(100).default("agent"),
+    },
+    (a) => spaces.redo(a.boardId, a.revision, a.author),
+  );
+  tool(
+    "sand_undo_to",
+    "Jump the board content back to a recorded step. The jump is itself a new reversible record.",
+    {
+      ...board,
+      revision: z.number().int().optional(),
+      recordId: id,
+      author: z.string().max(100).default("agent"),
+    },
+    (a) => spaces.undoTo(a.boardId, a.revision, a.recordId, a.author),
   );
   tool(
     "sand_attach_asset",

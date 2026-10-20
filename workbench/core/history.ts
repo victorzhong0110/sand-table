@@ -43,9 +43,13 @@ type HistoryStateMatchesShared = AssertTrue<
     : false
 >;
 
-/** 撤销单位内的一条实体快照。board 目标不能进 batch，故单列。 */
+/**
+ * 撤销单位内的一条实体快照。
+ * board 目标用于板级内容键（嵌套白板、分组、主题、组件包…），
+ * 见 docs/architecture/integration-2026-10.zh-CN.md 决策 D2。
+ */
 export type UnitSnapshot = {
-  target: "object" | "presentation" | "relation";
+  target: "object" | "presentation" | "relation" | "board";
   id: string;
   value: unknown;
 };
@@ -69,6 +73,32 @@ export type HistoryRefusal = {
   at: number;
 };
 
+/**
+ * 面板与接口用的历史记录：不含补丁负载，只给人和 UI 看。
+ * kind 区分「这是一次编辑」还是「这是一次撤销/重做」——
+ * 撤销本身也进审计日志，但它不占用撤销栈的位置。
+ */
+export type HistoryRecord = {
+  id: string;
+  label: string;
+  at: number;
+  author: string;
+  authorKind: "human" | "agent";
+  kind: "edit" | "undo" | "redo";
+  intentId: string;
+};
+
+/** 面板与 MCP 工具 `sand_history` 的返回形状。 */
+export type HistorySnapshot = {
+  boardId: string;
+  /** 新到旧。撤销栈在前，重做栈（已撤销、待重做）在后。 */
+  records: HistoryRecord[];
+  canUndo: boolean;
+  canRedo: boolean;
+  /** 这套历史能做什么、不能做什么。UI 直接展示，不要另写一份说明。 */
+  note: string;
+};
+
 const patchTargets: Patch["target"][] = [
   "object",
   "presentation",
@@ -81,6 +111,7 @@ const snapshotTargets: UnitSnapshot["target"][] = [
   "object",
   "presentation",
   "relation",
+  "board",
 ];
 
 /** 记录与拒绝列表的容量上限，避免长时间运行后无限增长。 */
@@ -470,6 +501,62 @@ export class History {
   /** 丢弃重做栈（新的编辑会调用）。 */
   clearRedo(): void {
     this.redoStack = [];
+  }
+
+  /**
+   * 跳到某条记录：板面回到「这条记录刚发生时的样子」。
+   *
+   * 双栈是有序的：撤销栈栈顶最新，重做栈栈顶最旧（重做时按时间正序弹出）。
+   * 跳转会同时动两个栈，因此插入位置必须按时间序算，不能随手 push——
+   * 否则重做时会把新的改动先应用出去，板面状态会串。
+   */
+  jumpTo(entryId: string): {
+    undone: HistoryEntry[];
+    redone: HistoryEntry[];
+  } | undefined {
+    const at = this.undoStack.findIndex((e) => e.id === entryId);
+    if (at >= 0) {
+      const undone: HistoryEntry[] = [];
+      const moved: HistoryEntry[] = [];
+      // 撤销栈栈顶是最新的：先撤掉它上面（更新）的，撤到目标为止，
+      // 但**不撤目标本身**——目标是「回到它刚发生的状态」。
+      while (this.undoStack.length - 1 > at) {
+        const entry = this.undoStack.pop();
+        if (!entry) break;
+        moved.push(entry);
+        undone.push(copyEntry(entry));
+      }
+      // 被撤掉的这些比重做栈里现有的都新，要放到重做栈**栈底**（栈底最新）。
+      // moved 是新→旧，unshift 的参数要旧→新，最后一个参数落在最底。
+      if (moved.length) this.redoStack.unshift(...moved.reverse());
+      this.mergeable = false;
+      return { undone, redone: [] };
+    }
+    const redoAt = this.redoStack.findIndex((e) => e.id === entryId);
+    if (redoAt >= 0) {
+      const undone: HistoryEntry[] = [];
+      const redone: HistoryEntry[] = [];
+      // 目标已经被撤销过：先把当前已应用的全部撤销，再重做到目标为止。
+      const moved: HistoryEntry[] = [];
+      while (this.undoStack.length) {
+        const entry = this.undoStack.pop();
+        if (!entry) break;
+        moved.push(entry);
+        undone.push(copyEntry(entry));
+      }
+      if (moved.length) this.redoStack.unshift(...moved.reverse());
+      // 重做栈栈顶是最旧的：依次弹出直到目标为止（含目标）。
+      while (this.redoStack.length) {
+        const entry = this.redoStack.pop();
+        if (!entry) break;
+        this.undoStack.push(entry);
+        redone.push(copyEntry(entry));
+        if (entry.id === entryId) break;
+      }
+      this.mergeable = false;
+      return { undone, redone };
+    }
+    return undefined;
   }
 
   private refuse(entry: HistoryEntry, reason: string): void {

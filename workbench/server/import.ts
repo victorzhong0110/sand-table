@@ -3,7 +3,8 @@ import { basename } from "node:path";
 import { z } from "zod";
 import type { BoardStore } from "../core/store.ts";
 import { bind, scan, type Binding } from "./repository.ts";
-import { Spaces } from "./spaces.ts";
+import { Spaces, type Operation,
+} from "./spaces.ts";
 import { openView } from "../core/space-state.ts";
 import type { RegisterTool } from "./tool-types.ts";
 export function registerRepositoryImport(
@@ -91,7 +92,7 @@ export function registerRepositoryImport(
       store.refresh(b.id, projection);
       const spaces = new Spaces(store),
         view = openView(b, a.viewId);
-      const op = (operation: unknown) =>
+      const op = (operation: Operation) =>
         spaces.update(b.id, b.revision, a.viewId, operation, "human-import");
       op({
         kind: "create",

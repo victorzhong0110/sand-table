@@ -136,9 +136,29 @@ export type Patch = {
   after: unknown;
 };
 
+/**
+ * 板级内容键。
+ *
+ * 这些字段在旧模型里随整块白板内容一起被撤销；新模型只覆盖
+ * object / presentation / relation 三类实体，若不显式补上，
+ * 嵌套白板、分组、主题、组件包的导入/移除会静默失去撤销能力。
+ * 详见 docs/architecture/integration-2026-10.zh-CN.md 决策 D2。
+ */
+export type BoardStateKey =
+  | "spaces"
+  | "spaceLinks"
+  | "groups"
+  | "placements"
+  | "componentPacks"
+  | "theme";
+
 /** 批量补丁里的单个实体快照。value 为 null 表示该实体在此刻不存在。 */
 export type EntitySnapshot = {
-  target: "object" | "presentation" | "relation";
+  /**
+   * board 时 id 为 BoardStateKey、value 为该键的完整值（null 表示删除该键）；
+   * 其余目标下 id 为实体 id、value 为该实体的完整快照。
+   */
+  target: "object" | "presentation" | "relation" | "board";
   id: string;
   value: unknown;
 };
@@ -215,6 +235,8 @@ export type PersistedBoard = {
   groups: unknown[];
   spaceLinks: unknown[];
   assets: unknown[];
+  /** 导入的组件包：白板级内容，导入/移除都可撤销，重启后仍在。 */
+  componentPacks?: unknown[];
   activities: unknown[];
   spaceActivities?: unknown[];
   guides: unknown[];

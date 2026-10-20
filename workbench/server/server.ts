@@ -13,6 +13,7 @@ import {
 import { z } from "zod";
 import { Spaces, registerSpaceTools } from "./spaces.ts";
 import { Changes, registerChangeTools } from "./changes.ts";
+import { registerPackTools } from "./packs.ts";
 import { boardSummary } from "../core/results.ts";
 import { BoardStore } from "../core/store.ts";
 import { WorkspaceStore } from "../core/workspace.ts";
@@ -91,7 +92,7 @@ export function createServer(
       async (args) => {
         try {
           if (forward) return await forward.tool(name, args);
-          const data = fn(args);
+          const data = await fn(args);
           const isBoard = Boolean(
             data &&
             typeof data === "object" &&
@@ -198,12 +199,13 @@ export function createServer(
   );
   tool(
     "sand_find_objects",
-    "Search a bounded page of indexed objects and source references without loading the entire map. Use query for names/paths or objectIds for known relation endpoints. Includes current revision for guide publishing.",
+    "Search a bounded page of indexed objects, source references and whiteboard components without loading the entire map. Use query for names/paths/titles or objectIds for known relation endpoints. Components you created are returned under instances; repository sources under objects. Includes current revision for guide publishing.",
     {
       ...board,
       query: z.string().max(300).default(""),
       objectIds: z.array(id).max(30).optional(),
       kind: z.enum(["workspace", "file", "symbol"]).optional(),
+      instanceType: z.string().max(60).optional(),
       workspaceId: id.optional(),
       offset: z.number().int().nonnegative().default(0),
       limit: z.number().int().min(1).max(30).default(20),
@@ -220,13 +222,29 @@ export function createServer(
           (!a.workspaceId || o.workspaceId === a.workspaceId) &&
           `${o.title} ${o.source?.path || ""}`.toLowerCase().includes(q),
       );
+      const instances = b.instances.filter(
+        (i) =>
+          (!a.instanceType || i.type === a.instanceType) &&
+          `${i.title} ${i.type}`.toLowerCase().includes(q),
+      );
       return {
         boardId: b.id,
         revision: b.revision,
         total: matches.length,
         objects: matches.slice(a.offset, a.offset + a.limit),
+        instanceTotal: instances.length,
+        instances: instances
+          .slice(a.offset, a.offset + a.limit)
+          .map((i) => ({
+            id: i.id,
+            spaceId: i.spaceId,
+            type: i.type,
+            title: i.title,
+          })),
         nextOffset:
           a.offset + a.limit < matches.length ? a.offset + a.limit : null,
+        instanceNextOffset:
+          a.offset + a.limit < instances.length ? a.offset + a.limit : null,
       };
     },
   );
@@ -333,6 +351,21 @@ export function createServer(
         label: r.entry?.label,
         board: r.board,
       };
+    },
+  );
+  tool(
+    "sand_history",
+    "The board's reversible history: what can be undone, what can be redone, and one readable record per step. Records are grouped by intent; external effects (published changes, executed tasks) are never on it.",
+    board,
+    (a) => store.history(a.boardId),
+  );
+  tool(
+    "sand_undo_to",
+    "Jump the board to a recorded history step: the board returns to the content that step produced. Pass a recordId from sand_history.",
+    { ...board, recordId: z.string().min(1).max(200) },
+    (a) => {
+      const r = store.jumpTo(a.boardId, a.recordId, "agent", "agent");
+      return { boardId: a.boardId, recordId: a.recordId, board: r.board };
     },
   );
   tool(
@@ -549,6 +582,7 @@ export function createServer(
   registerRepositoryImport(tool, store, bindings);
   registerChangeTools(tool, changes);
   registerSpaceTools(tool, new Spaces(store));
+  registerPackTools(tool, store);
   registerAppResource(server, "Sand Table overview", uri, {}, async () =>
     forward
       ? forward.resource()

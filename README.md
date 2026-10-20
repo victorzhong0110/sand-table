@@ -14,7 +14,7 @@ cd sand-table
 npm start
 ~~~
 
-首次启动安装本项目的固定版本依赖并构建界面，然后打开浏览器。只索引目标仓库，不自动安装或运行目标项目。保持终端运行；没有自动打开时，使用终端打印的完整链接。
+首次启动安装本项目的固定版本依赖并构建界面。**默认不自动打开浏览器**（避免打断你正在做的事）——用终端打印的完整链接打开即可，想让它自动打开就加 `--open`。只索引目标仓库，不自动安装或运行目标项目。保持终端运行。
 
 1. 打开后是一张空白板子。左侧“组件”按基础、数据、思考、开发分组；拖入画布或点击添加。
 2. 选中组件后才出现属性面板。编辑内容、拖动、调大小、固定、复制、分组或添加关系；双击白板进入它。
@@ -56,12 +56,17 @@ npm start
 ~~~bash
 # 可选：提前连接仓库；画布仍然为空，之后从工具箱选择加入
 npm start -- --workspace frontend=/absolute/frontend --workspace backend=/absolute/backend
+<<<<<<< HEAD
 npm start -- /absolute/repository --no-open
 # 可选：指定工作空间位置与 ID
 npm start -- --workspace-dir /absolute/workspace-dir --workspace-id my-book
+=======
+npm start -- /absolute/repository          # 默认不自动打开浏览器
+npm start -- /absolute/repository --open   # 启动后自动打开浏览器
+>>>>>>> origin/feat/issue-clearance-and-packs
 ~~~
 
-仅监听 127.0.0.1。启动链接含本机会话凭据，打开后从地址栏移除；请勿分享完整链接。
+仅监听 127.0.0.1。启动链接含本机会话凭据，打开后从地址栏移除；请勿分享完整链接。会话文件里 `url` 是不含凭据的地址，`link` 是可直接粘贴的完整链接——程序拼链接请用 `link`。
 
 ## 验证与当前边界
 

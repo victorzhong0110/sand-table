@@ -17,7 +17,12 @@ import {
 } from "./content.ts";
 import { History, appendAudit } from "./history.ts";
 import type {
+  HistoryRecord,
+  HistorySnapshot,
+} from "./history.ts";
+import type {
   AuditEntry,
+  BoardStateKey,
   HistoryEntry,
   ObjectRelation,
   Patch,
@@ -201,6 +206,8 @@ export class BoardStore {
       focusedViewId: persisted.focusedViewId,
       spaceLinks: (persisted.spaceLinks || []) as Board["spaceLinks"],
       assets: (persisted.assets || []) as Board["assets"],
+      componentPacks: (persisted.componentPacks ||
+        []) as Board["componentPacks"],
       theme: (persisted.theme || null) as Board["theme"],
       intents: (persisted.intents || []) as Board["intents"],
       proposals: (persisted.proposals || []) as Board["proposals"],
@@ -676,11 +683,22 @@ export class BoardStore {
   private applySnapshot(
     b: Board,
     snapshot: {
-      target: "object" | "presentation" | "relation";
+      target: "object" | "presentation" | "relation" | "board";
       id: string;
       value: unknown;
     },
   ) {
+    if (snapshot.target === "board") {
+      // 板级内容按键记录：撤销一次组件包导入不会连带回滚并发发生的主题修改。
+      const key = snapshot.id as BoardStateKey;
+      const value = snapshot.value;
+      if (value === null) delete (b as unknown as Record<string, unknown>)[key];
+      else
+        (b as unknown as Record<string, unknown>)[key] = structuredClone(
+          value,
+        );
+      return;
+    }
     if (snapshot.target === "object") {
       if (snapshot.value === null)
         b.contentObjects = b.contentObjects.filter((o) => o.id !== snapshot.id);
@@ -740,7 +758,7 @@ export class BoardStore {
       source?: WorkspaceObject["source"];
     },
     author: string,
-    intentId = randomUUID(),
+    intentId: string = randomUUID(),
     authorKind: "human" | "agent" = "human",
   ) {
     const object = createWorkspaceObject({
@@ -792,7 +810,7 @@ export class BoardStore {
     },
     expectedVersion: number,
     author: string,
-    intentId = randomUUID(),
+    intentId: string = randomUUID(),
     authorKind: "human" | "agent" = "human",
   ) {
     const before = b.contentObjects.find((o) => o.id === objectId);
@@ -843,7 +861,7 @@ export class BoardStore {
     b: Board,
     objectId: string,
     author: string,
-    intentId = randomUUID(),
+    intentId: string = randomUUID(),
   ) {
     const clone = cloneWorkspaceObject(
       b.contentObjects,
@@ -885,7 +903,7 @@ export class BoardStore {
     objectId: string,
     onReferenced: "refuse" | "detach",
     author: string,
-    intentId = randomUUID(),
+    intentId: string = randomUUID(),
   ) {
     // 撤销快照要在删除**之前**取：删完再取就只剩「已不存在」，
     // 撤销时无法把对象、引用它的展示和关系放回去。
@@ -960,7 +978,7 @@ export class BoardStore {
       basis?: string;
     },
     author: string,
-    intentId = randomUUID(),
+    intentId: string = randomUUID(),
   ) {
     const created = relateObjects(b.objectRelations, {
       id: randomUUID(),
@@ -1003,7 +1021,7 @@ export class BoardStore {
     b: Board,
     relationId: string,
     author: string,
-    intentId = randomUUID(),
+    intentId: string = randomUUID(),
   ) {
     const before = b.objectRelations.find((r) => r.id === relationId);
     if (!before) throw Error(`未知关系：${relationId}`);
@@ -1078,6 +1096,146 @@ export class BoardStore {
     });
     this.touch();
     return { redone: true, entry, board: this.read(boardId) };
+  }
+
+  /**
+   * 记录板级内容的变化：嵌套白板、空间关系、分组、布局锚点、组件包、主题。
+   *
+   * 按**键**记录，不抓整块白板——撤销一次组件包导入不会连带回滚并发发生的主题修改。
+   * 与展示实例的变更可以落在同一次意图里（合并成 batch）。
+   */
+  recordBoardState(
+    b: Board,
+    key: BoardStateKey,
+    before: unknown,
+    after: unknown,
+    author: string,
+    intentId: string = randomUUID(),
+    kind = "edit-board",
+    label = "修改白板内容",
+    authorKind: "human" | "agent" = "human",
+  ) {
+    this.record(b, {
+      intentId,
+      kind,
+      label,
+      author,
+      authorKind,
+      patch: {
+        target: "batch",
+        id: key,
+        before: [{ target: "board", id: key, value: structuredClone(before) }],
+        after: [{ target: "board", id: key, value: structuredClone(after) }],
+      },
+    });
+    this.touch();
+  }
+
+  /**
+   * 记录一批展示实例的变化：拖动、复制、移除、切换折叠档位。
+   * before / after 为 null 表示该实例在这一侧不存在（新增或删除）。
+   */
+  recordPresentations(
+    b: Board,
+    changes: {
+      id: string;
+      before: (typeof b.instances)[number] | null;
+      after: (typeof b.instances)[number] | null;
+    }[],
+    author: string,
+    intentId: string = randomUUID(),
+    kind = "move",
+    label = "调整布局",
+    authorKind: "human" | "agent" = "human",
+  ) {
+    if (!changes.length) return;
+    this.record(b, {
+      intentId,
+      kind,
+      label,
+      author,
+      authorKind,
+      patch: {
+        target: "batch",
+        id: changes.map((c) => c.id).join(","),
+        before: changes.map((c) => ({
+          target: "presentation" as const,
+          id: c.id,
+          value: c.before ? structuredClone(c.before) : null,
+        })),
+        after: changes.map((c) => ({
+          target: "presentation" as const,
+          id: c.id,
+          value: c.after ? structuredClone(c.after) : null,
+        })),
+      },
+    });
+    this.touch();
+  }
+
+  /**
+   * 面板与 MCP 工具用的历史快照。
+   * 撤销栈在前（可再撤），重做栈在后（已撤销、待重做）。
+   */
+  history(id: string): HistorySnapshot {
+    const b = this.get(id);
+    const h = this.historyFor(b);
+    const toRecord = (
+      entry: HistoryEntry,
+      kind: HistoryRecord["kind"],
+    ): HistoryRecord => ({
+      id: entry.id,
+      label: entry.label,
+      at: entry.at,
+      author: entry.author,
+      authorKind: "human",
+      kind,
+      intentId: entry.intentId,
+    });
+    const undoStack = h.state.undo;
+    const redoStack = h.state.redo;
+    return {
+      boardId: b.id,
+      records: [
+        ...[...undoStack].reverse().map((e) => toRecord(e, "edit")),
+        ...[...redoStack].reverse().map((e) => toRecord(e, "redo")),
+      ],
+      canUndo: h.canUndo,
+      canRedo: h.canRedo,
+      note:
+        "撤销按你的意图分组：一次连续输入、一次拖动算一步。审计日志与撤销导航分开，外部效果（已发布的改动、已运行的任务）不在撤销栈里。",
+    };
+  }
+
+  /**
+   * 跳到某条历史记录：撤销它之后的全部编辑，或重做到它。
+   * 找不到该记录时抛错——不静默什么都不做。
+   */
+  jumpTo(
+    boardId: string,
+    recordId: string,
+    author: string,
+    authorKind: "human" | "agent" = "human",
+  ) {
+    const b = this.get(boardId);
+    const h = this.historyFor(b);
+    const moved = h.jumpTo(recordId);
+    if (!moved) throw new Error("未知的历史记录，无法跳转。");
+    b.history = h.state;
+    for (const entry of moved.undone) this.applyPatch(b, entry.patch, "before");
+    for (const entry of moved.redone) this.applyPatch(b, entry.patch, "after");
+    b.contentRevision++;
+    b.revision++;
+    for (const entry of [...moved.undone, ...moved.redone])
+      this.audit(b, {
+        action: `${moved.undone.includes(entry) ? "撤销" : "重做"}「${entry.label}」`,
+        author,
+        authorKind,
+        target: { kind: entry.patch.target, id: entry.patch.id },
+        via: moved.undone.includes(entry) ? "undo" : "redo",
+      });
+    this.touch();
+    return { board: this.read(boardId) };
   }
 
   /**
@@ -1236,6 +1394,7 @@ export class BoardStore {
       groups: structuredClone(b.groups),
       spaceLinks: structuredClone(b.spaceLinks),
       assets: structuredClone(b.assets),
+      componentPacks: structuredClone(b.componentPacks || []),
       activities: structuredClone(b.activities),
       spaceActivities: structuredClone(b.spaceActivities || []),
       guides: structuredClone(b.guides),

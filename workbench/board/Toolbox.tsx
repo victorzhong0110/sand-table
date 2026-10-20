@@ -1,7 +1,10 @@
 import { Icon } from "./Icon.tsx";
 import { useState } from "react";
-import type { Board } from "../core/model.ts";
+import type { Board, ComponentPack } from "../core/model.ts";
+import type { HistorySnapshot } from "../core/history.ts";
 import { componentTypes, defaultData } from "../core/spaces.ts";
+import { HistoryPanel } from "./HistoryPanel.tsx";
+import "./packs.css";
 const groups = [
   {
     id: "basic",
@@ -20,25 +23,6 @@ const groups = [
     types: ["intent", "proposal", "validation"],
   },
 ];
-const icons: Record<string, string> = {
-  text: "Aa",
-  heading: "H",
-  board: "▣",
-  resource: "◇",
-  code: "</>",
-  metric: "#",
-  status: "●",
-  chart: "▥",
-  table: "▦",
-  events: "≡",
-  task: "☑",
-  reasoning: "?",
-  comparison: "⇄",
-  intent: "↗",
-  proposal: "±",
-  validation: "✓",
-  object: "{ }",
-};
 export function Toolbox({
   board: b,
   viewId,
@@ -47,16 +31,42 @@ export function Toolbox({
   setMode,
   create,
   action,
+  call,
   showPanel,
   navigate,
+  activeSection = "tools",
+  focusInstance,
+  close,
+  history,
+  onUndo,
+  onRedo,
+  onJump,
 }: {
+  focusInstance?: (id: string) => void;
+  activeSection?: string;
+  close?: () => void;
+  /** The board's reversible history, shown in the "历史" tab. */
+  history?: HistorySnapshot;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  onJump?: (recordId: string) => void;
   board: Board;
   viewId: string;
   mode: string;
   busy: boolean;
   setMode: (m: string) => void;
-  create: (type: string, title: string, data?: any, objectId?: string) => void;
+  create: (
+    type: string,
+    title: string,
+    data?: any,
+    objectId?: string,
+    size?: { width: number; height: number },
+  ) => void;
   action: (name: string, args?: Record<string, unknown>) => Promise<any>;
+  /** Calls one tool and throws when the server refuses it, so a failed pack
+   * import can show the server's own message. Optional: without it the
+   * message still reaches the user through the app-level error bar. */
+  call?: (name: string, args?: Record<string, unknown>) => Promise<any>;
   showPanel: (panel: string) => void;
   navigate?: (spaceId: string) => void;
 }) {
@@ -64,12 +74,104 @@ export function Toolbox({
     [group, setGroup] = useState("basic"),
     [query, setQuery] = useState(""),
     [path, setPath] = useState(""),
-    [sourceQuery, setSourceQuery] = useState("");
+    [sourceQuery, setSourceQuery] = useState(""),
+    [packJson, setPackJson] = useState(""),
+    [packUrl, setPackUrl] = useState(""),
+    [packError, setPackError] = useState(""),
+    [packNotice, setPackNotice] = useState(""),
+    [packBusy, setPackBusy] = useState(false),
+    [exported, setExported] = useState<{ id: string; json: string }>();
   const palette = componentTypes.filter(
     (c) =>
       groups.find((g) => g.id === group)!.types.includes(c.type) &&
       c.title.includes(query),
   );
+  /* One group per imported pack, after the built-in groups. A pack preset is
+     only a preset: it fills in a component that already exists. */
+  const packGroups = (b.componentPacks ?? [])
+    .map((pack) => ({
+      pack,
+      items: pack.components.filter((c) => c.title.includes(query)),
+    }))
+    .filter((g) => !query || g.items.length > 0);
+  const packSource = (pack: ComponentPack) =>
+    pack.source === "json" ? "粘贴的 JSON" : pack.source.replace(/^url:/, "");
+  async function packTool(name: string, args: Record<string, unknown>) {
+    if (call) return await call(name, args);
+    const result = await action(name, args);
+    if (result === undefined)
+      throw Error("操作没有成功，服务端的错误说明见页面上方的提示。");
+    return result;
+  }
+  async function importPack(source: { json: string } | { url: string }) {
+    setPackError("");
+    setPackNotice("");
+    setPackBusy(true);
+    try {
+      const fresh = await action("sand_read_board");
+      const revision = (fresh as Board | undefined)?.revision ?? b.revision;
+      const result = await packTool("sand_import_component_pack", {
+        revision,
+        viewId,
+        author: "human",
+        source,
+      });
+      /* The server's warnings are part of the answer: a pack written for a
+         newer version can be imported, but the person has to be told what
+         was kept, dropped or shown as a placeholder. */
+      const warnings = (result?.warnings ?? []) as string[];
+      const pack = result?.pack;
+      setPackNotice(
+        warnings.length
+          ? `已导入「${pack?.name ?? "组件包"}」，有 ${warnings.length} 条提示：${warnings.join(" ")}`
+          : `已导入「${pack?.name ?? "组件包"}」，共 ${pack?.componentCount ?? 0} 个预设。`,
+      );
+      setPackJson("");
+      setPackUrl("");
+      /* Read the board again so the new group shows up right away. */
+      await action("sand_read_board");
+    } catch (e) {
+      setPackError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPackBusy(false);
+    }
+  }
+  async function removePack(pack: ComponentPack) {
+    setPackError("");
+    setPackBusy(true);
+    try {
+      const fresh = await action("sand_read_board");
+      const revision = (fresh as Board | undefined)?.revision ?? b.revision;
+      await packTool("sand_remove_component_pack", {
+        revision,
+        packId: pack.id,
+        author: "human",
+      });
+      if (exported?.id === pack.id) setExported(undefined);
+      await action("sand_read_board");
+    } catch (e) {
+      setPackError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPackBusy(false);
+    }
+  }
+  async function exportPack(pack: ComponentPack) {
+    setPackError("");
+    setPackBusy(true);
+    try {
+      const result = await packTool("sand_export_component_pack", {
+        packId: pack.id,
+      });
+      setExported({
+        id: pack.id,
+        json: JSON.stringify(result.manifest, null, 2),
+      });
+    } catch (e) {
+      setPackError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPackBusy(false);
+    }
+  }
   const sources = b.objects
     .filter(
       (o) =>
@@ -99,46 +201,35 @@ export function Toolbox({
   }
   return (
     <aside className="canvas-toolbox" aria-label="组件工具箱">
-      <div className="tool-modes" aria-label="操作工具">
-        {[
-          ["browse", "↖", "浏览"],
-          ["arrange", "✥", "编排"],
-          ["ai", "✦", "AI"],
-        ].map(([id, icon, label]) => (
-          <button
-            key={id}
-            title={label}
-            aria-pressed={mode === id}
-            onClick={() => {
-              setMode(id);
-              if (id === "ai") showPanel("ai");
-            }}
-          >
-            <span aria-hidden="true">
-              <Icon name={id} />
-            </span>
-            {label}
-          </button>
-        ))}
+      <div className="palette-heading">
+        <strong>{activeSection === "boards" ? "画板" : "工具"}</strong>
+        <button aria-label="收起面板" onClick={close}>
+          ×
+        </button>
       </div>
-      <div className="toolbox-nav" role="tablist" aria-label="素材">
-        {[
-          ["components", "组件"],
-          ["presets", "场景"],
-          ["sources", "仓库"],
-        ].map(([id, label]) => (
-          <button
-            role="tab"
-            key={id}
-            aria-selected={section === id}
-            onClick={() => setSection(id)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {activeSection !== "boards" && (
+        <>
+          <div className="toolbox-nav" role="tablist" aria-label="素材">
+            {[
+              ["components", "组件"],
+              ["presets", "场景"],
+              ["sources", "仓库"],
+              ["history", "历史"],
+            ].map(([id, label]) => (
+              <button
+                role="tab"
+                key={id}
+                aria-selected={section === id}
+                onClick={() => setSection(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
       <div className="toolbox-content">
-        {navigate && (
+        {activeSection === "boards" && navigate && (
           <details className="board-library" open>
             <summary>画板</summary>
             <div>
@@ -156,7 +247,23 @@ export function Toolbox({
             </div>
           </details>
         )}
-        {section === "components" ? (
+        {activeSection === "boards" && focusInstance && (
+          <div className="board-components">
+            {b.instances
+              .filter((c) => c.spaceId === b.views[viewId]?.spaceId)
+              .map((c) => (
+                <button
+                  key={c.id}
+                  aria-label={`定位 ${c.title}`}
+                  onClick={() => focusInstance(c.id)}
+                >
+                  <Icon name={c.type} size={16} />
+                  <span>{c.title}</span>
+                </button>
+              ))}
+          </div>
+        )}
+        {activeSection === "boards" ? null : section === "components" ? (
           <>
             <input
               aria-label="搜索组件"
@@ -187,20 +294,7 @@ export function Toolbox({
                   title={"拖入画布，或点击添加" + c.title}
                 >
                   <span className={"palette-icon " + group} aria-hidden="true">
-                    {[
-                      "text",
-                      "heading",
-                      "code",
-                      "metric",
-                      "reasoning",
-                      "intent",
-                      "proposal",
-                      "validation",
-                    ].includes(c.type) ? (
-                      icons[c.type]
-                    ) : (
-                      <Icon name={c.type} />
-                    )}
+                    <Icon name={c.type} />
                   </span>
                   <span>{c.title}</span>
                   <span className="palette-grip" aria-hidden="true">
@@ -209,16 +303,121 @@ export function Toolbox({
                 </button>
               ))}
             </div>
-            <p className="toolbox-hint">
-              拖进画布，或点击添加。
-              <br />
-              选中后修改内容；双击白板进入。
-            </p>
+            {packGroups.map(({ pack, items }) => (
+              <section className="pack-group" key={pack.id}>
+                <header className="pack-heading">
+                  <b className="pack-name">{pack.name}</b>
+                  <small className="pack-meta">
+                    {pack.author ? pack.author + " · " : ""}
+                    {packSource(pack)}
+                  </small>
+                  <div className="pack-actions">
+                    <button
+                      disabled={busy || packBusy}
+                      onClick={() => void exportPack(pack)}
+                    >
+                      导出
+                    </button>
+                    <button
+                      disabled={busy || packBusy}
+                      onClick={() => void removePack(pack)}
+                    >
+                      移除
+                    </button>
+                  </div>
+                </header>
+                <div className="palette-list">
+                  {items.map((c) => {
+                    const base = componentTypes.find((t) => t.type === c.type);
+                    const size =
+                      c.width === undefined && c.height === undefined
+                        ? undefined
+                        : {
+                            width: c.width ?? base?.width ?? 280,
+                            height: c.height ?? base?.height ?? 180,
+                          };
+                    return (
+                      <button
+                        className="palette-item"
+                        key={pack.id + ":" + c.key}
+                        disabled={busy || packBusy}
+                        draggable={!busy && !packBusy}
+                        onDragStart={(e) => drag(e, c.type, c.title, c.data)}
+                        onClick={() =>
+                          create(c.type, c.title, c.data, undefined, size)
+                        }
+                        title={"拖入画布，或点击添加" + c.title}
+                      >
+                        <span className="palette-icon pack" aria-hidden="true">
+                          <Icon name={c.icon ?? c.type} />
+                        </span>
+                        <span>{c.title}</span>
+                        <span className="palette-grip" aria-hidden="true">
+                          <Icon name="grip" size={14} />
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {exported?.id === pack.id && (
+                  <textarea
+                    className="pack-export"
+                    aria-label={pack.name + " 的清单"}
+                    readOnly
+                    value={exported.json}
+                  />
+                )}
+              </section>
+            ))}
+            <details className="pack-import">
+              <summary>导入组件包</summary>
+              <div className="pack-import-body">
+                <p className="pack-hint">
+                  组件包是一份 JSON 清单，只是数据：它只会给这里多出几组预填组件，
+                  不会安装新代码，也不会改动任何源码。
+                </p>
+                <label>
+                  粘贴 JSON
+                  <textarea
+                    aria-label="组件包 JSON"
+                    placeholder='{"protocol":"sand-table/component-pack","version":1,…}'
+                    value={packJson}
+                    onChange={(e) => setPackJson(e.target.value)}
+                  />
+                </label>
+                <button
+                  disabled={busy || packBusy || !packJson.trim()}
+                  onClick={() => void importPack({ json: packJson.trim() })}
+                >
+                  从粘贴的 JSON 导入
+                </button>
+                <label>
+                  或粘贴 https:// 链接
+                  <input
+                    aria-label="组件包链接"
+                    placeholder="https://example.com/pack.json"
+                    value={packUrl}
+                    onChange={(e) => setPackUrl(e.target.value)}
+                  />
+                </label>
+                <button
+                  disabled={busy || packBusy || !packUrl.trim()}
+                  onClick={() => void importPack({ url: packUrl.trim() })}
+                >
+                  从链接导入
+                </button>
+                {packError && (
+                  <p className="pack-error" role="alert">
+                    {packError}
+                  </p>
+                )}
+                {packNotice && <p className="pack-notice">{packNotice}</p>}
+              </div>
+            </details>
           </>
         ) : section === "presets" ? (
           <>
             <h2>从一个场景开始</h2>
-            <p className="muted">只添加你选择的内容。</p>
             <button
               className="preset-choice"
               disabled={busy}
@@ -246,12 +445,17 @@ export function Toolbox({
               <span>在这张板子里再放一张板子</span>
             </button>
           </>
+        ) : section === "history" ? (
+          <HistoryPanel
+            history={history}
+            busy={busy}
+            onUndo={() => onUndo?.()}
+            onRedo={() => onRedo?.()}
+            onJump={(id) => onJump?.(id)}
+          />
         ) : (
           <>
             <h2>导入代码仓库</h2>
-            <p className="muted">
-              把本机已有的 Git 仓库作为一个子白板加入。不会安装或运行它。
-            </p>
             <label>
               本机仓库路径
               <input
@@ -322,11 +526,9 @@ export function Toolbox({
         )}
       </div>
       <div className="toolbox-bottom">
-        <button onClick={() => showPanel("theme")}>外观</button>
         {b.workspaces.length > 0 && (
           <button onClick={() => showPanel("changes")}>代码改动</button>
         )}
-        <small>本次会话 · 不自动保存</small>
       </div>
     </aside>
   );
