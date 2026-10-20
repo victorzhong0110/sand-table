@@ -6,8 +6,10 @@ import { defaultSessionFile } from "./session.ts";
 let open = true,
   port = 0,
   sessionFile = defaultSessionFile,
-  workspaceDir: string | undefined,
-  workspaceId: string | undefined,
+  workspaceDir: string | undefined = process.env.SAND_WORKSPACE_DIR
+    ? resolve(process.env.SAND_WORKSPACE_DIR)
+    : undefined,
+  workspaceId: string | undefined = process.env.SAND_WORKSPACE_ID,
   preset: "blank" | "code" = "blank";
 const roots: string[] = [];
 const args = process.argv.slice(2);
@@ -16,9 +18,13 @@ for (let i = 0; i < args.length; i++) {
   if (arg === "--code-board") preset = "code";
   else if (arg === "--no-open") open = false;
   else if (
-    ["--workspace", "--port", "--session-file", "--workspace-dir", "--workspace-id"].includes(
-      arg,
-    )
+    [
+      "--workspace",
+      "--port",
+      "--session-file",
+      "--workspace-dir",
+      "--workspace-id",
+    ].includes(arg)
   ) {
     const value = args[++i];
     if (!value) throw Error(`Missing value for ${arg}`);

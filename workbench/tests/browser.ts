@@ -1,12 +1,15 @@
 import { resultData } from "../core/results.ts";
 import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { fixtureGuide } from "./fixture-guide.ts";
 const external = process.env.SAND_EXTERNAL_REPO;
 if (!external)
   throw Error("Set SAND_EXTERNAL_REPO to a checkout of lukeed/clsx.");
+const workspaceDir = mkdtempSync(join(tmpdir(), "sand-browser-"));
 const host = spawn(
   process.execPath,
   [
@@ -15,7 +18,11 @@ const host = spawn(
     "--workspace",
     `clsx=${external}`,
   ],
-  { stdio: ["ignore", "pipe", "pipe"] },
+  {
+    stdio: ["ignore", "pipe", "pipe"],
+    // 测试之间互不干扰，也不碰用户真实的工作空间
+    env: { ...process.env, SAND_WORKSPACE_DIR: workspaceDir },
+  },
 );
 let logs = "";
 host.stderr.on("data", (d) => (logs += d));
