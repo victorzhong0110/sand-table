@@ -91,6 +91,41 @@ select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  vertical-align: middle;
+}
+.icon-button[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+.report-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.report-head b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.report-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.report-actions .icon-button {
+  margin: 0;
+}
 .header-actions,
 .modes,
 .tools,

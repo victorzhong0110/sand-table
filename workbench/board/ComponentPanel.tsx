@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import type { Board } from "../core/model.ts";
 import type { ComponentInstance, ThemeConfig } from "../core/spaces.ts";
 import { componentTypes, defaultData } from "../core/spaces.ts";
+import { Icon } from "./Icon.tsx";
 export function ComponentPanel({
   board: b,
   viewId,
@@ -103,28 +104,44 @@ export function ComponentPanel({
           <h3>选中组件</h3>
           {selected.map((c) => (
             <div key={c.id} className="report">
-              <b>{c.title}</b>
-              <button
-                disabled={busy}
-                onClick={() =>
-                  void operate({ kind: "duplicate", instanceId: c.id })
-                }
-              >
-                复制
-              </button>
-              <button
-                disabled={busy}
-                onClick={() =>
-                  void operate({
-                    kind: "place",
-                    items: [
-                      { id: c.id, rect: { ...c.rect, pinned: !c.rect.pinned } },
-                    ],
-                  })
-                }
-              >
-                {c.rect.pinned ? "取消固定" : "固定位置"}
-              </button>
+              <div className="report-head">
+                <b title={c.title}>{c.title}</b>
+                <div className="report-actions">
+                  <button
+                    className="icon-button"
+                    title={`复制 ${c.title}`}
+                    aria-label={`复制 ${c.title}`}
+                    disabled={busy}
+                    onClick={() =>
+                      void operate({ kind: "duplicate", instanceId: c.id })
+                    }
+                  >
+                    <Icon name="copy" size={15} />
+                  </button>
+                  <button
+                    className="icon-button"
+                    title={c.rect.pinned ? `取消固定 ${c.title}` : `固定 ${c.title}`}
+                    aria-label={
+                      c.rect.pinned ? `取消固定 ${c.title}` : `固定 ${c.title}`
+                    }
+                    aria-pressed={c.rect.pinned}
+                    disabled={busy}
+                    onClick={() =>
+                      void operate({
+                        kind: "place",
+                        items: [
+                          {
+                            id: c.id,
+                            rect: { ...c.rect, pinned: !c.rect.pinned },
+                          },
+                        ],
+                      })
+                    }
+                  >
+                    <Icon name="pin" size={15} />
+                  </button>
+                </div>
+              </div>
               <select
                 aria-label={`移动 ${c.title} 到白板`}
                 value={c.spaceId}

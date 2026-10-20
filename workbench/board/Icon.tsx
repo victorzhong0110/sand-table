@@ -108,6 +108,18 @@ export function Icon({ name, size = 20 }: { name: string; size?: number }) {
         <circle cx="10" cy="10" r="2" fill="currentColor" />
       </>
     ),
+    copy: (
+      <>
+        <rect x="3" y="3" width="11" height="11" rx="2" />
+        <path d="M7 14v1.5A2.5 2.5 0 0 0 9.5 18h6A2.5 2.5 0 0 0 18 15.5v-6A2.5 2.5 0 0 0 15.5 7H14" />
+      </>
+    ),
+    pin: (
+      <>
+        <path d="M7 3h6l-1 5 2 2H6l2-2-1-5Z" />
+        <path d="M10 10v7" />
+      </>
+    ),
   };
   return (
     <svg
