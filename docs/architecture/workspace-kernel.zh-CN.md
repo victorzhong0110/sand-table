@@ -193,6 +193,17 @@ export type Presentation = {
 | I14 | 工作空间格式有版本与迁移路径；迁移失败不静默丢弃 | 旧版本文件迁移测试 |
 | I15 | 引用失效、外部内容更新可识别，不静默覆盖 | 指纹比对 |
 
+**I16（2026-10-20 集成轮补充）**：板级内容（嵌套白板、空间关系、分组、布局锚点、
+组件包、主题）与对象/展示/关系一样，必须可撤销，且按**键**记录——
+撤销一次组件包导入不应连带回滚并发发生的主题修改。
+实现见 `core/objects.ts` 的 `BoardStateKey` 与 `EntitySnapshot.target = "board"`；
+规格与取舍见 `docs/architecture/integration-2026-10.zh-CN.md` 决策 D2。
+
+**历史模型的选择（2026-10-20 集成轮）**：撤销单位是**用户意图**（`intentId` 分组），
+不是「一次写入」；快照是**实体级**的（object / presentation / relation / board 键），
+不是整块白板。理由与被否决的替代方案见
+`docs/architecture/integration-2026-10.zh-CN.md` 决策 D1。
+
 **实现状态（2026-10-20 交叉审计后核对）**：I1–I14 已落地并有自动化用例覆盖；
 **I15 尚未实现**——`ResourceReference.status` 的 `stale` / `missing` 与 `ObjectSource.fingerprint`
 目前都没有计算方（没有比对入口），属于 P4 连接器范围，见 issue #13。
