@@ -15,4 +15,4 @@
     - id: sand-table
       name: "@sand-table/dsh-plugin"
       config:
-        boardUrl: http://127.0.0.1:4173/board.html
+        boardUrl: http://127.0.0.1:4173/embed

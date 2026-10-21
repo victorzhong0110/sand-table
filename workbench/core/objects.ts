@@ -390,6 +390,8 @@ export type HostTaskRequest = {
 /** 宿主回传的任务事件。状态必须来自实际执行反馈，不伪造进度。 */
 export type HostTaskEvent = {
   taskId: string;
+  boardId?: string;
+  results?: import("./host-bridge.ts").HostResult[];
   state: "queued" | "running" | "waiting" | "done" | "failed" | "cancelled";
   message?: string;
   /** 结果关联到哪个对象。 */

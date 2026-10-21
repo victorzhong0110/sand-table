@@ -309,7 +309,6 @@ button[aria-pressed="true"] {
   /* The bar must stay usable no matter what the canvas holds: a card's
      content can be wider than the card itself, and .world is a stacking
      context, so the bar is put above the content layer on purpose. */
-  z-index: 5;
   display: flex;
   gap: 10px;
   align-items: center;
@@ -2015,10 +2014,25 @@ main.canvas-app {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.canvas-app .studio-inspector.is-context { left: 16px; right: auto; }
-@media(max-width:700px) { .canvas-app .studio-inspector.is-context { top: 92px; left: 8px; } }
-.canvas-app .component-card.detail-full .component-chrome { position: absolute; top: 8px; right: 8px; margin: 0; }
-.canvas-app .component-card.detail-full .component-symbol { display: none; }
+.canvas-app .studio-inspector.is-context {
+  left: 16px;
+  right: auto;
+}
+@media (max-width: 700px) {
+  .canvas-app .studio-inspector.is-context {
+    top: 92px;
+    left: 8px;
+  }
+}
+.canvas-app .component-card.detail-full .component-chrome {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  margin: 0;
+}
+.canvas-app .component-card.detail-full .component-symbol {
+  display: none;
+}
 
 /* #9.3: editing a component where it sits. The editor covers the body of
    the card, or the whole card when the title is being edited, and the card

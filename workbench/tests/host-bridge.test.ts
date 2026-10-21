@@ -77,7 +77,7 @@ test("宿主声明能力但没提供提交入口时，要说清楚而不是静�
   };
   const bridge = readInjectedBridge(scope);
   assert.ok(bridge);
-  assert.equal(canShowTaskEntry(bridge), true);
+  assert.equal(canShowTaskEntry(bridge), false);
   await assert.rejects(() => bridge.submitTask(request), /没有提供提交入口/);
 });
 
@@ -170,6 +170,7 @@ test("resolveBridge 优先用宿主注入，没有才退回本地模式", () => 
       [HOST_BRIDGE_KEY]: {
         host: "dsh",
         capabilities: { taskSubmit: true },
+        submitTask: async () => ({ taskId: "real" }),
       },
     },
     "mcp",
@@ -186,7 +187,11 @@ test("插件结果按种类映射到组件，认不出的走通用降级", async
     kind: "document",
     title: "Attention Is All You Need",
     text: "摘要片段",
-    resource: { uri: "file:///papers/a.pdf", fragment: "p.42" },
+    resource: {
+      uri: "file:///papers/a.pdf",
+      fragment: "p.42",
+      fingerprint: "sha256:test",
+    },
     source: "DSH 插件：文献检索",
   });
   assert.equal(paper.type, "evidence");
@@ -215,7 +220,12 @@ test("插件结果按种类映射到组件，认不出的走通用降级", async
     resource: { uri: "file:///out/report.pdf" },
   });
   assert.equal(file.type, "resource");
-  assert.equal(file.data.uri, "file:///out/report.pdf");
+  assert.equal(file.data.resourceUri, "file:///out/report.pdf");
+  assert.equal(
+    file.data.url,
+    "",
+    "local paths are references, not unsafe browser links",
+  );
 
   const other = mapHostResult({
     kind: "whatever",

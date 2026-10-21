@@ -264,7 +264,8 @@ export function SpaceCanvas({
     setEditing({
       id: c.id,
       field,
-      value: field === "text" ? String(resolved.data.text ?? "") : resolved.title,
+      value:
+        field === "text" ? String(resolved.data.text ?? "") : resolved.title,
       baseTitle: resolved.title,
       baseData: resolved.data,
     });
@@ -400,13 +401,22 @@ export function SpaceCanvas({
     const x = r.x * current.zoom + current.x,
       y = r.y * current.zoom + current.y + 36;
     if (
+      animation.current ||
       x < area.left ||
       x + r.width * current.zoom > area.right ||
       y < area.top ||
       y + r.height * current.zoom > area.bottom
     )
       animateTo(centerCamera(current, r, area));
-  }, [view?.selection.join("|"), view?.spaceId, focusRevision]);
+  }, [
+    view?.selection.join("|"),
+    view?.spaceId,
+    focusRevision,
+    insets.left,
+    insets.right,
+    insets.top,
+    insets.bottom,
+  ]);
   const navigate = (spaceId: unknown) => {
     clearFilters();
     return operate({ kind: "navigate", spaceId });

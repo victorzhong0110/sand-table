@@ -4,6 +4,7 @@ import {
   useRef,
   type KeyboardEvent as ReactKeyEvent,
 } from "react";
+import { findObjectType } from "../core/domains.ts";
 import type { Board } from "../core/model.ts";
 import type { ComponentInstance, ThemeConfig } from "../core/spaces.ts";
 import { componentTypes, defaultData } from "../core/spaces.ts";
@@ -593,6 +594,61 @@ function ComponentEditor({
           onKeyDown={onKey("title")}
         />
       </label>
+      {findObjectType(c.type)?.fields?.map((spec) => {
+        if (spec.key === "citation")
+          return data.citation ? (
+            <p key={spec.key}>
+              {data.citation.uri} · {data.citation.fragment} ·{" "}
+              {data.citation.status}
+            </p>
+          ) : null;
+        if (spec.kind === "boolean")
+          return (
+            <label key={spec.key}>
+              {spec.label}
+              <input
+                type="checkbox"
+                checked={Boolean(data[spec.key])}
+                onChange={(e) => {
+                  touch(spec.key, spec.label, e.target.checked);
+                  leave();
+                }}
+              />
+            </label>
+          );
+        if (spec.kind === "number")
+          return (
+            <label key={spec.key}>
+              {spec.label}
+              <input
+                type="number"
+                value={data[spec.key] ?? ""}
+                onChange={(e) =>
+                  touch(
+                    spec.key,
+                    spec.label,
+                    e.target.value === "" ? undefined : Number(e.target.value),
+                  )
+                }
+                onBlur={leave}
+              />
+            </label>
+          );
+        if (spec.kind === "list")
+          return (
+            <label key={spec.key}>
+              {spec.label}
+              <textarea
+                value={(data[spec.key] ?? []).join("\n")}
+                onChange={(e) =>
+                  touch(spec.key, spec.label, e.target.value.split("\n"))
+                }
+                onBlur={leave}
+              />
+            </label>
+          );
+        return field(spec.key, spec.label, spec.kind === "longtext");
+      })}
       {["text", "heading", "code"].includes(c.type) &&
         field("text", c.type === "code" ? "代码" : "内容", true)}
       {c.type === "code" && field("language", "语言")}

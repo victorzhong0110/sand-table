@@ -17,42 +17,42 @@ Sand Table 侧要做的不是「再实现一个 Agent」，而是：
 核实时间：2026-10-20。来源全部是官方仓库 `deepseek-ai/deepseek-harness`
 （默认分支 `master`，MIT，仓库描述「DeepSeek Harness: Everything is a Plugin.」）。
 
-| 事实 | 依据 |
-|---|---|
-| 宿主是插件化运行时；插件分 **Host 半**与 **Client 半** | `packages/preset/agent-preset/skills/cordis-plugin-development/SKILL.md` |
-| Host 插件导出 `apply(ctx, config)`，可选 `inject = ['tools']` 与 `Config` | 同上 + `references/host-plugin.md` |
-| 插件包是 **bundle**：`package.json` 声明 `dsh.bundle.patch`，YAML patch 插入插件行 | `references/host-plugin.md` |
-| Client 插件：`package.json` 的 `dsh.client` 段（`platform` / `immediately` / `inject`）+ `./client` 导出 | `references/ui-plugin.md` |
-| Client 通过 `ctx.slots.inject(key, cb)` + `ctx.slots.register({name,id,order}, Component)` 注册 UI | `references/ui-plugin.md`、`docs/subsystems/slots.md` |
-| 槽位是**有类型的 React 组合系统**；`root` 是唯一内建声明，由 `ctx.slots.renderSlot('root', {})` 渲染 | `docs/subsystems/slots.md` |
-| 槽位基数：`single`（优先级最低者胜出）/ `list` / `keyed` / `chain`；`single` 与已占用的 keyed 格是**替换点** | `docs/subsystems/slots.md` |
-| 槽位作用域：`root` / `session-maybe` / `session` | 同上 |
-| 现成的槽位（节选）：`conversation.session.header.actions`、`conversation.header.leading`、`conversation.composer.dock`、`conversation.input.activity`、`conversation.view`、`conversation.hero.*`、`shell.overlay`、`plugins.add.actions` | 同上（随附的槽位层级树） |
-| **侧栏 + 主面板的正确组合是 `sidebar.panellist`（list/root）+ `main`（keyed/root），两个 id 必须一致**——侧栏选中的面板 id 直接作为 `main` 的 `entryKey` | `packages/extensions/cordis-client-runner/src/client/slot-catalog.ts:3641,2126`；`packages/client/ui-layout/src/client/AppFrame.tsx:42` |
-| `conversation.view` 是 **`list`**（scope `session`），不是 single：用新 id 注册是**新增**会话视图，复用官方 id 才是替换 | 同上，slot-catalog.ts:1937 |
-| Host 半暴露 **Agent 工具**：`ctx.tools.register(defineTool({...}))`，注册即进入系统提示的 schema 汇总；参数用 DSH 的 schema DSL 声明，非法参数变成普通错误结果 | `packages/core/tools/README.md:45` |
-| 面向人的动作 / Client 可调用入口：`ctx.commands.register({ name, description, input?, handler })`；name 只能小写字母/数字/`_`/`-`；同名重复注册抛错；命令不产生模型消息，但记进 agent 的 session log | `packages/interaction/commands/README.md:32-35` |
-| 清单字段：`dsh.bundle.patch`（单文件或**有序数组**）、`dsh.profile.bundles`（**有序数组**）、`dsh.client.{platform,inject,immediately,external}`、`engines.dsh`；patch 是 Cordis patch YAML，**不能是空/只有注释的文件**（空 patch 会导致启动失败） | `packages/util/package-manifest/src/types.ts:30-95`；`packages/boot/app-boot/README.md:50,61` |
-| DSH 的 Web 外壳**没有**给页面设 `frame-ancestors` / `X-Frame-Options`；插件自渲染 iframe 时 **CSP 要自己管**（DSH 自带范式：`ui-sidebar-documentpreview` 用 `meta` CSP + `sandbox`） | `packages/credentials/deepseek-account-platform/src/index.ts:645` |
-| 官方槽位权威目录（生成物，覆盖全部槽位键的基数/作用域/占用者/替换风险） | `packages/extensions/cordis-client-runner/src/client/slot-catalog.ts` |
-| 标准 props 提供 `useSessions` / `useSessionStatus` / `useSessionAccess` / `useWorkspaces` / `useWorkspaceAccess` / `usePanelInfo` | 同上 |
-| **不得**替换应用根、不得往 `document.body` 追加第二个应用 | `references/ui-plugin.md` |
-| UI 操作要暴露给 Agent 时：操作实现为 **Host 服务方法**，UI 走 Client 可调用的 Host 入口，Agent 走**同名工具**，两者共用同一实现 | `references/user-actions.md` |
-| Client 调用 Host 入口的方式是 `ctx.remote.commands.execute()` | 同上 |
-| 插件安装由 `plugin_manager` 的 `install_bundle` 完成（不手写 profile 的 package.json / cordis.patch.yml） | `SKILL.md` |
-| 运行时可用 `cordis_inspect_query` 查询 `Slots.listSubTree` 拿到实时槽位树 | `SKILL.md`、`docs/subsystems/slots.md` |
+| 事实                                                                                                                                                                                                                                                | 依据                                                                                                                                    |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| 宿主是插件化运行时；插件分 **Host 半**与 **Client 半**                                                                                                                                                                                              | `packages/preset/agent-preset/skills/cordis-plugin-development/SKILL.md`                                                                |
+| Host 插件导出 `apply(ctx, config)`，可选 `inject = ['tools']` 与 `Config`                                                                                                                                                                           | 同上 + `references/host-plugin.md`                                                                                                      |
+| 插件包是 **bundle**：`package.json` 声明 `dsh.bundle.patch`，YAML patch 插入插件行                                                                                                                                                                  | `references/host-plugin.md`                                                                                                             |
+| Client 插件：`package.json` 的 `dsh.client` 段（`platform` / `immediately` / `inject`）+ `./client` 导出                                                                                                                                            | `references/ui-plugin.md`                                                                                                               |
+| Client 通过 `ctx.slots.inject(key, cb)` + `ctx.slots.register({name,id,order}, Component)` 注册 UI                                                                                                                                                  | `references/ui-plugin.md`、`docs/subsystems/slots.md`                                                                                   |
+| 槽位是**有类型的 React 组合系统**；`root` 是唯一内建声明，由 `ctx.slots.renderSlot('root', {})` 渲染                                                                                                                                                | `docs/subsystems/slots.md`                                                                                                              |
+| 槽位基数：`single`（优先级最低者胜出）/ `list` / `keyed` / `chain`；`single` 与已占用的 keyed 格是**替换点**                                                                                                                                        | `docs/subsystems/slots.md`                                                                                                              |
+| 槽位作用域：`root` / `session-maybe` / `session`                                                                                                                                                                                                    | 同上                                                                                                                                    |
+| 现成的槽位（节选）：`conversation.session.header.actions`、`conversation.header.leading`、`conversation.composer.dock`、`conversation.input.activity`、`conversation.view`、`conversation.hero.*`、`shell.overlay`、`plugins.add.actions`           | 同上（随附的槽位层级树）                                                                                                                |
+| **侧栏 + 主面板的正确组合是 `sidebar.panellist`（list/root）+ `main`（keyed/root），两个 id 必须一致**——侧栏选中的面板 id 直接作为 `main` 的 `entryKey`                                                                                             | `packages/extensions/cordis-client-runner/src/client/slot-catalog.ts:3641,2126`；`packages/client/ui-layout/src/client/AppFrame.tsx:42` |
+| `conversation.view` 是 **`list`**（scope `session`），不是 single：用新 id 注册是**新增**会话视图，复用官方 id 才是替换                                                                                                                             | 同上，slot-catalog.ts:1937                                                                                                              |
+| Host 半暴露 **Agent 工具**：`ctx.tools.register(defineTool({...}))`，注册即进入系统提示的 schema 汇总；参数用 DSH 的 schema DSL 声明，非法参数变成普通错误结果                                                                                      | `packages/core/tools/README.md:45`                                                                                                      |
+| 面向人的动作 / Client 可调用入口：`ctx.commands.register({ name, description, input?, handler })`；name 只能小写字母/数字/`_`/`-`；同名重复注册抛错；命令不产生模型消息，但记进 agent 的 session log                                                | `packages/interaction/commands/README.md:32-35`                                                                                         |
+| 清单字段：`dsh.bundle.patch`（单文件或**有序数组**）、`dsh.profile.bundles`（**有序数组**）、`dsh.client.{platform,inject,immediately,external}`、`engines.dsh`；patch 是 Cordis patch YAML，**不能是空/只有注释的文件**（空 patch 会导致启动失败） | `packages/util/package-manifest/src/types.ts:30-95`；`packages/boot/app-boot/README.md:50,61`                                           |
+| DSH 的 Web 外壳**没有**给页面设 `frame-ancestors` / `X-Frame-Options`；插件自渲染 iframe 时 **CSP 要自己管**（DSH 自带范式：`ui-sidebar-documentpreview` 用 `meta` CSP + `sandbox`）                                                                | `packages/credentials/deepseek-account-platform/src/index.ts:645`                                                                       |
+| 官方槽位权威目录（生成物，覆盖全部槽位键的基数/作用域/占用者/替换风险）                                                                                                                                                                             | `packages/extensions/cordis-client-runner/src/client/slot-catalog.ts`                                                                   |
+| 标准 props 提供 `useSessions` / `useSessionStatus` / `useSessionAccess` / `useWorkspaces` / `useWorkspaceAccess` / `usePanelInfo`                                                                                                                   | 同上                                                                                                                                    |
+| **不得**替换应用根、不得往 `document.body` 追加第二个应用                                                                                                                                                                                           | `references/ui-plugin.md`                                                                                                               |
+| UI 操作要暴露给 Agent 时：操作实现为 **Host 服务方法**，UI 走 Client 可调用的 Host 入口，Agent 走**同名工具**，两者共用同一实现                                                                                                                     | `references/user-actions.md`                                                                                                            |
+| Client 调用 Host 入口的方式是 `ctx.remote.commands.execute()`                                                                                                                                                                                       | 同上                                                                                                                                    |
+| 插件安装由 `plugin_manager` 的 `install_bundle` 完成（不手写 profile 的 package.json / cordis.patch.yml）                                                                                                                                           | `SKILL.md`                                                                                                                              |
+| 运行时可用 `cordis_inspect_query` 查询 `Slots.listSubTree` 拿到实时槽位树                                                                                                                                                                           | `SKILL.md`、`docs/subsystems/slots.md`                                                                                                  |
 
 ### 1.1 由此得出的能力边界
 
-| 目标（#18 §2） | 普通插件机制能否做到 | 依据 |
-|---|---|---|
-| 侧栏加「新建 Sand Table」入口 | **能** | 向 `sidebar.panellist` 注册一个 id（`list`/root，加法） |
-| 在主内容区打开画布 | **能，且不顶掉官方 UI** | 向 `main` 注册**同名 key**（`keyed`/root，加法）；侧栏 id 与 main key 必须一致 |
-| 白板内发任务给 Agent 并收响应 | **能，但需走 Host 入口**（`ctx.commands.register` 或 `ctx.tools.register`），且要确认宿主提供的会话命令 | `references/user-actions.md`；`packages/interaction/commands/README.md` |
-| 会话与白板统一导航 | **能**：`useSessions` / `useWorkspaces` / `useSessionAccess` 是标准 props | `docs/subsystems/slots.md` |
-| Agent 读取/修改白板内容 | **能**：把白板操作暴露成 **Host 工具** | `references/user-actions.md` |
-| 复用 DSH 插件能力 | **能**（Agent 侧直接用宿主插件） | #18 §7 |
-| 自建模型调用循环、凭据管理、对话压缩 | **不做**（按 #18 决策撤销该路线） | #18 §3 |
+| 目标（#18 §2）                       | 普通插件机制能否做到                                                                                    | 依据                                                                           |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| 侧栏加「新建 Sand Table」入口        | **能**                                                                                                  | 向 `sidebar.panellist` 注册一个 id（`list`/root，加法）                        |
+| 在主内容区打开画布                   | **能，且不顶掉官方 UI**                                                                                 | 向 `main` 注册**同名 key**（`keyed`/root，加法）；侧栏 id 与 main key 必须一致 |
+| 白板内发任务给 Agent 并收响应        | **能，但需走 Host 入口**（`ctx.commands.register` 或 `ctx.tools.register`），且要确认宿主提供的会话命令 | `references/user-actions.md`；`packages/interaction/commands/README.md`        |
+| 会话与白板统一导航                   | **能**：`useSessions` / `useWorkspaces` / `useSessionAccess` 是标准 props                               | `docs/subsystems/slots.md`                                                     |
+| Agent 读取/修改白板内容              | **能**：把白板操作暴露成 **Host 工具**                                                                  | `references/user-actions.md`                                                   |
+| 复用 DSH 插件能力                    | **能**（Agent 侧直接用宿主插件）                                                                        | #18 §7                                                                         |
+| 自建模型调用循环、凭据管理、对话压缩 | **不做**（按 #18 决策撤销该路线）                                                                       | #18 §3                                                                         |
 
 ### 1.2 本轮**没有**核实的（不得当成已存在）
 
@@ -84,11 +84,11 @@ export type HostBridge = {
 
 ### 2.1 三个实现
 
-| 实现 | 何时用 | 能力 |
-|---|---|---|
-| `localBridge` | 独立模式（无宿主） | `taskSubmit: false`，提交任务抛错 |
-| `mcpBridge` | 只有 MCP 客户端接入 | `taskSubmit: false`（MCP 不是任务执行通道） |
-| `injectedBridge(scope)` | 宿主注入了桥（DSH 插件的 Client 半注入） | 取宿主自报的能力 |
+| 实现                    | 何时用                                   | 能力                                        |
+| ----------------------- | ---------------------------------------- | ------------------------------------------- |
+| `localBridge`           | 独立模式（无宿主）                       | `taskSubmit: false`，提交任务抛错           |
+| `mcpBridge`             | 只有 MCP 客户端接入                      | `taskSubmit: false`（MCP 不是任务执行通道） |
+| `injectedBridge(scope)` | 宿主注入了桥（DSH 插件的 Client 半注入） | 取宿主自报的能力                            |
 
 ### 2.2 注入约定
 
@@ -98,9 +98,16 @@ export type HostBridge = {
 window.__SAND_TABLE_HOST__ = {
   host: "dsh",
   version: "0.1.0",
-  capabilities: { taskSubmit: true, eventStream: true, contentRead: true, resultKinds: ["text", "link"] },
+  capabilities: {
+    taskSubmit: true,
+    eventStream: true,
+    contentRead: true,
+    resultKinds: ["text", "link"],
+  },
   submitTask: async (request) => ({ taskId: "..." }),
-  subscribe: (listener) => { /* ... */ return () => {} },
+  subscribe: (listener) => {
+    /* ... */ return () => {};
+  },
 };
 ```
 
@@ -108,12 +115,12 @@ Sand Table 读这个对象；**读不到就是没有宿主**，不报错、不�
 
 ### 2.3 能力与入口的对应（硬规则）
 
-| 能力 | 界面行为 |
-|---|---|
-| `taskSubmit: false` | **不显示**白板内对话入口（不显示「问 AI」，不显示输入框） |
-| `taskSubmit: true` | 显示入口与输入框；发送时携带对象引用与版本 |
-| `eventStream: false` | 仍可发送，但只显示「已提交」，**不伪造进度** |
-| 断线 | 保留历史与未发送草稿，显示断开/重试状态，不销毁正在编辑的内容 |
+| 能力                 | 界面行为                                                      |
+| -------------------- | ------------------------------------------------------------- |
+| `taskSubmit: false`  | **不显示**白板内对话入口（不显示「问 AI」，不显示输入框）     |
+| `taskSubmit: true`   | 显示入口与输入框；发送时携带对象引用与版本                    |
+| `eventStream: false` | 仍可发送，但只显示「已提交」，**不伪造进度**                  |
+| 断线                 | 保留历史与未发送草稿，显示断开/重试状态，不销毁正在编辑的内容 |
 
 这条规则延续集成轮决策 D7：**AI 入口按真实能力显示**。
 
@@ -155,7 +162,7 @@ dsh-plugin/
 3. 画布用 **iframe** 承载 Sand Table 本地服务（`local/main.ts` 提供的 HTTP 服务），
    **不**往 `document.body` 追加第二个应用、**不**替换应用根；
    iframe 的 **CSP 与 sandbox 自己管**（照 `ui-sidebar-documentpreview` 的范式）。
-3. 提供「问 AI」的就近输入（`conversation.composer.dock` 一类的槽位），
+4. 提供「问 AI」的就近输入（`conversation.composer.dock` 一类的槽位），
    发送时走宿主桥的 `submitTask`。
 
 ### 3.3 安装
@@ -169,12 +176,12 @@ README 写清步骤与**未验证项**。
 插件结果不一定自带可嵌入的白板 UI。映射是**降级优先**的
 （`core/host-bridge.ts` 的 `mapHostResult`）：
 
-| 结果种类 | 目标组件 | 说明 |
-|---|---|---|
-| 文献（`document` / `paper`） | 证据卡（`evidence`） | 带页码级引用与来源 |
-| 数据（`dataset` / `data`） | 表格（`table`）或图表（`chart`） | 有行就表格，没有就图表占位 |
-| 文件（`file` / `resource`） | 资源引用（`resource`） | 保留 uri 与片段定位 |
-| 其他 | 基础文本（`text`） | 通用降级：结果可以看不懂，来源不能丢 |
+| 结果种类                     | 目标组件                         | 说明                                 |
+| ---------------------------- | -------------------------------- | ------------------------------------ |
+| 文献（`document` / `paper`） | 证据卡（`evidence`）             | 带页码级引用与来源                   |
+| 数据（`dataset` / `data`）   | 表格（`table`）或图表（`chart`） | 有行就表格，没有就图表占位           |
+| 文件（`file` / `resource`）  | 资源引用（`resource`）           | 保留 uri 与片段定位                  |
+| 其他                         | 基础文本（`text`）               | 通用降级：结果可以看不懂，来源不能丢 |
 
 **来源与资源定位一律保留**——映射丢的是呈现细节，不是可追溯性。
 
@@ -186,27 +193,27 @@ README 写清步骤与**未验证项**。
 
 ## 5. 不变量
 
-| 编号 | 不变量 | 怎么验 |
-|---|---|---|
-| X1 | 没有宿主时，白板内**不出现**对话入口 | UI 快照测试 + bridge 单测 |
-| X2 | 宿主自报 `taskSubmit: false` 时同样不出现 | 同上 |
-| X3 | 提交任务携带对象引用与版本，不带整份快照 | bridge 单测断言请求形状 |
-| X4 | 断线保留草稿与历史，显示断开/重试 | UI 行为（CI 浏览器测试） |
-| X5 | 事件缺失时不伪造进度 | 只显示「已提交」 |
-| X6 | 插件包清单符合官方 bundle 规范 | 清单结构测试（exports / files / locale / icon） |
-| X7 | 插件两端代码语法可解析 | `node --check` |
-| X8 | 未在真实 DSH 中验证的部分**明确标注** | 文档与 README 明写 |
+| 编号 | 不变量                                    | 怎么验                                          |
+| ---- | ----------------------------------------- | ----------------------------------------------- |
+| X1   | 没有宿主时，白板内**不出现**对话入口      | UI 快照测试 + bridge 单测                       |
+| X2   | 宿主自报 `taskSubmit: false` 时同样不出现 | 同上                                            |
+| X3   | 提交任务携带对象引用与版本，不带整份快照  | bridge 单测断言请求形状                         |
+| X4   | 断线保留草稿与历史，显示断开/重试         | UI 行为（CI 浏览器测试）                        |
+| X5   | 事件缺失时不伪造进度                      | 只显示「已提交」                                |
+| X6   | 插件包清单符合官方 bundle 规范            | 清单结构测试（exports / files / locale / icon） |
+| X7   | 插件两端代码语法可解析                    | `node --check`                                  |
+| X8   | 未在真实 DSH 中验证的部分**明确标注**     | 文档与 README 明写                              |
 
 ## 6. 交付形态
 
-| 文件 | 归属 | 内容 |
-|---|---|---|
-| `workbench/core/host-bridge.ts` | 负责人 | 桥协议与三个实现 |
-| `workbench/tests/host-bridge.test.ts` | 负责人 | X1–X5 |
-| `workbench/dsh-plugin/**` | 生产者 E | 插件包（Host/Client/清单/locale/图标/README） |
-| `workbench/tests/dsh-plugin.test.ts` | 生产者 E | X6、X7 |
-| `workbench/board/**`（AI 入口接线） | 负责人 | 按能力显示入口 |
-| `docs/architecture/dsh-integration.zh-CN.md` | 负责人 | 本文档 |
+| 文件                                         | 归属     | 内容                                          |
+| -------------------------------------------- | -------- | --------------------------------------------- |
+| `workbench/core/host-bridge.ts`              | 负责人   | 桥协议与三个实现                              |
+| `workbench/tests/host-bridge.test.ts`        | 负责人   | X1–X5                                         |
+| `workbench/dsh-plugin/**`                    | 生产者 E | 插件包（Host/Client/清单/locale/图标/README） |
+| `workbench/tests/dsh-plugin.test.ts`         | 生产者 E | X6、X7                                        |
+| `workbench/board/**`（AI 入口接线）          | 负责人   | 按能力显示入口                                |
+| `docs/architecture/dsh-integration.zh-CN.md` | 负责人   | 本文档                                        |
 
 ## 7. 需要 DSH 宿主改动的诉求
 
@@ -215,13 +222,21 @@ README 写清步骤与**未验证项**。
 
 原列的四条待核实项，经源码核对**已有答案**（见 §1）：
 
-| 原问题 | 结论 |
-|---|---|
-| 提交任务/发送消息的会话命令名与签名 | `ctx.commands.register({name, description, input?, handler})`；name 限小写字母/数字/`_`/`-` |
-| `conversation.view` 是否 single 槽位 | **不是**，是 `list`（scope session）；本次改用 `sidebar.panellist` + `main` 组合，不碰它 |
-| 跨源 iframe 的 CSP | DSH 外壳不设 `frame-ancestors`/`X-Frame-Options`；**插件自己管**（`meta` CSP + `sandbox`） |
-| Agent 工具的注册与调用时序 | `ctx.tools.register(defineTool(...))` 注册即进系统提示的 schema 汇总 |
+| 原问题                               | 结论                                                                                        |
+| ------------------------------------ | ------------------------------------------------------------------------------------------- |
+| 提交任务/发送消息的会话命令名与签名  | `ctx.commands.register({name, description, input?, handler})`；name 限小写字母/数字/`_`/`-` |
+| `conversation.view` 是否 single 槽位 | **不是**，是 `list`（scope session）；本次改用 `sidebar.panellist` + `main` 组合，不碰它    |
+| 跨源 iframe 的 CSP                   | DSH 外壳不设 `frame-ancestors`/`X-Frame-Options`；**插件自己管**（`meta` CSP + `sandbox`）  |
+| Agent 工具的注册与调用时序           | `ctx.tools.register(defineTool(...))` 注册即进系统提示的 schema 汇总                        |
 
 仍需在**真实 DSH 实例**里验证的（源码查不到答案）：
 安装是否成功、入口实际长什么样、Agent 侧能否真的调到工具。
 这些以**能力探测**兜底：探测不到就不显示对应入口。
+
+## 2026-10-21 修正：运行期接线与验收口径
+
+- 插件通过 `local/bridge.ts` 共享浏览器的同一个服务，不另起内核。
+- 可嵌入路由为 `/embed`，需工作台启动时显式提供 `--embed-origin <DSH origin>`；独立 `/` 页面继续禁止被嵌入。
+- DSH → 本地外壳 → sandbox 画布采用逐层窗口/origin 校验与消息中继；晚到能力会触发 React 更新。
+- 任务标识使用 DSH prompt requestId，借 user/message.source.rpcId 关联实际 turn；查询事件回传文本与结构化插件结果，写入白板。取消只针对关联的活动轮次。
+- `test:host` 是真实浏览器及插件、脚本化 DSH 执行器的集成检查；真实 DSH 安装、真实模型、真人验收仍未通过，不能写成“只差环境但 A–C 已验收”。

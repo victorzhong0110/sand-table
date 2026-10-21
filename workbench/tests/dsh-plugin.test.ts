@@ -118,7 +118,7 @@ test("X6：图标存在、格式正确、体积在限制内", () => {
 });
 
 test("X7：Host 半与 Client 半的语法都能被 node 解析", () => {
-  for (const file of ["index.js", "client.js"]) {
+  for (const file of ["index.js", "client.js", "tasks.js"]) {
     const result = spawnSync(process.execPath, ["--check", file], {
       cwd: pluginDir,
       encoding: "utf8",
@@ -157,7 +157,7 @@ test("X7：Host 半导出 apply，并且不 import 宿主包", () => {
   assert.ok(specifiers.length > 0, "Host 半要 import node 内置模块");
   for (const specifier of specifiers)
     assert.ok(
-      specifier.startsWith("node:"),
+      specifier.startsWith("node:") || specifier === "./tasks.js",
       `运行时代码不 import ${specifier}（不引宿主包、不引第三方包）`,
     );
 });

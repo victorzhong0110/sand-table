@@ -374,7 +374,7 @@ test("J3：进程还活着——活锁不可抢", async () => {
   assert.equal(readLockHolder(mem, lockPath)?.pid, 9999, "活锁没有被抢走");
 });
 
-test("J3：超过陈旧阈值的锁可被抢占（覆盖 kill -9 来不及释放）", async () => {
+test("J3：不能仅凭锁年龄抢占无法确认存活的异地主机", async () => {
   const mem = new MemoryFileSystem();
   const clock = fakeClock();
   const dir = "/virtual/j3-expired";
@@ -398,9 +398,12 @@ test("J3：超过陈旧阈值的锁可被抢占（覆盖 kill -9 来不及释放
     alive: () => true,
   });
 
-  await lock.acquire();
-  assert.equal(readLockHolder(mem, lockPath)?.pid, 1001, "过期锁被换成了新的");
-  await lock.release();
+  await assert.rejects(lock.acquire(), WorkspaceLockError);
+  assert.equal(
+    readLockHolder(mem, lockPath)?.pid,
+    9999,
+    "没有证明持有者退出，不能偷走锁",
+  );
 });
 
 test("J4：两个进程同时抢同一把陈旧锁——只有一个成功，另一个明确失败", async () => {

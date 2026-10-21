@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     /** 侧栏条目 id 与中央列键必须是同一个值。 */
     const PANEL_ID = "sand-table";
     /** 白板画布地址默认值（宿主会用它自己的配置覆盖）。 */
-    const DEFAULT_BOARD_URL = "http://127.0.0.1:4173/board.html";
+    const DEFAULT_BOARD_URL = "http://127.0.0.1:4173/embed";
     /** 宿主侧的会话命令名。 */
     const COMMAND_NAME = "sand-table";
     /** 宿主标识。 */
@@ -114,59 +114,83 @@ window.__ModuleLoader__.load({
           }
         };
 
-        /** 把任务提交给宿主会话，返回任务 id。 */
+        const pendingTasks = new Map();
+        let polling = false;
+        const boardOrigin = () => new URL(state.boardUrl).origin;
+        const send = (data) =>
+          currentFrame?.contentWindow?.postMessage(data, boardOrigin());
         const submitThroughHost = async (request) => {
           const sessionId = resolveSessionId();
-          if (!sessionId) throw new Error("找不到当前会话，无法提交任务。");
-          const line = `/${COMMAND_NAME} submit ${JSON.stringify(request ?? {})}`;
-          await callHost(sessionId, line);
-          return `sand-${Date.now().toString(36)}`;
+          if (!sessionId) throw Error("找不到当前会话，无法提交任务。");
+          const result = JSON.parse(
+            await callHost(
+              sessionId,
+              `/${COMMAND_NAME} submit ${JSON.stringify(request ?? {})}`,
+            ),
+          );
+          if (!result.taskId) throw Error("宿主没有返回任务标识。");
+          pendingTasks.set(result.taskId, {
+            sessionId,
+            after: 0,
+            boardId: request.boardId,
+          });
+          return result.taskId;
         };
-
-        /** 注入给白板的桥对象（同源时直接写，函数也带过去）。 */
-        const hostObject = () => ({
-          host: HOST_ID,
-          version: state.version,
-          capabilities: state.capabilities,
-          submitTask: async (request) => ({
-            taskId: await submitThroughHost(request),
-          }),
-          // 宿主没有事件通道：不伪造进度，订阅是空操作。
-          subscribe: () => () => {},
-        });
-
-        /**
-         * 把能力交给白板页面。
-         *
-         * 同源：直接写 window.__SAND_TABLE_HOST__（函数也能带过去）。
-         * 跨源：只能发 postMessage，白板侧按 README 的消息契约接手。
-         */
         const injectHostBridge = (frame) => {
-          const target = frame?.contentWindow;
-          if (!target || !state.capabilities) return;
-          const bridge = hostObject();
-          try {
-            target.__SAND_TABLE_HOST__ = bridge;
-            if (target.__SAND_TABLE_HOST__ === bridge) return;
-          } catch {
-            // 跨源读写受限：走消息通道。
-          }
-          try {
-            target.postMessage(
-              {
-                type: HOST_MESSAGE,
-                host: {
-                  host: HOST_ID,
-                  version: state.version,
-                  capabilities: state.capabilities,
-                },
+          if (!frame?.contentWindow || !state.capabilities) return;
+          frame.contentWindow.postMessage(
+            {
+              type: HOST_MESSAGE,
+              host: {
+                host: HOST_ID,
+                version: state.version,
+                capabilities: state.capabilities,
               },
-              "*",
-            );
-          } catch {
-            // 画布还没准备好：下一次 load 事件会再试一次。
-          }
+            },
+            boardOrigin(),
+          );
         };
+        ctx.effect(() => {
+          const timer = setInterval(async () => {
+            if (polling || !pendingTasks.size) return;
+            polling = true;
+            try {
+              for (const [taskId, task] of pendingTasks) {
+                try {
+                  const status = JSON.parse(
+                    await callHost(
+                      task.sessionId,
+                      `/${COMMAND_NAME} status ${JSON.stringify({ taskId, after: task.after })}`,
+                    ),
+                  );
+                  for (const event of status.events ?? [])
+                    send({ type: "sand-table:task-event", event });
+                  task.after = status.cursor;
+                  if (["done", "failed", "cancelled"].includes(status.state))
+                    pendingTasks.delete(taskId);
+                } catch (error) {
+                  send({
+                    type: "sand-table:task-event",
+                    event: {
+                      taskId,
+                      boardId: task.boardId,
+                      state: "failed",
+                      message: `宿主连接中断：${String(error)}`,
+                      at: Date.now(),
+                    },
+                  });
+                  pendingTasks.delete(taskId);
+                }
+              }
+            } finally {
+              polling = false;
+            }
+          }, 800);
+          return () => {
+            clearInterval(timer);
+            pendingTasks.clear();
+          };
+        }, "sand-table: task updates");
 
         /** 探测本机工作台在不在。 */
         const probeWorkbench = async (url) => {
@@ -417,28 +441,37 @@ window.__ModuleLoader__.load({
           const onMessage = (event) => {
             const data = event?.data;
             if (!data || typeof data !== "object") return;
-            if (data.type !== TASK_MESSAGE) return;
             const frame = currentFrame;
-            if (!frame || event.source !== frame.contentWindow) return;
+            if (
+              !frame ||
+              event.source !== frame.contentWindow ||
+              event.origin !== boardOrigin()
+            )
+              return;
+            if (data.type === "sand-table:bridge-ready") {
+              injectHostBridge(frame);
+              return;
+            }
+            if (![TASK_MESSAGE, "sand-table:cancel-task"].includes(data.type))
+              return;
             const id = String(data.id ?? "");
-            void submitThroughHost(data.request)
-              .then((taskId) => {
-                frame.contentWindow?.postMessage(
-                  { type: TASK_RESULT_MESSAGE, id, taskId },
-                  "*",
-                );
-              })
-              .catch((error) => {
-                frame.contentWindow?.postMessage(
-                  {
-                    type: TASK_ERROR_MESSAGE,
-                    id,
-                    message:
-                      error instanceof Error ? error.message : String(error),
-                  },
-                  "*",
-                );
-              });
+            const operation =
+              data.type === TASK_MESSAGE
+                ? submitThroughHost(data.request)
+                : (async () => {
+                    const task = pendingTasks.get(data.taskId);
+                    if (!task) throw Error("找不到活动任务。");
+                    await callHost(
+                      task.sessionId,
+                      `/${COMMAND_NAME} cancel ${data.taskId}`,
+                    );
+                    return data.taskId;
+                  })();
+            void operation
+              .then((taskId) => send({ type: TASK_RESULT_MESSAGE, id, taskId }))
+              .catch((error) =>
+                send({ type: TASK_ERROR_MESSAGE, id, message: String(error) }),
+              );
           };
           window.addEventListener("message", onMessage);
           return () => window.removeEventListener("message", onMessage);

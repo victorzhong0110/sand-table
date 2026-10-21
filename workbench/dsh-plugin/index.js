@@ -14,6 +14,7 @@
  * 这样它在没有 DSH 的机器上也能被静态检查、被 node --check 解析。
  */
 
+import { createTaskChannel } from "./tasks.js";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -28,7 +29,7 @@ export const name = "@sand-table/dsh-plugin";
  * - tools：Agent 工具注册表；
  * - commands：会话命令注册表（Client 半用 ctx.remote.commands.execute 调用）。
  */
-export const inject = ["tools", "commands"];
+export const inject = ["tools", "commands", "sessionController"];
 
 const PLUGIN_VERSION = "0.1.0";
 /** 宿主标识，写进注入给白板的桥。 */
@@ -36,7 +37,7 @@ const HOST_ID = "dsh";
 /** Client 半调用的会话命令名（只能小写字母、数字、下划线、连字符）。 */
 const COMMAND_NAME = "sand-table";
 /** 白板画布地址默认值。 */
-const DEFAULT_BOARD_URL = "http://127.0.0.1:4173/board.html";
+const DEFAULT_BOARD_URL = "http://127.0.0.1:4173/embed";
 /** 工作空间存储目录默认值（与 server/main.ts 的默认一致）。 */
 const DEFAULT_WORKSPACE_DIR = join(homedir(), ".sand-table", "workspaces");
 /** 工作空间 ID 默认值（与 server/main.ts 的默认一致）。 */
@@ -62,7 +63,7 @@ function resolveConfig(raw) {
   const timeout = Number(config.timeoutMs);
   return {
     serverEntry: resolvePath(
-      text("serverEntry") || join("..", "server", "main.ts"),
+      text("serverEntry") || join("..", "local", "bridge.ts"),
       here,
     ),
     workspaceDir: resolvePath(
@@ -70,6 +71,7 @@ function resolveConfig(raw) {
       here,
     ),
     workspaceId: text("workspaceId") || DEFAULT_WORKSPACE_ID,
+    sessionFile: text("sessionFile"),
     boardUrl: text("boardUrl") || DEFAULT_BOARD_URL,
     nodePath: text("nodePath") || process.execPath,
     timeoutMs:
@@ -129,10 +131,7 @@ function createMcpClient(config) {
     const args = [
       "--experimental-strip-types",
       config.serverEntry,
-      "--workspace-dir",
-      config.workspaceDir,
-      "--workspace-id",
-      config.workspaceId,
+      ...(config.sessionFile ? ["--session-file", config.sessionFile] : []),
     ];
     child = spawn(config.nodePath, args, { stdio: ["pipe", "pipe", "pipe"] });
     child.stdout.setEncoding("utf8");
@@ -301,9 +300,21 @@ function createOperations(mcp) {
   };
 
   /** 读一张白板。 */
-  const readBoard = async (boardId) => {
+  const readBoard = async (boardId, offset = 0) => {
     if (!boardId) throw new Error("缺少 boardId");
-    return dataOf(await mcp.callTool("sand_read_board", { boardId }));
+    const summary = dataOf(await mcp.callTool("sand_read_board", { boardId }));
+    const objects = dataOf(
+      await mcp.callTool("sand_list_objects", { boardId, offset, limit: 50 }),
+    );
+    const spaces = dataOf(
+      await mcp.callTool("sand_read_spaces", { boardId, offset, limit: 50 }),
+    );
+    return {
+      ...summary,
+      objects,
+      spaces,
+      hint: "objects/spaces 各有分页信息；用 offset 读取下一页，再用 sand_table_read_object 读完整对象。",
+    };
   };
 
   /** 读白板上的一个对象。 */
@@ -315,7 +326,17 @@ function createOperations(mcp) {
     );
   };
 
-  return { listBoards, readBoard, readObject };
+  const editSpace = async (args) =>
+    dataOf(
+      await mcp.callTool("sand_edit_space", {
+        boardId: args.boardId,
+        viewId: args.viewId,
+        revision: args.revision,
+        author: "DSH",
+        operation: JSON.parse(args.operation),
+      }),
+    );
+  return { listBoards, readBoard, readObject, editSpace };
 }
 
 /**
@@ -324,67 +345,18 @@ function createOperations(mcp) {
  * 只有真的能提交任务时才说能：会话控制器不在，taskSubmit 就是假，
  * 白板里也就不该出现「问 AI」入口。
  */
-function hostCapabilities(ctx) {
-  const canSubmit = Boolean(ctx.get("sessionController"));
+function hostCapabilities(tasks) {
+  const available = tasks.enabled();
   return {
     host: HOST_ID,
     version: PLUGIN_VERSION,
     capabilities: {
-      taskSubmit: canSubmit,
-      eventStream: false,
+      taskSubmit: available,
+      eventStream: available,
       contentRead: true,
-      resultKinds: ["text"],
+      resultKinds: ["text", "paper", "dataset", "file"],
     },
   };
-}
-
-/**
- * 把任务提交给宿主会话。
- *
- * 任务上下文只带**引用与版本**，不带整份快照（契约 X3）。
- */
-async function submitTask(ctx, request, agent, signal) {
-  const controller = ctx.get("sessionController");
-  if (!controller)
-    return { kind: "error", text: "当前宿主没有会话任务通道，无法提交任务。" };
-  const instruction = String(request?.instruction ?? "").trim();
-  if (!instruction) return { kind: "error", text: "任务指令为空，没有提交。" };
-  const targets = Array.isArray(request?.targets) ? request.targets : [];
-  const lines = [
-    instruction,
-    "",
-    "【Sand Table 白板上下文】",
-    `boardId: ${String(request?.boardId ?? "")}`,
-    `上下文版本: ${String(request?.contextVersion ?? "")}`,
-    targets.length
-      ? `对象引用: ${targets
-          .map(
-            (target) =>
-              `${String(target?.objectId ?? "")}@${String(target?.version ?? "")}`,
-          )
-          .join(", ")}`
-      : "对象引用: （无）",
-    "先用 sand_table_read_board / sand_table_read_object 读取内容再回答；引用与版本只是当时的快照，读取结果才是事实。",
-  ];
-  try {
-    const value = await controller.prompt(
-      {
-        requestId: randomUUID(),
-        sessionId: agent.id,
-        mode: "queue",
-        content: [{ type: "text", text: lines.join("\n") }],
-      },
-      signal,
-    );
-    if (value?.accepted !== true)
-      return { kind: "error", text: "宿主没有确认接收这次任务。" };
-    return { kind: "success", text: "已提交给宿主会话。" };
-  } catch (error) {
-    return {
-      kind: "error",
-      text: `提交失败：${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
 }
 
 /**
@@ -398,6 +370,22 @@ async function submitTask(ctx, request, agent, signal) {
 function toolDefinitions(operations) {
   const json = (value) => JSON.stringify(value);
   return [
+    {
+      name: "sand_table_edit_space",
+      description:
+        "按用户请求修改当前白板的组件、布局或关系，不修改真实文件。先 sand_table_read_board 读取 revision 及 spaces.views 中的 viewId；operation 为 sand_edit_space 操作的 JSON 字符串。冲突时重新读取，不盲目重试。",
+      parameters: {
+        boardId: { type: "string", required: true },
+        viewId: { type: "string", required: true },
+        revision: { type: "number", required: true },
+        operation: { type: "string", required: true },
+      },
+      output: {
+        schema: { type: "string" },
+        render: (_args, value) => [{ type: "text", text: String(value) }],
+      },
+      execute: async (args) => json(await operations.editSpace(args)),
+    },
     {
       name: "sand_table_list_boards",
       description:
@@ -414,6 +402,7 @@ function toolDefinitions(operations) {
       description:
         "读取一张 Sand Table 白板：标题、版本、选区、对象与空间概览、备注与编排摘要。boardId 来自 sand_table_list_boards。",
       parameters: {
+        offset: { type: "number", description: "对象与展示分页偏移，默认 0" },
         boardId: {
           type: "string",
           required: true,
@@ -424,7 +413,8 @@ function toolDefinitions(operations) {
         schema: { type: "string" },
         render: (_args, value) => [{ type: "text", text: String(value) }],
       },
-      execute: async (args) => json(await operations.readBoard(args?.boardId)),
+      execute: async (args) =>
+        json(await operations.readBoard(args?.boardId, args?.offset)),
     },
     {
       name: "sand_table_read_object",
@@ -486,6 +476,8 @@ export function apply(ctx, config) {
   const settings = resolveConfig(config);
   const mcp = createMcpClient(settings);
   const operations = createOperations(mcp);
+  const tasks = createTaskChannel(ctx);
+  ctx.effect(() => () => tasks.dispose(), "sand-table: task events");
 
   // Agent 工具：白板的读操作。
   ctx.effect(() => {
@@ -516,7 +508,7 @@ export function apply(ctx, config) {
             return {
               kind: "success",
               text: JSON.stringify({
-                ...hostCapabilities(ctx),
+                ...hostCapabilities(tasks),
                 boardUrl: settings.boardUrl,
                 workspaceId: settings.workspaceId,
               }),
@@ -529,7 +521,12 @@ export function apply(ctx, config) {
           if (action === "read_board")
             return {
               kind: "success",
-              text: JSON.stringify(await operations.readBoard(rest)),
+              text: JSON.stringify(
+                await operations.readBoard(
+                  rest.split(/\s+/)[0],
+                  Number(rest.split(/\s+/)[1] || 0),
+                ),
+              ),
             };
           if (action === "read_object") {
             const parts = rest.split(/\s+/).filter(Boolean);
@@ -542,13 +539,31 @@ export function apply(ctx, config) {
           }
           if (action === "submit") {
             const request = rest ? JSON.parse(rest) : {};
-            return await submitTask(
-              ctx,
-              request,
-              invocation.agent,
-              invocation.signal,
-            );
+            return {
+              kind: "success",
+              text: JSON.stringify(
+                await tasks.submit(
+                  request,
+                  invocation.agent,
+                  invocation.signal,
+                ),
+              ),
+            };
           }
+          if (action === "status") {
+            const { taskId, after } = JSON.parse(rest);
+            return {
+              kind: "success",
+              text: JSON.stringify(
+                tasks.status(taskId, invocation.agent, after),
+              ),
+            };
+          }
+          if (action === "cancel")
+            return {
+              kind: "success",
+              text: JSON.stringify(await tasks.cancel(rest, invocation.agent)),
+            };
           return {
             kind: "error",
             text: `未知子命令「${action || "(空)"}」。可用：capabilities、list_boards、read_board、read_object、submit。`,

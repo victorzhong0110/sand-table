@@ -8,11 +8,11 @@
 
 需要 **Node.js 22.18+**。搭建普通白板不需要仓库或 AI；需要 AI 时再连接你已有的本机 MCP 客户端。导入代码仓库时需要 Git，Python 符号索引另用系统 python3。
 
-~~~bash
+```bash
 git clone https://github.com/victorzhong0110/sand-table.git
 cd sand-table
 npm start
-~~~
+```
 
 首次启动安装本项目的固定版本依赖并构建界面。**默认不自动打开浏览器**（避免打断你正在做的事）——用终端打印的完整链接打开即可，想让它自动打开就加 `--open`。只索引目标仓库，不自动安装或运行目标项目。保持终端运行。
 
@@ -81,25 +81,25 @@ DSH 侧的插件包在 `workbench/dsh-plugin/`，集成契约见
 类型、字段、校验规则、关系词汇与模板都在包里，内核只认注册表。
 领域包提供的是**起点**，不强制流程——你完全可以从空白开始。
 
-~~~bash
+```bash
 # 可选：提前连接仓库；画布仍然为空，之后从工具箱选择加入
 npm start -- --workspace frontend=/absolute/frontend --workspace backend=/absolute/backend
 npm start -- /absolute/repository          # 默认不自动打开浏览器
 npm start -- /absolute/repository --open   # 启动后自动打开浏览器
 # 可选：指定工作空间位置与 ID
 npm start -- --workspace-dir /absolute/workspace-dir --workspace-id my-book
-~~~
+```
 
 仅监听 127.0.0.1。启动链接含本机会话凭据，打开后从地址栏移除；请勿分享完整链接。会话文件里 `url` 是不含凭据的地址，`link` 是可直接粘贴的完整链接——程序拼链接请用 `link`。
 
 ## 验证与当前边界
 
-~~~bash
+```bash
 cd workbench
 npm ci
 npm run build
 npm test
-~~~
+```
 
 外部集成使用固定版本的 lukeed/clsx 和 huggingface/huggingface_hub。完整改动测试在 clsx 的可丢弃副本中，由独立测试宿主写入并运行一个明确的源码断言；不会向外部仓库提交内容。
 
@@ -107,10 +107,9 @@ npm test
 
 **还没验证的**（如实列出，见 [problems.md](docs/problems.md)）：
 
-- **DSH 插件包没在真实 DSH 实例里装过**：本沙箱没有 DSH，也没有浏览器。插件的清单与槽位写法按官方源码核对过，
+- **DSH 插件包没在真实 DSH 实例里装过**：尚未完成真实 DSH 安装验证。插件的清单与槽位写法按官方源码核对过，
   但「装得上、入口出得来、Agent 调得到」三件事都还没在真机验过。
-- **浏览器端断言只能靠 CI**：沙箱装不上 Chromium，`test:blank` / `test:browser` / `test:local` / `test:full`
-  的结论以 CI 为准；本地跑不起来不等于代码坏了。
+- 浏览器检查可本地运行；已有 Chromium 时可设置 `CHROMIUM_PATH`。新增 `test:host` 使用真实插件与本地服务，但 DSH 执行端是脚本夹具，不能替代真机模型验收。
 - 真人验收（#15）尚未开始：没有真实被试、任务脚本与记录。
 
 详见 [工作台说明](workbench/README.md)、[快速上手](workbench/docs/QUICKSTART.md)、[实现与证据](workbench/docs/IMPLEMENTATION.md)、[真人验收](workbench/docs/HOST_ACCEPTANCE.md)、[盲评工具](workbench/acceptance/README.md)、[开发规划](docs/DEVELOPMENT_PLAN.zh-CN.md)。
@@ -118,3 +117,5 @@ npm test
 根目录旧 Research OS 界面独立保留，见 [旧界面说明](docs/LEGACY_RESEARCH_OS.md)。
 
 Apache-2.0。Copyright 2026 victorzhong0110。保留原始历史与来源声明。
+
+小说和科研组件现在可从组件库直接添加、查看和编辑。科研另有 `sand_read_pdf`、`sand_import_pdf_evidence`、`sand_verify_pdf_citation` 三个增量 MCP 工具，读取真实 PDF 页码及指纹；不包含 OCR。DSH 的安装与显式嵌入配置见 [插件说明](workbench/dsh-plugin/README.md)。

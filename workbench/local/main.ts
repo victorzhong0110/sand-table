@@ -12,6 +12,7 @@ let open = false,
   workspaceId: string | undefined = process.env.SAND_WORKSPACE_ID,
   preset: "blank" | "code" = "blank";
 const roots: string[] = [];
+const embedOrigins: string[] = [];
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
@@ -25,11 +26,13 @@ for (let i = 0; i < args.length; i++) {
       "--session-file",
       "--workspace-dir",
       "--workspace-id",
+      "--embed-origin",
     ].includes(arg)
   ) {
     const value = args[++i];
     if (!value) throw Error(`Missing value for ${arg}`);
-    if (arg === "--workspace") roots.push(value);
+    if (arg === "--embed-origin") embedOrigins.push(value);
+    else if (arg === "--workspace") roots.push(value);
     else if (arg === "--session-file") sessionFile = resolve(value);
     else if (arg === "--workspace-dir") workspaceDir = resolve(value);
     else if (arg === "--workspace-id") workspaceId = value;
@@ -59,6 +62,7 @@ try {
     preset,
     workspaceDir,
     workspaceId,
+    embedOrigins,
   });
   console.log(
     [

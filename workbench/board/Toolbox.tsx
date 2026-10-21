@@ -1,3 +1,4 @@
+import { paletteTypes, initialData } from "./domain-ui.ts";
 import { Icon } from "./Icon.tsx";
 import { useState } from "react";
 import type { Board, ComponentPack } from "../core/model.ts";
@@ -6,6 +7,12 @@ import { componentTypes, defaultData } from "../core/spaces.ts";
 import { HistoryPanel } from "./HistoryPanel.tsx";
 import "./packs.css";
 const groups = [
+  { id: "novel", title: "小说", types: ["character", "event", "chapter"] },
+  {
+    id: "research",
+    title: "科研",
+    types: ["hypothesis", "evidence", "conclusion"],
+  },
   {
     id: "basic",
     title: "基础",
@@ -81,7 +88,7 @@ export function Toolbox({
     [packNotice, setPackNotice] = useState(""),
     [packBusy, setPackBusy] = useState(false),
     [exported, setExported] = useState<{ id: string; json: string }>();
-  const palette = componentTypes.filter(
+  const palette = paletteTypes().filter(
     (c) =>
       groups.find((g) => g.id === group)!.types.includes(c.type) &&
       c.title.includes(query),
@@ -194,7 +201,7 @@ export function Toolbox({
       JSON.stringify({
         type,
         title,
-        data: data || defaultData(type),
+        data: data || initialData(type, title),
         objectId,
       }),
     );
