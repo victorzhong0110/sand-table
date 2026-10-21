@@ -61,6 +61,7 @@ export class BoardStore {
   persistence?: WorkspacePersistence;
   /** 当前工作空间 ID。空白启动也会落盘，不依赖 Git 或 AI。 */
   workspaceId?: string;
+  workspaceTitle?: string;
   /** 最近一次保存失败的原因。保存失败必须可观察，不能显示虚假的「已保存」。 */
   lastSaveError?: string;
   /** 最近一次读取失败的原因。读取失败不能当作「没有工作空间」。 */
@@ -145,6 +146,15 @@ export class BoardStore {
     }
     if (this.boards.size >= 8)
       throw Error("End another board first (limit 8).");
+    const b = this.newBoard(p, title);
+    applyPreset(b);
+    if (preset === "blank") b.instances = [];
+    this.boards.set(b.id, b);
+    this.touch();
+    return this.read(b.id);
+  }
+
+  private newBoard(p: Projection, title: string): Board {
     const b: Board = {
       ...structuredClone(p),
       id: randomUUID(),
@@ -175,19 +185,26 @@ export class BoardStore {
       ...(this.workspaceId ? { workspaceId: this.workspaceId } : {}),
     };
     initializeSpaces(b);
-    applyPreset(b);
-    // 空白预设：只对**新建**的白板生效。恢复出来的白板带着用户自己的内容，
-    // 不能因为预设是 blank 就清空——那是把作品抹掉，不是"从空白开始"。
-    if (preset === "blank") b.instances = [];
-    this.boards.set(b.id, b);
-    this.touch();
-    return this.read(b.id);
+    return b;
   }
 
   /** 从持久化快照恢复白板。 */
   restore(snapshot: WorkspaceSnapshot): Board {
     const persisted = snapshot.boards[0];
-    if (!persisted) throw Error("工作空间里没有白板。");
+    // A newly created workspace is valid even before its first board exists.
+    if (!persisted) {
+      this.boards.clear();
+      this.histories.clear();
+      this.contextSnapshots.clear();
+      this.workspaceId = snapshot.id;
+      this.workspaceTitle = snapshot.title;
+      const b = this.newBoard(
+        { objects: [], relations: [], workspaces: [] },
+        snapshot.title,
+      );
+      this.boards.set(b.id, b);
+      return b;
+    }
     const b: Board = {
       id: persisted.id,
       revision: persisted.revision,
@@ -224,6 +241,11 @@ export class BoardStore {
       objects: [],
       relations: [],
     };
+    this.boards.clear();
+    this.histories.clear();
+    this.contextSnapshots.clear();
+    this.workspaceId = snapshot.id;
+    this.workspaceTitle = snapshot.title;
     this.boards.set(b.id, b);
     this.histories.set(b.id, new History(b.history, { requireKind: true }));
     return b;
@@ -1460,7 +1482,7 @@ export class BoardStore {
       // （内核不 import 存储层，避免把存储细节漏进核心）。
       schemaVersion: 2,
       id: this.workspaceId || b.id,
-      title: b.title,
+      title: this.workspaceTitle ?? b.title,
       createdAt: this.now(),
       updatedAt: this.now(),
       revision: b.revision,

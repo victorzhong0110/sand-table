@@ -21,6 +21,7 @@ try {
     metafile: true,
     entryPoints: ["local/bridge.ts"],
     bundle: true,
+    external: ["pdfjs-dist/*"],
     platform: "node",
     format: "esm",
     target: "node22",

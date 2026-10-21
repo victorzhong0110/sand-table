@@ -5,6 +5,7 @@
 // 存在的唯一理由：**入口显隐由宿主的真实能力决定，不由猜测决定**。
 // 拿不到能力就不显示对话入口——这是集成轮决策 D7 的延续。
 
+import { safeUrl } from "./spaces.ts";
 import type {
   HostCapabilities,
   HostTaskEvent,
@@ -23,6 +24,7 @@ export type HostBridge = {
    */
   submitTask(request: HostTaskRequest): Promise<{ taskId: string }>;
   /** 订阅任务事件。返回取消订阅函数。 */
+  cancelTask?(taskId: string): Promise<void>;
   subscribe(listener: (event: HostTaskEvent) => void): () => void;
 };
 
@@ -62,6 +64,7 @@ export type InjectedHost = {
   version?: string;
   capabilities?: Partial<HostCapabilities>;
   submitTask?: (request: HostTaskRequest) => Promise<{ taskId: string }>;
+  cancelTask?: (taskId: string) => Promise<void>;
   subscribe?: (listener: (event: HostTaskEvent) => void) => (() => void) | void;
 };
 
@@ -86,7 +89,8 @@ export function readInjectedBridge(scope: unknown): HostBridge | undefined {
   const capabilities: HostCapabilities = {
     host: host.host,
     version: host.version,
-    taskSubmit: raw.taskSubmit === true,
+    taskSubmit:
+      raw.taskSubmit === true && typeof host.submitTask === "function",
     eventStream: raw.eventStream === true,
     contentRead: raw.contentRead === true,
     resultKinds: Array.isArray(raw.resultKinds) ? raw.resultKinds : undefined,
@@ -95,12 +99,15 @@ export function readInjectedBridge(scope: unknown): HostBridge | undefined {
     host: host.host,
     capabilities: () => capabilities,
     submitTask: async (request: HostTaskRequest) => {
+      if (raw.taskSubmit === true && typeof host.submitTask !== "function")
+        throw new Error("宿主声明了任务提交能力，但没有提供提交入口。");
       if (!capabilities.taskSubmit)
         throw new Error("宿主没有声明任务提交能力。");
       if (typeof host.submitTask !== "function")
-        throw new Error("宿主声明了任务提交能力，但没有提供提交入口。");
+        throw new Error("宿主提交入口已断开。");
       return host.submitTask(request);
     },
+    cancelTask: host.cancelTask,
     subscribe: (listener: (event: HostTaskEvent) => void) => {
       if (!capabilities.eventStream || typeof host.subscribe !== "function")
         return () => {};
@@ -154,7 +161,7 @@ export type HostResult = {
   /** 表格数据：首行是表头。 */
   rows?: (string | number)[][];
   /** 资源定位。 */
-  resource?: { uri: string; fragment?: string };
+  resource?: { uri: string; fragment?: string; fingerprint?: string };
   /** 来源说明：结果从哪来。 */
   source?: string;
 };
@@ -181,11 +188,14 @@ export function mapHostResult(result: HostResult): MappedResult {
       type: "evidence",
       title,
       data: {
-        summary: result.text ?? "",
-        ...(result.resource
+        summary: result.text || title,
+        ...(result.resource ? { externalResource: result.resource } : {}),
+        ...(result.resource?.fragment && result.resource.fingerprint
           ? {
               citation: {
                 uri: result.resource.uri,
+                fingerprint: result.resource.fingerprint,
+                status: "valid",
                 ...(result.resource.fragment
                   ? { fragment: result.resource.fragment }
                   : {}),
@@ -202,15 +212,15 @@ export function mapHostResult(result: HostResult): MappedResult {
         type: "table",
         title,
         data: {
-          columns: result.rows[0].map((_, i) => `col${i + 1}`),
+          columns: result.rows[0].map(String),
           rows: result.rows.slice(1).map((r) => r.map((v) => String(v))),
         },
         ...(result.source ? { source: result.source } : {}),
       };
     return {
-      type: "chart",
+      type: "text",
       title,
-      data: { points: [] },
+      data: { text: result.text || "数据结果未包含可绘制的值。" },
       ...(result.source ? { source: result.source } : {}),
     };
   }
@@ -219,15 +229,12 @@ export function mapHostResult(result: HostResult): MappedResult {
       type: "resource",
       title,
       data: {
-        ...(result.resource
-          ? {
-              uri: result.resource.uri,
-              ...(result.resource.fragment
-                ? { fragment: result.resource.fragment }
-                : {}),
-            }
+        url: safeUrl(result.resource?.uri ?? result.url) ?? "",
+        resourceUri: result.resource?.uri ?? result.url ?? "",
+        description: result.text ?? "",
+        ...(result.resource?.fragment
+          ? { fragment: result.resource.fragment }
           : {}),
-        ...(result.text ? { text: result.text } : {}),
       },
       ...(result.source ? { source: result.source } : {}),
     };
@@ -238,7 +245,7 @@ export function mapHostResult(result: HostResult): MappedResult {
     title,
     data: {
       text: result.text ?? (result.url ? result.url : ""),
-      ...(result.url ? { url: result.url } : {}),
+      ...(safeUrl(result.url) ? { url: safeUrl(result.url) } : {}),
     },
     ...(result.source ? { source: result.source } : {}),
   };

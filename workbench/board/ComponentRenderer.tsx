@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { Board } from "../core/model.ts";
 import type { ComponentInstance } from "../core/spaces.ts";
-import { componentTypes, safeUrl } from "../core/spaces.ts";
+import { findObjectType } from "../core/domains.ts";
+import { componentTypes, safeUrl, findComponentSpec } from "../core/spaces.ts";
 import { peekContent } from "../core/content.ts";
 const text = (v: unknown) => (v === undefined || v === null ? "" : String(v));
 export function ComponentRenderer({
@@ -84,7 +85,7 @@ export function ComponentRenderer({
   const header = (
     <>
       <span className="card-type">
-        {componentTypes.find((t) => t.type === c.type)?.title || "未知组件"}
+        {findComponentSpec(c.type)?.title || "未知组件"}
       </span>
       {!componentTypes.some((t) => t.title === title) && (
         <strong>{title}</strong>
@@ -98,9 +99,7 @@ export function ComponentRenderer({
       return (
         <>
           {header}
-          <p className="component-text">
-            {text(d.text) || "写点什么…"}
-          </p>
+          <p className="component-text">{text(d.text) || "写点什么…"}</p>
         </>
       );
     case "code":
@@ -117,6 +116,12 @@ export function ComponentRenderer({
         <>
           {header}
           <p>{text(d.description)}</p>
+          {d.resourceUri && (
+            <small className="path">
+              {text(d.resourceUri)}
+              {d.fragment ? ` · ${text(d.fragment)}` : ""}
+            </small>
+          )}
           {asset?.dataUrl &&
             (asset.mime.startsWith("image/") ? (
               <img src={asset.dataUrl} alt={asset.name} />
@@ -136,7 +141,7 @@ export function ComponentRenderer({
               打开资源 ↗
             </button>
           ) : (
-            !d.assetId && <small>尚未关联资源</small>
+            !d.assetId && !d.resourceUri && <small>尚未关联资源</small>
           )}
         </>
       );
@@ -416,6 +421,37 @@ export function ComponentRenderer({
       );
     }
     default:
+      if (findObjectType(c.type))
+        return (
+          <>
+            {header}
+            <dl>
+              {findObjectType(c.type)!.fields?.map((field) => {
+                const value: any = d[field.key];
+                if (value === undefined || value === null || value === "")
+                  return null;
+                const label =
+                  typeof value === "object"
+                    ? Array.isArray(value)
+                      ? value.join("、")
+                      : [value.uri, value.fragment, value.status]
+                          .filter(Boolean)
+                          .join(" · ")
+                    : typeof value === "boolean"
+                      ? value
+                        ? "是"
+                        : "否"
+                      : String(value);
+                return (
+                  <div key={field.key}>
+                    <dt>{field.label}</dt>
+                    <dd>{label}</dd>
+                  </div>
+                );
+              })}
+            </dl>
+          </>
+        );
       return (
         <>
           {header}

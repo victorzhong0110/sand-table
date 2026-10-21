@@ -1,9 +1,21 @@
 name: Workbench
 on:
   push:
-    paths: ['workbench/**', 'package.json', 'scripts/start-workbench.mjs', '.github/workflows/workbench.yml']
+    paths:
+      [
+        "workbench/**",
+        "package.json",
+        "scripts/start-workbench.mjs",
+        ".github/workflows/workbench.yml",
+      ]
   pull_request:
-    paths: ['workbench/**', 'package.json', 'scripts/start-workbench.mjs', '.github/workflows/workbench.yml']
+    paths:
+      [
+        "workbench/**",
+        "package.json",
+        "scripts/start-workbench.mjs",
+        ".github/workflows/workbench.yml",
+      ]
 permissions:
   contents: read
 jobs:
@@ -16,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
           cache-dependency-path: workbench/package-lock.json
       - run: npm ci --ignore-scripts
@@ -42,6 +54,7 @@ jobs:
         env:
           SAND_EXTERNAL_REPO: /tmp/sand-clsx
 
+      - run: npm run test:host
       - run: npm run test:blank
         env:
           SAND_EXTERNAL_REPO: /tmp/sand-clsx

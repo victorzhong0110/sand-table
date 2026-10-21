@@ -37,11 +37,13 @@ export function createWorkspaceManager(
       restore: (snapshot) => {
         store.restore(snapshot);
       },
-      attach: (nextId) => {
-        store.attachPersistence(
-          workspacePort(new WorkspaceStore(root)),
-          nextId,
-        );
+      renamed: (title) => {
+        store.workspaceTitle = title;
+      },
+      attach: (nextId, baseline) => {
+        const port = workspacePort(new WorkspaceStore(root), baseline);
+        store.attachPersistence(port, nextId);
+        store.touch();
       },
     },
   });

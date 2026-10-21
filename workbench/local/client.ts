@@ -55,7 +55,7 @@ async function requestSessionToken() {
         "）。请确认终端里的 Sand Table 实例还在运行，然后点「重新连接」。",
     );
   }
-  const data = await response.json().catch(() => ({} as any));
+  const data = await response.json().catch(() => ({}) as any);
   if (!response.ok)
     throw Error(
       "本机工作台拒绝了凭据请求（HTTP " +
@@ -89,7 +89,7 @@ async function request(route: string, data: unknown = {}) {
     },
     body: JSON.stringify(data),
   });
-  const result = await response.json().catch(() => ({} as any));
+  const result = await response.json().catch(() => ({}) as any);
   if (!response.ok) {
     const error = Error(
       result?.error || "工作台请求失败（HTTP " + response.status + "）",
@@ -136,6 +136,48 @@ function renderStatus(data: any) {
     ? `MCP 接入进程 ${entries.length} 个${latest ? ` · 最近工具：${latest.lastTool}` : " · 等待 AI 调用工具"}`
     : "尚未连接 AI · 可以先浏览，再点击「连接我的 AI」";
 }
+const embedded = location.pathname === "/embed" && window.parent !== window;
+let hostOrigin = "";
+let hostHandshake: unknown;
+const toBoard = (data: unknown) =>
+  document.querySelector("iframe")?.contentWindow?.postMessage(data, "*");
+window.addEventListener("message", (event) => {
+  if (!embedded) return;
+  if (event.source === window.parent) {
+    if (hostOrigin && event.origin !== hostOrigin) return;
+    if (event.data?.type === "sand-table:host-bridge") {
+      if (!event.origin || event.origin === "null") return;
+      hostOrigin = event.origin;
+      hostHandshake = event.data;
+      toBoard(event.data);
+    } else if (
+      hostOrigin &&
+      [
+        "sand-table:submit-task-result",
+        "sand-table:submit-task-error",
+        "sand-table:task-event",
+      ].includes(event.data?.type)
+    )
+      toBoard(event.data);
+  } else if (
+    event.source === document.querySelector("iframe")?.contentWindow &&
+    event.data?.type === "sand-table:bridge-ready"
+  ) {
+    if (hostHandshake) toBoard(hostHandshake);
+    window.parent.postMessage(
+      { type: "sand-table:bridge-ready" },
+      hostOrigin || "*",
+    );
+  } else if (
+    event.source === document.querySelector("iframe")?.contentWindow &&
+    hostOrigin &&
+    ["sand-table:submit-task", "sand-table:cancel-task"].includes(
+      event.data?.type,
+    )
+  ) {
+    window.parent.postMessage(event.data, hostOrigin);
+  }
+});
 async function mount() {
   element("error").hidden = true;
   const boot = await request("/bootstrap");
@@ -153,6 +195,14 @@ async function mount() {
   const old = document.querySelector("iframe")!;
   const frame = old.cloneNode() as HTMLIFrameElement;
   old.replaceWith(frame);
+  frame.addEventListener("load", () => {
+    if (hostHandshake) toBoard(hostHandshake);
+    if (embedded)
+      window.parent.postMessage(
+        { type: "sand-table:bridge-ready" },
+        hostOrigin || "*",
+      );
+  });
   bridge = new AppBridge(
     null,
     { name: "Sand Table local workbench", version: "0.3.0" },
@@ -275,21 +325,18 @@ void connect().catch((e) =>
         ),
   ),
 );
-setInterval(
-  () => {
-    if (connecting || !window.__sandToken) return;
-    void request("/status")
-      .then(renderStatus)
-      .catch((e) => {
-        element("connection").textContent = "与本地工作台断开";
-        showError(
-          Error(
-            "与本地工作台断开：" +
-              (e instanceof Error ? e.message : String(e)) +
-              " 点「重新连接」可重新取凭据并重连；也可以在终端里重新启动实例。",
-          ),
-        );
-      });
-  },
-  3000,
-);
+setInterval(() => {
+  if (connecting || !window.__sandToken) return;
+  void request("/status")
+    .then(renderStatus)
+    .catch((e) => {
+      element("connection").textContent = "与本地工作台断开";
+      showError(
+        Error(
+          "与本地工作台断开：" +
+            (e instanceof Error ? e.message : String(e)) +
+            " 点「重新连接」可重新取凭据并重连；也可以在终端里重新启动实例。",
+        ),
+      );
+    });
+}, 3000);

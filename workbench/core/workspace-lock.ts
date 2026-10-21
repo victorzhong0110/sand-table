@@ -394,9 +394,9 @@ export class WorkspaceLock {
    */
   private isStaleFile(holder: WorkspaceLockHolder | null): boolean {
     if (holder) {
-      if (holder.host === this.host && !this.isProcessAlive(holder.pid))
-        return true;
-      return this.now() - holder.at > this.staleMs;
+      if (holder.host === this.host) return !this.isProcessAlive(holder.pid);
+      // Age alone is not proof a remote owner has died; never steal a live lease.
+      return false;
     }
     // 持有者读不出来（进程死在写锁文件的中途）：只能靠文件时间判断。
     const mtime = this.mtimeMs();

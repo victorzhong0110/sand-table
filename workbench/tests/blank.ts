@@ -403,17 +403,12 @@ try {
     .getByRole("button", { name: "AI 编排", exact: true })
     .first()
     .click();
-  await frame
-    .getByRole("textbox", { name: "给 AI 的编排请求" })
-    .fill("在这个子白板里添加一个比较组件，保留我的便签。");
-  await frame.getByRole("button", { name: "交给我的 AI", exact: true }).click();
-  await page.locator("#setup-panel").waitFor();
-  assert.match(
-    await page.locator("#prompt").inputValue(),
-    /在这个子白板里添加一个比较组件/,
+  assert.equal(
+    await frame.getByRole("textbox", { name: "给 AI 的编排请求" }).count(),
+    0,
+    "read-only MCP is not an executable AI channel",
   );
-  assert.ok((await page.locator("#prompt").inputValue()).includes(boardId));
-  await page.getByRole("button", { name: "返回白板" }).click();
+  await frame.getByRole("heading", { name: "你的 AI 怎么接入" }).waitFor();
   // A scripted external MCP client maintains the same board, without a repository.
   b = await read();
   const viewId = Object.keys(b.views)[0];
@@ -772,7 +767,7 @@ try {
   );
   assert.deepEqual(errors, []);
   console.log(
-    "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, explicit AI handoff/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",
+    "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",
   );
 } catch (e) {
   const failedPage = browser?.contexts()[0]?.pages()[0];

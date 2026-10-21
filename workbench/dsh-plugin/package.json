@@ -2,7 +2,7 @@
   "name": "@sand-table/dsh-plugin",
   "version": "0.1.0",
   "private": true,
-  "description": "Sand Table 的 DSH 插件包：Agent 可读的白板工具 + 侧栏白板面板 + 白板内「问 AI」入口。",
+  "description": "Sand Table \u7684 DSH \u63d2\u4ef6\u5305\uff1aAgent \u53ef\u8bfb\u7684\u767d\u677f\u5de5\u5177 + \u4fa7\u680f\u767d\u677f\u9762\u677f + \u767d\u677f\u5185\u300c\u95ee AI\u300d\u5165\u53e3\u3002",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -17,7 +17,8 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "README.md"
+    "README.md",
+    "tasks.js"
   ],
   "engines": {
     "dsh": ">=0.2.1-rc.2 <0.3.0"

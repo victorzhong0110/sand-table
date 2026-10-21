@@ -76,7 +76,8 @@ export type WorkspaceHost = {
    */
   flush(): void | Promise<void>;
   restore(snapshot: WorkspaceSnapshot): void;
-  attach(workspaceId: string): void;
+  attach(workspaceId: string, baseline?: WorkspaceSnapshot): void;
+  renamed?(title: string): void;
 };
 
 /** list() 的结果：可用条目 + 被跳过的损坏工作空间。 */
@@ -125,6 +126,7 @@ export class WorkspaceManager {
   private readonly hostName: string;
   /** 已经 create 过但还没落盘的 id：防止同一进程里建出两个同名的。 */
   private readonly reserved = new Set<string>();
+  private readonly baselines = new Map<string, string | null>();
 
   constructor(options: WorkspaceManagerOptions) {
     if (typeof options?.root !== "string" || !options.root.trim())
@@ -215,6 +217,7 @@ export class WorkspaceManager {
       ...(input?.title === undefined ? {} : { title: input.title }),
     });
     this.reserved.add(id);
+    this.baselines.set(id, null);
     return workspace;
   }
 
@@ -226,7 +229,18 @@ export class WorkspaceManager {
       recursive: true,
     });
     const lock = this.lock(workspace.id);
-    return lock.withLock(() => this.store.save(workspace));
+    return lock.withLock(() => {
+      const disk = this.store.exists(workspace.id)
+        ? JSON.stringify(this.store.load(workspace.id).workspace)
+        : null;
+      if (disk !== (this.baselines.get(workspace.id) ?? null))
+        throw new WorkspaceConflictError(
+          "工作空间已被其他写者修改，拒绝覆盖。",
+        );
+      const saved = this.store.save(workspace);
+      this.baselines.set(saved.id, JSON.stringify(saved));
+      return saved;
+    });
   }
 
   /**
@@ -235,6 +249,7 @@ export class WorkspaceManager {
    */
   open(id: string): WorkspaceOpenResult {
     const loaded = this.store.load(id);
+    this.baselines.set(id, JSON.stringify(loaded.workspace));
     return {
       workspace: loaded.workspace,
       recovered: loaded.recovered,
@@ -251,8 +266,9 @@ export class WorkspaceManager {
       throw new WorkspaceNotFoundError(
         `工作空间「${id}」不存在于 ${this.root}。`,
       );
+    if (this.host?.currentWorkspaceId() === id) await this.host.flush();
     const lock = this.lock(id);
-    return lock.withLock(() => {
+    const saved = await lock.withLock(() => {
       const loaded = this.store.load(id);
       const updated: WorkspaceFile = {
         ...loaded.workspace,
@@ -261,6 +277,12 @@ export class WorkspaceManager {
       };
       return this.store.save(updated);
     });
+    this.baselines.set(id, JSON.stringify(saved));
+    if (this.host?.currentWorkspaceId() === id) {
+      this.host.renamed?.(next);
+      this.host.attach(id, saved);
+    }
+    return saved;
   }
 
   /**
@@ -268,6 +290,10 @@ export class WorkspaceManager {
    * 被别的进程持锁时拒绝：删掉别人正在写的工作空间，丢的是对方的内容。
    */
   async delete(id: string): Promise<{ id: string }> {
+    if (this.host?.currentWorkspaceId() === id)
+      throw new WorkspaceError(
+        "不能删除正在使用的工作空间，请先切换到其他工作空间。",
+      );
     const dir = this.store.workspaceDir(id);
     if (!this.fs.existsSync(dir))
       throw new WorkspaceNotFoundError(
@@ -298,9 +324,10 @@ export class WorkspaceManager {
       );
     const current = this.host.currentWorkspaceId();
     if (current && current !== id) await this.host.flush();
+    if (current === id) await this.host.flush();
     const target = this.open(id);
     this.host.restore(target.workspace);
-    this.host.attach(id);
+    this.host.attach(id, target.workspace);
     return target;
   }
 

@@ -1,8 +1,15 @@
+import { initialData } from "./domain-ui.ts";
 import { Icon } from "./Icon.tsx";
 import { useState, useEffect, useRef, type CSSProperties } from "react";
+import type { HostTaskEvent } from "../core/objects.ts";
 import type { Board, Item } from "../core/model.ts";
 import type { HistorySnapshot } from "../core/history.ts";
-import { safeUrl, defaultData, componentTypes } from "../core/spaces.ts";
+import {
+  safeUrl,
+  defaultData,
+  componentTypes,
+  findComponentSpec,
+} from "../core/spaces.ts";
 import { SpaceCanvas } from "./SpaceCanvas.tsx";
 import { Toolbox } from "./Toolbox.tsx";
 import { ComponentPanel, ThemePanel } from "./ComponentPanel.tsx";
@@ -27,6 +34,8 @@ export function CanvasShell({
   aiMode = "mcp",
   sendToHost,
   workspacePanel,
+  hostTask,
+  onCancelHostTask,
 }: {
   board: Board;
   viewId: string;
@@ -57,6 +66,8 @@ export function CanvasShell({
   sendToHost?: (text: string) => Promise<void>;
   /** 工作空间管理面板的接线。传了就显示「工作空间」入口。 */
   workspacePanel?: WorkspacePanelProps;
+  hostTask?: HostTaskEvent;
+  onCancelHostTask?: () => Promise<void>;
 }) {
   const [mode, setMode] = useState("browse"),
     [focusRevision, setFocusRevision] = useState(0),
@@ -84,6 +95,8 @@ export function CanvasShell({
   }, [JSON.stringify(b.theme)]);
   useEffect(() => {
     setSource(undefined);
+    // Selecting context or receiving an AI result must not close the conversation.
+    if (panel === "ai") return;
     if (selected)
       setPanel(selected.type === "object" ? "source" : "properties");
     else if (panel === "source" || panel === "properties") setPanel("");
@@ -116,7 +129,7 @@ export function CanvasShell({
   ) => {
     setQuery("");
     setMode("arrange");
-    const size_ = componentTypes.find((c) => c.type === type);
+    const size_ = findComponentSpec(type);
     const narrow = window.innerWidth < 700;
     if (narrow) setToolsOpen(false);
     const camera = view?.camera || { x: 24, y: 24, zoom: 1 };
@@ -126,7 +139,7 @@ export function CanvasShell({
       kind: "create",
       type,
       title,
-      data: data ?? defaultData(type),
+      data: data ?? initialData(type, title),
       rect: {
         x: ((narrow ? 24 : 280) + offset - camera.x) / camera.zoom,
         y: (160 + offset - 36 - camera.y) / camera.zoom,
@@ -467,6 +480,22 @@ export function CanvasShell({
                   </>
                 )}
                 {handoff && <p role="status">{handoff}</p>}
+                {hostTask && (
+                  <div role="status" aria-label="AI 任务状态">
+                    <p>{hostTask.message || hostTask.state}</p>
+                    {hostTask.state === "running" && onCancelHostTask && (
+                      <button
+                        onClick={() =>
+                          void onCancelHostTask().catch((e) =>
+                            setHandoff(String(e)),
+                          )
+                        }
+                      >
+                        停止 AI
+                      </button>
+                    )}
+                  </div>
+                )}
                 {(b.spaceActivities?.length || 0) > 0 && (
                   <>
                     <h3>Agent 在哪里</h3>

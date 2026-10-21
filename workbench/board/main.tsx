@@ -1,3 +1,4 @@
+import "./domain-ui.ts";
 import { CanvasShell } from "./CanvasShell.tsx";
 import React, { useState, useEffect, useRef, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
@@ -12,9 +13,13 @@ import { resultData } from "../core/results.ts";
 import { GuidePanel } from "./GuidePanel.tsx";
 import { HistoryPanel } from "./HistoryPanel.tsx";
 import type { HistorySnapshot } from "../core/history.ts";
-import { canShowTaskEntry, resolveBridge } from "../core/host-bridge.ts";
+import {
+  canShowTaskEntry,
+  resolveBridge,
+  mapHostResult,
+} from "../core/host-bridge.ts";
 import { installHostBridgeClient } from "./host-bridge-client.ts";
-import type { WorkspaceDescriptor } from "../core/objects.ts";
+import type { HostTaskEvent, WorkspaceDescriptor } from "../core/objects.ts";
 const relationLabels = {
   contains: "包含",
   imports: "导入",
@@ -28,9 +33,12 @@ function Workbench() {
   const [viewId] = useState(() => crypto.randomUUID());
   const [tab, setTab] = useState("inspect");
   const opening = useRef(false);
+  const [, hostChanged] = useState(0);
+  const [hostTask, setHostTask] = useState<HostTaskEvent>();
   const operations = useRef<Promise<unknown>>(Promise.resolve());
   const [board, setBoard] = useState<Board>(),
     [error, setError] = useState(""),
+    [saveError, setSaveError] = useState(""),
     [ended, setEnded] = useState(false),
     [busy, setBusy] = useState(false);
   const [theme, setTheme] = useState("paper"),
@@ -95,7 +103,7 @@ function Workbench() {
       scope: window,
       parent: window.parent,
       /* 跨源时不能用 "*"：那等于把能力与任务内容广播给任何嵌入者。 */
-      targetOrigin: window.location.origin,
+      onCapabilities: () => hostChanged((n) => n + 1),
     });
     return () => client.dispose();
   }, []);
@@ -105,7 +113,44 @@ function Workbench() {
     typeof window === "undefined" ? undefined : window,
     app ? "mcp" : "local",
   );
-  const hostReady = Boolean(app) || canShowTaskEntry(bridge);
+  const resultQueue = useRef<Promise<unknown>>(Promise.resolve());
+  useEffect(
+    () =>
+      bridge.subscribe((event) => {
+        if (event.boardId && event.boardId !== boardRef.current?.id) return;
+        setHostTask(event);
+        for (const result of event.results ?? []) {
+          resultQueue.current = resultQueue.current
+            .then(async () => {
+              if (event.boardId && event.boardId !== boardRef.current?.id)
+                return;
+              const mapped = mapHostResult(result);
+              const current = boardRef.current;
+              if (!current) return;
+              const r = await call("sand_edit_space", {
+                revision: current.revision,
+                viewId,
+                author: "DSH",
+                operation: {
+                  kind: "create",
+                  type: mapped.type,
+                  title: mapped.title,
+                  data: {
+                    ...mapped.data,
+                    hostSource: mapped.source ?? bridge.host,
+                    hostTaskId: event.taskId,
+                  },
+                },
+              });
+              boardRef.current = r;
+              setBoard(r);
+            })
+            .catch((e) => setError(`AI 结果未能写入白板：${String(e)}`));
+        }
+      }),
+    [bridge.host, bridge.capabilities().eventStream, app],
+  );
+  const hostReady = canShowTaskEntry(bridge);
   async function call(name: string, args: Record<string, unknown> = {}) {
     if (!app) throw Error("尚未连接宿主");
     return unpack(
@@ -307,8 +352,16 @@ function Workbench() {
   useEffect(() => {
     if (!board?.id || ended) return;
     const timer = setInterval(() => {
-      if (!busy && document.visibilityState === "visible")
+      if (!busy && document.visibilityState === "visible") {
         void action("sand_read_board");
+        void call("sand_workspace_status")
+          .then((status) =>
+            setSaveError(
+              status.lastSaveError ? `保存失败：${status.lastSaveError}` : "",
+            ),
+          )
+          .catch(() => {});
+      }
     }, 5000);
     return () => clearInterval(timer);
   }, [board?.id, busy, ended]);
@@ -412,6 +465,12 @@ function Workbench() {
             await refreshWorkspaces();
           },
         }}
+        hostTask={hostTask}
+        onCancelHostTask={
+          bridge.cancelTask && hostTask
+            ? () => bridge.cancelTask!(hostTask.taskId)
+            : undefined
+        }
         sendToHost={
           canShowTaskEntry(bridge)
             ? async (text) => {
@@ -432,11 +491,18 @@ function Workbench() {
                   .filter((t): t is { objectId: string; version: number } =>
                     Boolean(t),
                   );
-                await bridge.submitTask({
+                const submitted = await bridge.submitTask({
                   boardId: current?.id ?? "",
                   instruction: text,
                   targets,
                   contextVersion: current?.contentRevision ?? 0,
+                });
+                setHostTask({
+                  taskId: submitted.taskId,
+                  boardId: current?.id,
+                  state: "queued",
+                  message: "已提交",
+                  at: Date.now(),
                 });
               }
             : undefined
