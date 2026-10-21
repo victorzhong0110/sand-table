@@ -89,13 +89,11 @@ export function removeConnection(file: string, token: string) {
   } catch {}
 }
 const describeCause = (cause: unknown) => {
-  const e = cause as
-    | {
-        message?: string;
-        code?: string;
-        cause?: { code?: string; message?: string; errors?: any[] };
-      }
-    | null;
+  const e = cause as {
+    message?: string;
+    code?: string;
+    cause?: { code?: string; message?: string; errors?: any[] };
+  } | null;
   const inner = e?.cause;
   const first = Array.isArray(inner?.errors) ? inner.errors[0] : inner;
   const code = e?.code || first?.code;
@@ -105,7 +103,8 @@ const describeCause = (cause: unknown) => {
 // The session file could not be read at all: the workbench is not running,
 // --session-file points somewhere else, or the file was removed.
 function unreadableSessionFile(file: string, cause: unknown) {
-  const missing = (cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+  const missing =
+    (cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
   const detail = cause instanceof Error ? cause.message : String(cause);
   return [
     `Sand Table 会话文件读不到：${file}`,
@@ -145,8 +144,10 @@ export async function request(file: string, route: string, data: unknown) {
     throw Error(mismatchedSession(file, c, describeCause(e)));
   }
   if (!response.ok) {
-    const body = await response.json().catch(() => ({} as any));
-    const reason = body?.error ? `HTTP ${response.status}（${body.error}）` : `HTTP ${response.status}`;
+    const body = await response.json().catch(() => ({}) as any);
+    const reason = body?.error
+      ? `HTTP ${response.status}（${body.error}）`
+      : `HTTP ${response.status}`;
     throw Error(mismatchedSession(file, c, reason));
   }
   return await response.json();

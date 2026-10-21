@@ -50,42 +50,47 @@ export function registerResearchTools(tool: RegisterTool, store: BoardStore) {
         ...result,
         quote: result.text.slice(0, 2000),
       });
-      const intent = randomUUID();
-      const object = store.createContent(
-        b,
-        {
-          type: "evidence",
-          title: a.title,
-          data: { summary: a.summary ?? result.text.slice(0, 2000), citation },
-          source: {
-            origin: "imported",
-            author: "PDF",
-            external: {
-              kind: "pdf",
-              uri: result.uri,
-              fragment: result.fragment,
+      store.atomic(b, () => {
+        const intent = randomUUID();
+        const object = store.createContent(
+          b,
+          {
+            type: "evidence",
+            title: a.title,
+            data: {
+              summary: a.summary ?? result.text.slice(0, 2000),
+              citation,
             },
-            fingerprint: result.fingerprint,
+            source: {
+              origin: "imported",
+              author: "PDF",
+              external: {
+                kind: "pdf",
+                uri: result.uri,
+                fragment: result.fragment,
+              },
+              fingerprint: result.fingerprint,
+            },
           },
-        },
-        "PDF",
-        intent,
-        "agent",
-      );
-      store.createResource(
-        b,
-        citationToResource(citation, object.id),
-        "PDF",
-        intent,
-        "agent",
-      );
-      new Spaces(store).update(
-        b.id,
-        b.revision,
-        a.viewId,
-        { kind: "present", objectId: object.id, intentId: intent },
-        "PDF",
-      );
+          "PDF",
+          intent,
+          "agent",
+        );
+        store.createResource(
+          b,
+          citationToResource(citation, object.id),
+          "PDF",
+          intent,
+          "agent",
+        );
+        new Spaces(store).update(
+          b.id,
+          b.revision,
+          a.viewId,
+          { kind: "present", objectId: object.id, intentId: intent },
+          "PDF",
+        );
+      });
       return store.read(b.id);
     },
   );

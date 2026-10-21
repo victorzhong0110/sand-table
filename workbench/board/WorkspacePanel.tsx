@@ -30,6 +30,9 @@ export type WorkspacePanelProps = {
   onDelete?: (id: string) => void;
   /** 重新读取列表。 */
   onRefresh?: () => void;
+  onExport?: () => void;
+  onReload?: () => void;
+  recoveryMessage?: string;
 };
 
 function clock(at: number) {
@@ -52,6 +55,9 @@ export function WorkspacePanel({
   onRename,
   onDelete,
   onRefresh,
+  onExport,
+  onReload,
+  recoveryMessage,
 }: WorkspacePanelProps) {
   const [newTitle, setNewTitle] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -93,6 +99,19 @@ export function WorkspacePanel({
         )}
       </header>
 
+      <div className="workspace-actions">
+        {onExport && (
+          <button disabled={disabled} onClick={onExport}>
+            导出工作空间
+          </button>
+        )}
+        {onReload && (
+          <button disabled={disabled} onClick={onReload}>
+            保留副本并重新加载
+          </button>
+        )}
+      </div>
+      {recoveryMessage && <p role="status">{recoveryMessage}</p>}
       {workspaces.length === 0 ? (
         <p className="workspace-empty">还没有工作空间。</p>
       ) : (

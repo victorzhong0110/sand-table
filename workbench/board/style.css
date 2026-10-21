@@ -1295,6 +1295,12 @@ main.canvas-app {
   line-height: 1.8;
 }
 .canvas-error {
+  position: absolute;
+  z-index: 10;
+  top: 72px;
+  left: 16px;
+  right: 16px;
+  border-radius: 12px;
   padding: 8px 18px;
   background: #fbe7e1;
   color: #833c28;

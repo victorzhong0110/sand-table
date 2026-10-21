@@ -35,7 +35,10 @@ test("local connection descriptor stays private, rejects external targets and ca
       validateConnection({ ...c, url: "http://127.0.0.1:4317/redirect" }),
     );
     assert.throws(() =>
-      validateConnection({ ...c, link: "http://127.0.0.1:4317/#session=wrong" }),
+      validateConnection({
+        ...c,
+        link: "http://127.0.0.1:4317/#session=wrong",
+      }),
     );
     assert.throws(() =>
       validateConnection({

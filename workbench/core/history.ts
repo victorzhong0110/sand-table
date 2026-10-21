@@ -565,6 +565,16 @@ export class History {
     }
   }
 
+  /** Isolated transaction history, including refusal and grouping metadata. */
+  fork(): History {
+    const fork = new History(structuredClone(this.state), this.options);
+    fork.refusals = structuredClone(this.refusals);
+    fork.unclassifiedEntries = structuredClone(this.unclassifiedEntries);
+    fork.mergeable = this.mergeable;
+    fork.nextSeq = this.nextSeq;
+    return fork;
+  }
+
   /** 当前状态快照（v2）。数组与条目是副本，改动它不会影响内部状态。 */
   get state(): TimelineState {
     return {

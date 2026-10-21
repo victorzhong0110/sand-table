@@ -4,6 +4,9 @@
 // 本文件只做「编排」：调用 core/workspace-manager.ts，并把失败原因原样带给调用方。
 // 契约见 docs/architecture/workspace-management.zh-CN.md。
 
+import { randomUUID } from "node:crypto";
+import { cpSync, existsSync } from "node:fs";
+import { viewResult } from "../core/results.ts";
 import { z } from "zod";
 import { WorkspaceManager } from "../core/workspace-manager.ts";
 import { WorkspaceLockError } from "../core/workspace-lock.ts";
@@ -70,7 +73,72 @@ export type RegisterTool = (
 export function registerWorkspaceTools(
   manager: WorkspaceManager,
   tool: RegisterTool,
+  store?: BoardStore,
 ) {
+  if (store) {
+    tool(
+      "sand_export_workspace",
+      "导出当前内存中的完整工作空间，包括未保存编辑、历史与附件；不覆盖磁盘。",
+      {},
+      () => {
+        const snapshot = structuredClone(store.snapshot());
+        return viewResult(
+          { workspaceId: snapshot.id, exported: true },
+          {
+            filename: `sand-table-${snapshot.id}.json`,
+            json: manager.store.exportSnapshot(snapshot),
+          },
+        );
+      },
+    );
+    tool(
+      "sand_reload_workspace",
+      "先将当前编辑保存为独立恢复副本，再重新加载磁盘版本。任一步失败都会保留当前编辑。",
+      {},
+      async () =>
+        store.withSavingPaused(async () => {
+          const originalId = store.workspaceId;
+          if (!originalId) throw Error("没有活动工作空间。");
+          const copy = manager.create({
+            id: randomUUID(),
+            title: `${store.workspaceTitle ?? store.snapshot().title}（恢复副本）`,
+          });
+          const sourceAttachments = manager.store.attachmentsDir(originalId);
+          if (existsSync(sourceAttachments))
+            cpSync(sourceAttachments, manager.store.attachmentsDir(copy.id), {
+              recursive: true,
+            });
+          for (let attempt = 0; attempt < 32; attempt++) {
+            const generation = store.generation;
+            const snapshot = structuredClone(store.snapshot());
+            if (snapshot.id !== originalId)
+              throw Error("活动工作空间已变化，已中止恢复。");
+            await manager.save({
+              ...snapshot,
+              id: copy.id,
+              title: copy.title,
+              createdAt: copy.createdAt,
+            } as typeof copy);
+            if (generation !== store.generation) continue;
+            const disk = manager.open(originalId);
+            store.restore(disk.workspace);
+            store.attachPersistence(
+              workspacePort(new WorkspaceStore(manager.root), disk.workspace),
+              originalId,
+            );
+            return viewResult(
+              { workspaceId: originalId, recoveryCopyId: copy.id },
+              {
+                board: store.read([...store.boards.keys()][0]),
+                recoveryCopyId: copy.id,
+                recoveryCopyTitle: copy.title,
+              },
+            );
+          }
+          throw Error("当前编辑持续变化，已保留恢复副本；请暂停编辑后重试。");
+        }),
+    );
+  }
   tool(
     "sand_list_workspaces",
     "列出本机工作空间根目录下的全部工作空间。单个损坏的工作空间会被跳过并在 errors 里点名，不影响其他条目。",

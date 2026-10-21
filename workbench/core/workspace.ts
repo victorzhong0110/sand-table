@@ -1071,6 +1071,23 @@ export class WorkspaceStore {
     }
   }
 
+  /** Export the live snapshot even when the disk version is conflicted or unreadable. */
+  exportSnapshot(workspace: WorkspaceFile): string {
+    const normalized = migrate(workspace);
+    this.assertId(normalized.id);
+    const bundle: WorkspaceBundle = {
+      format: WORKSPACE_BUNDLE_FORMAT,
+      bundleVersion: WORKSPACE_BUNDLE_VERSION,
+      exportedAt: this.now(),
+      schemaVersion: normalized.schemaVersion,
+      workspace: normalized,
+      externalDependencies: collectExternalDependencies(normalized),
+      attachments: this.collectAttachments(normalized.id, true),
+      source: { recovered: false },
+    };
+    return JSON.stringify(bundle, null, 2) + "\n";
+  }
+
   /**
    * 导入导出包。解析 + 迁移后落盘并返回工作空间内容。
    * 同 ID 已存在时抛 WorkspaceConflictError，除非显式传 overwrite。

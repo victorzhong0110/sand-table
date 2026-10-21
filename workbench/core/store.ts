@@ -62,6 +62,23 @@ export class BoardStore {
   /** 当前工作空间 ID。空白启动也会落盘，不依赖 Git 或 AI。 */
   workspaceId?: string;
   workspaceTitle?: string;
+  private workspaceCreatedAt?: number;
+  private mutationGeneration = 0;
+  private savedGeneration = -1;
+  private saving?: Promise<void>;
+  private savingPaused = false;
+  private atomicDepth = 0;
+  private atomicTouched = false;
+  get generation() {
+    return this.mutationGeneration;
+  }
+  get saved() {
+    return (
+      Boolean(this.persistence) &&
+      !this.lastSaveError &&
+      this.savedGeneration === this.mutationGeneration
+    );
+  }
   /** 最近一次保存失败的原因。保存失败必须可观察，不能显示虚假的「已保存」。 */
   lastSaveError?: string;
   /** 最近一次读取失败的原因。读取失败不能当作「没有工作空间」。 */
@@ -146,6 +163,7 @@ export class BoardStore {
     }
     if (this.boards.size >= 8)
       throw Error("End another board first (limit 8).");
+    this.workspaceCreatedAt ??= this.now();
     const b = this.newBoard(p, title);
     applyPreset(b);
     if (preset === "blank") b.instances = [];
@@ -191,6 +209,11 @@ export class BoardStore {
   /** 从持久化快照恢复白板。 */
   restore(snapshot: WorkspaceSnapshot): Board {
     const persisted = snapshot.boards[0];
+    this.workspaceCreatedAt = snapshot.createdAt;
+    this.mutationGeneration++;
+    this.savedGeneration = this.mutationGeneration;
+    this.lastSaveError = undefined;
+    this.lastLoadError = undefined;
     // A newly created workspace is valid even before its first board exists.
     if (!persisted) {
       this.boards.clear();
@@ -1441,7 +1464,12 @@ export class BoardStore {
 
   /** 标记有未保存的变更，触发合并保存。 */
   touch() {
-    if (!this.persistence || !this.workspaceId) return;
+    if (this.atomicDepth) {
+      this.atomicTouched = true;
+      return;
+    }
+    this.mutationGeneration++;
+    if (!this.persistence || !this.workspaceId || this.savingPaused) return;
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       // 定时路径不抛：错误由 lastSaveError 承载，界面据此显示「保存失败」。
@@ -1458,18 +1486,95 @@ export class BoardStore {
    * 否则会出现「切换成功但内容没存上」——那不是切换，是丢内容。
    * 定时保存路径自己 catch，错误照旧记在 lastSaveError 里供界面显示。
    */
-  async flushSave(): Promise<void> {
+  flushSave(): Promise<void> {
+    if (this.savingPaused)
+      return Promise.reject(new Error("正在恢复工作空间，请稍后重试。"));
+    if (this.saving) return this.saving;
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = undefined;
     }
-    if (!this.persistence || !this.workspaceId) return;
+    if (!this.persistence || !this.workspaceId) return Promise.resolve();
+    const port = this.persistence;
+    const id = this.workspaceId;
+    const save = (async () => {
+      try {
+        // Drain edits made while the previous snapshot waited for its file lock.
+        for (let attempt = 0; attempt < 32; attempt++) {
+          if (
+            this.savingPaused ||
+            this.workspaceId !== id ||
+            this.persistence !== port
+          )
+            throw Error("保存期间工作空间状态发生变化，请重试。");
+          const generation = this.mutationGeneration;
+          await port.save(structuredClone(this.snapshot()));
+          if (this.mutationGeneration !== generation) continue;
+          this.savedGeneration = generation;
+          this.lastSaveError = undefined;
+          if (this.saveTimer) {
+            clearTimeout(this.saveTimer);
+            this.saveTimer = undefined;
+          }
+          return;
+        }
+        throw Error("工作空间持续变化，尚未完成保存；请暂停编辑后重试。");
+      } catch (error) {
+        this.lastSaveError =
+          error instanceof Error ? error.message : String(error);
+        throw error;
+      }
+    })();
+    this.saving = save;
+    void save
+      .finally(() => {
+        if (this.saving === save) this.saving = undefined;
+      })
+      .catch(() => {});
+    return save;
+  }
+
+  /** Recovery must settle old writes before replacing the persistence baseline. */
+  async withSavingPaused<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.savingPaused) throw Error("工作空间正在恢复。");
+    this.savingPaused = true;
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = undefined;
+    }
     try {
-      await this.persistence.save(this.snapshot());
-      this.lastSaveError = undefined;
-    } catch (e) {
-      this.lastSaveError = e instanceof Error ? e.message : String(e);
-      throw e;
+      await this.saving?.catch(() => {});
+      return await fn();
+    } finally {
+      this.savingPaused = false;
+      this.touch();
+    }
+  }
+
+  /** A synchronous multi-step content edit commits or rolls back as one operation. */
+  atomic<T>(b: Board, fn: () => T): T {
+    if (this.atomicDepth) throw Error("不支持嵌套内容事务。");
+    const before = structuredClone(b);
+    const history = this.histories.get(b.id);
+    if (history) this.histories.set(b.id, history.fork());
+    this.atomicDepth = 1;
+    this.atomicTouched = false;
+    try {
+      const result = fn();
+      if (result && typeof (result as any).then === "function")
+        throw Error("内容事务必须同步执行。");
+      this.atomicDepth = 0;
+      if (this.atomicTouched) this.touch();
+      return result;
+    } catch (error) {
+      for (const key of Object.keys(b)) delete (b as any)[key];
+      Object.assign(b, before);
+      if (history) this.histories.set(b.id, history);
+      else this.histories.delete(b.id);
+      throw error;
+    } finally {
+      this.atomicDepth = 0;
+      this.atomicTouched = false;
     }
   }
 
@@ -1483,7 +1588,7 @@ export class BoardStore {
       schemaVersion: 2,
       id: this.workspaceId || b.id,
       title: this.workspaceTitle ?? b.title,
-      createdAt: this.now(),
+      createdAt: (this.workspaceCreatedAt ??= this.now()),
       updatedAt: this.now(),
       revision: b.revision,
       contentRevision: b.contentRevision,

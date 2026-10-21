@@ -302,6 +302,14 @@ export function CanvasShell({
       {error && (
         <div className="canvas-error" role="alert">
           {error}
+          {workspacePanel?.onExport && (
+            <button onClick={workspacePanel.onExport}>导出工作空间</button>
+          )}
+          {workspacePanel?.onReload && (
+            <button onClick={workspacePanel.onReload}>
+              保留副本并重新加载
+            </button>
+          )}
         </div>
       )}
       <div className={"studio-layout " + (panel ? "has-inspector" : "")}>

@@ -354,7 +354,7 @@ export function createServer(
         boardId: b.id,
         workspaceId: store.workspaceId || null,
         persisted: Boolean(store.persistence),
-        saved: store.persistence ? !store.lastSaveError : false,
+        saved: store.saved,
         lastSaveError: store.lastSaveError || null,
         lastLoadError: store.lastLoadError || null,
         revision: b.revision,
@@ -565,14 +565,17 @@ export function createServer(
   registerConnectorTools(tool, [folderConnector]);
   registerResearchTools(tool, store);
   /* 多工作空间：只有配置了工作空间根目录才有意义（否则无处可列）。 */
-  if (options?.workspaceRoot) {
+  if (options?.workspaceRoot || forward) {
     const manager = createWorkspaceManager(
       store,
-      options.workspaceRoot,
-      options.workspaceId || "default",
+      options?.workspaceRoot || ".",
+      options?.workspaceId || "default",
     );
-    registerWorkspaceTools(manager, (name, description, shape, fn) =>
-      tool(name, description, shape as never, fn as never),
+    registerWorkspaceTools(
+      manager,
+      (name, description, shape, fn) =>
+        tool(name, description, shape as never, fn as never),
+      store,
     );
   }
   registerAppResource(server, "Sand Table overview", uri, {}, async () =>
