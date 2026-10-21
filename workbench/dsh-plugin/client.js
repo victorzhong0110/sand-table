@@ -390,7 +390,7 @@ window.__ModuleLoader__.load({
               ref: frameRef,
               src: state.boardUrl,
               title: "Sand Table 白板",
-              sandbox: "allow-scripts allow-same-origin allow-forms",
+              sandbox: "allow-scripts allow-same-origin allow-forms allow-downloads",
               onLoad: () => injectHostBridge(frameRef.current),
               style: {
                 flex: 1,

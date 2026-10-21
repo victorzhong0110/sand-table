@@ -190,19 +190,17 @@ try {
       .execute({ boardId: listed.boards[0].boardId }),
   );
   assert.ok(JSON.stringify(readBack).includes("Plugin table"));
-  await tools
-    .get("sand_table_edit_space")
-    .execute({
-      boardId: readBack.id,
-      viewId: Object.keys(readBack.spaces.views)[0],
-      revision: readBack.revision,
-      operation: JSON.stringify({
-        kind: "create",
-        type: "text",
-        title: "Agent edit",
-        data: { text: "Shared through the host tool" },
-      }),
-    });
+  await tools.get("sand_table_edit_space").execute({
+    boardId: readBack.id,
+    viewId: Object.keys(readBack.spaces.views)[0],
+    revision: readBack.revision,
+    operation: JSON.stringify({
+      kind: "create",
+      type: "text",
+      title: "Agent edit",
+      data: { text: "Shared through the host tool" },
+    }),
+  });
   await board
     .getByText("Shared through the host tool", { exact: true })
     .waitFor();

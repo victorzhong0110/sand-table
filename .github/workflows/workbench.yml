@@ -32,6 +32,7 @@ jobs:
           cache: npm
           cache-dependency-path: workbench/package-lock.json
       - run: npm ci --ignore-scripts
+      - run: npm run format:check
       - run: npm run build
       - name: Clone external read-only fixture
         run: |
@@ -54,6 +55,7 @@ jobs:
         env:
           SAND_EXTERNAL_REPO: /tmp/sand-clsx
 
+      - run: npm run test:recovery
       - run: npm run test:host
       - run: npm run test:blank
         env:

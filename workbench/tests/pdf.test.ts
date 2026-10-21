@@ -44,7 +44,7 @@ test("real PDF extraction, evidence import, persistence, changed and missing sou
     assert.match(read.text, /real PDF page/);
     assert.equal(read.pageCount, 1);
     await assert.rejects(readPdf(path, 2), /越界/);
-    const store = new BoardStore();
+    const store = new BoardStore(() => 1_700_000_000_000);
     store.attachPersistence(workspacePort(new WorkspaceStore(root)), "default");
     const board = store.open(
       { objects: [], relations: [], workspaces: [] },
@@ -65,6 +65,41 @@ test("real PDF extraction, evidence import, persistence, changed and missing sou
       revision: store.get(board.id).revision,
       title: "PDF evidence",
     });
+    store.undo(board.id, "human");
+    assert.equal(store.get(board.id).contentObjects.length, 0);
+    assert.equal(store.get(board.id).resources.length, 0);
+    assert.equal(store.get(board.id).instances.length, 0);
+    store.redo(board.id, "human");
+    const live = store.get(board.id);
+    const presentations = live.instances;
+    live.instances = Array.from({ length: 2200 }, (_, i) => ({
+      ...structuredClone(live.instances[0]),
+      id: `full-${i}`,
+    }));
+    const before = JSON.stringify(live),
+      generation = store.generation;
+    await assert.rejects(
+      tools.get("sand_import_pdf_evidence")({
+        path,
+        page: 1,
+        boardId: board.id,
+        viewId: "view",
+        revision: live.revision,
+        title: "must roll back",
+      }),
+      /Component limit/,
+    );
+    assert.equal(
+      JSON.stringify(live),
+      before,
+      "failure leaves content, resources, history, audit and revision unchanged",
+    );
+    assert.equal(
+      store.generation,
+      generation,
+      "failed import is not marked dirty",
+    );
+    live.instances = presentations;
     await store.flushSave();
     const reopened = new WorkspaceStore(root).load("default").workspace;
     assert.equal(reopened.objects.length, 1);

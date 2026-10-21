@@ -59,6 +59,7 @@ function Workbench() {
     [groupTitle, setGroupTitle] = useState("");
   const boardRef = useRef(board);
   boardRef.current = board;
+  const [recoveryMessage, setRecoveryMessage] = useState("");
   const [workspaces, setWorkspaces] = useState<WorkspaceDescriptor[]>([]);
   const [workspaceErrors, setWorkspaceErrors] = useState<
     { id: string; reason: string }[]
@@ -171,6 +172,46 @@ function Workbench() {
       setWorkspaceActiveId(data?.activeId);
     } catch {
       /* 没连上服务端时不显示工作空间入口。 */
+    }
+  }
+  async function exportWorkspace() {
+    try {
+      if (!app) throw Error("尚未连接宿主。");
+      const exported = await call("sand_export_workspace");
+      const result = await app.downloadFile({
+        contents: [
+          {
+            type: "resource",
+            resource: {
+              uri: `file:///${exported.filename}`,
+              mimeType: "application/json",
+              text: exported.json,
+            },
+          },
+        ],
+      });
+      if (result.isError) throw Error("宿主未接受下载，当前编辑仍保留。");
+      setRecoveryMessage("已导出当前工作空间。");
+    } catch (error) {
+      setError(String(error));
+    }
+  }
+  async function reloadWorkspace() {
+    setBusy(true);
+    try {
+      const result = await call("sand_reload_workspace");
+      boardRef.current = result.board;
+      setBoard(result.board);
+      setSaveError("");
+      setError("");
+      setRecoveryMessage(
+        `本地编辑已保存到「${result.recoveryCopyTitle}」，已加载磁盘版本。可从工作空间列表切换到副本。`,
+      );
+      await refreshWorkspaces();
+    } catch (error) {
+      setError(String(error));
+    } finally {
+      setBusy(false);
     }
   }
   async function action(name: string, args: Record<string, unknown> = {}) {
@@ -430,7 +471,9 @@ function Workbench() {
         board={board}
         viewId={viewId}
         busy={busy}
-        error={error || connectionError?.message || ""}
+        error={[error || connectionError?.message, saveError]
+          .filter(Boolean)
+          .join("\n")}
         action={action}
         call={call}
         operate={operate}
@@ -443,6 +486,10 @@ function Workbench() {
         workspacePanel={{
           workspaces,
           activeId: workspaceActiveId,
+          busy,
+          onExport: () => void exportWorkspace(),
+          onReload: () => void reloadWorkspace(),
+          recoveryMessage,
           errors: workspaceErrors,
           onRefresh: () => void refreshWorkspaces(),
           onCreate: async (input) => {
@@ -450,7 +497,8 @@ function Workbench() {
             await refreshWorkspaces();
           },
           onSwitch: async (id) => {
-            await action("sand_switch_workspace", { id });
+            const switched = await action("sand_switch_workspace", { id });
+            if (!switched) return;
             await refreshWorkspaces();
             /* 切换之后活动工作空间的内容变了：重新载入最省事，
                也避免旧白板的状态残留在界面上。 */

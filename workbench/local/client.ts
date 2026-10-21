@@ -206,7 +206,7 @@ async function mount() {
   bridge = new AppBridge(
     null,
     { name: "Sand Table local workbench", version: "0.3.0" },
-    { serverTools: {}, openLinks: {}, message: { text: {} } },
+    { serverTools: {}, openLinks: {}, message: { text: {} }, downloadFile: {} },
     {
       hostContext: {
         theme: "light",
@@ -224,6 +224,22 @@ async function mount() {
     showSetup(true);
     element("setup-status").textContent =
       "编排请求已准备。复制下面的消息，到你自己的 AI 客户端发送。";
+    return {};
+  };
+  bridge.ondownloadfile = async ({ contents }) => {
+    if (contents.length !== 1 || contents[0].type !== "resource")
+      return { isError: true };
+    const resource = contents[0].resource;
+    if (!("text" in resource) || resource.mimeType !== "application/json")
+      return { isError: true };
+    const blob = new Blob([resource.text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download =
+      new URL(resource.uri).pathname.split("/").pop() || "sand-table.json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
     return {};
   };
   bridge.onopenlink = async ({ url }) => {

@@ -323,8 +323,7 @@ export class WorkspaceManager {
         "没有配置宿主端口，无法切换工作空间：管理器不知道运行期的状态该交给谁。",
       );
     const current = this.host.currentWorkspaceId();
-    if (current && current !== id) await this.host.flush();
-    if (current === id) await this.host.flush();
+    if (current) await this.host.flush();
     const target = this.open(id);
     this.host.restore(target.workspace);
     this.host.attach(id, target.workspace);

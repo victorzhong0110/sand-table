@@ -153,3 +153,125 @@ test("attach retains the exact loaded baseline, not a later disk version", async
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("switch drains edits made while a real second process holds the file lock", async () => {
+  const { spawn } = await import("node:child_process");
+  const root = mkdtempSync(join(tmpdir(), "sand-switch-drain-"));
+  let child: import("node:child_process").ChildProcess | undefined;
+  try {
+    const { store, b } = setup(root);
+    store.saveDelay = 10000;
+    await store.flushSave();
+    const manager = createWorkspaceManager(store, root, "default");
+    await manager.save(manager.create({ id: "next" }));
+    store.createContent(b, { type: "text", title: "before" }, "human");
+    const script = `import {WorkspaceLock} from ${JSON.stringify(new URL("../core/workspace-lock.ts", import.meta.url).href)};const l=new WorkspaceLock(process.env.AUDIT_LOCK,'default');await l.acquire();console.log('locked');process.stdin.once('data',async()=>{await l.release();process.exit(0)});`;
+    child = spawn(
+      process.execPath,
+      ["--experimental-strip-types", "--input-type=module", "-e", script],
+      {
+        env: {
+          ...process.env,
+          AUDIT_LOCK: join(root, "default", "workspace.lock"),
+        },
+        stdio: ["pipe", "pipe", "inherit"],
+      },
+    );
+    await once(child.stdout!, "data");
+    const switching = manager.switch("next");
+    await new Promise((r) => setTimeout(r, 60));
+    store.createContent(b, { type: "text", title: "during-lock" }, "human");
+    assert.equal(store.saved, false);
+    const exited = once(child, "exit");
+    child.stdin!.write("release");
+    await exited;
+    await switching;
+    assert.deepEqual(
+      manager.open("default").workspace.objects.map((o) => o.title),
+      ["before", "during-lock"],
+    );
+    await store.flushSave();
+  } finally {
+    child?.kill();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("creation time remains stable across edits, reopen and workspace switches", async () => {
+  const root = mkdtempSync(join(tmpdir(), "sand-created-at-"));
+  let now = 1000;
+  try {
+    const files = new WorkspaceStore(root);
+    const store = new BoardStore(() => now);
+    store.attachPersistence(workspacePort(files), "default");
+    const b = store.open(empty, "Original");
+    await store.flushSave();
+    now = 9000;
+    store.createContent(
+      store.get(b.id),
+      { type: "text", title: "later" },
+      "human",
+    );
+    await store.flushSave();
+    assert.equal(files.load("default").workspace.createdAt, 1000);
+    const reopened = new BoardStore(() => 20000);
+    reopened.attachPersistence(workspacePort(files), "default");
+    reopened.open(empty, "ignored");
+    await reopened.flushSave();
+    assert.equal(files.load("default").workspace.createdAt, 1000);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("conflict recovery exports live edits, preserves a copy, then reloads the disk version", async () => {
+  const { registerWorkspaceTools } = await import("../server/workspaces.ts");
+  const root = mkdtempSync(join(tmpdir(), "sand-recovery-"));
+  try {
+    const initial = setup(root);
+    await initial.store.flushSave();
+    const local = setup(root),
+      remote = setup(root);
+    local.store.createContent(
+      local.b,
+      { type: "text", title: "local-unsaved" },
+      "human",
+    );
+    remote.store.createContent(
+      remote.b,
+      { type: "text", title: "remote" },
+      "human",
+    );
+    await remote.store.flushSave();
+    await assert.rejects(local.store.flushSave());
+    const manager = createWorkspaceManager(local.store, root, "default"),
+      tools = new Map<string, any>();
+    registerWorkspaceTools(
+      manager,
+      (name, _desc, _shape, fn) => {
+        tools.set(name, fn);
+      },
+      local.store,
+    );
+    const exported = JSON.parse(
+      tools.get("sand_export_workspace")({}).value.json,
+    );
+    assert.equal(exported.workspace.objects[0].title, "local-unsaved");
+    const result = (await tools.get("sand_reload_workspace")({})).value;
+    assert.equal(result.board.contentObjects[0].title, "remote");
+    assert.equal(
+      manager.open(result.recoveryCopyId).workspace.objects[0].title,
+      "local-unsaved",
+    );
+    await local.store.flushSave();
+    assert.equal(manager.open("default").workspace.objects[0].title, "remote");
+    await manager.switch(result.recoveryCopyId);
+    assert.equal(
+      [...local.store.boards.values()][0].contentObjects[0].title,
+      "local-unsaved",
+    );
+    await local.store.flushSave();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

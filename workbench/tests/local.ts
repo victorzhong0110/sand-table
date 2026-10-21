@@ -307,10 +307,7 @@ try {
     location.hash = "#session=" + token;
   }, connection.token);
   await page.waitForFunction(
-    () =>
-      !document
-        .getElementById("connection")
-        ?.textContent?.includes("断开"),
+    () => !document.getElementById("connection")?.textContent?.includes("断开"),
     undefined,
     { timeout: 20000 },
   );

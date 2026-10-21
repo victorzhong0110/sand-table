@@ -66,7 +66,12 @@ function expandIpv6(ip: string): number[] | null {
     const rightGroups = right ? right.split(":") : [];
     const fill = 8 - leftGroups.length - rightGroups.length - tail.length;
     if (fill < 0) return null;
-    groups = [...leftGroups, ...new Array(fill).fill("0"), ...rightGroups, ...tail];
+    groups = [
+      ...leftGroups,
+      ...new Array(fill).fill("0"),
+      ...rightGroups,
+      ...tail,
+    ];
   } else groups = [...text.split(":"), ...tail];
   if (groups.length !== 8) return null;
   const bytes: number[] = [];
@@ -85,8 +90,7 @@ function describeIpv6(ip: string): string | null {
   if (bytes.slice(0, 15).every((b) => b === 0) && bytes[15] === 1)
     return "回环地址";
   if ((bytes[0] & 0xfe) === 0xfc) return "私有网段";
-  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80)
-    return "链路本地地址";
+  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return "链路本地地址";
   if (bytes.slice(0, 12).every((b) => b === 0))
     return describeIpv4(bytes.slice(12).join("."));
   return null;
@@ -142,14 +146,14 @@ export async function assertPublicHost(hostname: string): Promise<void> {
       throw Error(`取件失败：拒绝指向${reason}的链接（${hostname}）。`);
     return;
   }
-  const addresses = await new Promise<
-    { address: string; family: number }[]
-  >((resolve, reject) => {
-    dnsLookup(hostname, { all: true, verbatim: true }, (error, found) => {
-      if (error) reject(Error(`取件失败：域名 ${hostname} 解析失败。`));
-      else resolve(found || []);
-    });
-  });
+  const addresses = await new Promise<{ address: string; family: number }[]>(
+    (resolve, reject) => {
+      dnsLookup(hostname, { all: true, verbatim: true }, (error, found) => {
+        if (error) reject(Error(`取件失败：域名 ${hostname} 解析失败。`));
+        else resolve(found || []);
+      });
+    },
+  );
   if (!addresses.length)
     throw Error(`取件失败：域名 ${hostname} 没有解析到地址。`);
   refusePrivateAddresses(hostname, addresses);
@@ -265,9 +269,7 @@ export async function fetchPackManifest(
         continue;
       }
       if (response.status !== 200)
-        throw Error(
-          `取件失败：${current.href} 返回 HTTP ${response.status}。`,
-        );
+        throw Error(`取件失败：${current.href} 返回 HTTP ${response.status}。`);
       if (!isJsonContentType(response.headers["content-type"]))
         throw Error(
           `取件失败：${current.href} 的 Content-Type 不是 JSON（收到 ${response.headers["content-type"] ?? "空"}）。`,
