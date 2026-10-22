@@ -26,6 +26,10 @@ type Props = {
   onOpenLink: (url: string) => void;
   clearFilters: () => void;
 };
+/* 同一次删除里的多个组件共用一个意图：撤销一次，全部回来。 */
+let removalSeq = 0;
+const removalIntent = () => `remove:${Date.now()}:${++removalSeq}`;
+
 export function SpaceCanvas({
   board: b,
   viewId,
@@ -79,6 +83,9 @@ export function SpaceCanvas({
   });
   const options = useRef({ operate, edgePan, edgeSpeed, motionPaused });
   options.current = { operate, edgePan, edgeSpeed, motionPaused };
+  /* 选区跟着服务端的状态走，按键处理时读到的必须是最新的一份。 */
+  const selection = useRef<string[]>([]);
+  selection.current = view?.selection ?? [];
   const stopAnimation = (commit = false) => {
     if (commit && animation.current)
       void options.current.operate({
@@ -201,7 +208,39 @@ export function SpaceCanvas({
       stopEdge();
     };
     const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape") stop();
+      const target = e.target as HTMLElement | null;
+      /* 正在打字时，键归那个输入框：不让画布抢走。 */
+      const typing = Boolean(
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable),
+      );
+      if (e.key === "Escape") {
+        stop();
+        /* 就地编辑的文本框自己处理 Escape 并拦下这个键；输入框里的 Escape
+           属于那个字段（撤销改动）。剩下的才是取消选择。 */
+        if (typing) return;
+        if (selection.current.length) {
+          e.preventDefault();
+          void options.current.operate({ kind: "select", ids: [] });
+        }
+        return;
+      }
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (typing) return;
+      const ids = selection.current;
+      if (!ids.length) return;
+      e.preventDefault();
+      /* 一次删掉的组件共用一个意图：撤销一次，全部回来。 */
+      const intentId = removalIntent();
+      for (const id of ids)
+        void options.current.operate({
+          kind: "remove",
+          instanceId: id,
+          intentId,
+        });
     };
     const visibility = () => {
       if (document.hidden) stop();
@@ -1030,7 +1069,7 @@ export function SpaceCanvas({
                     onBlur={() => void commitEdit()}
                   />
                 )}
-                {mode === "arrange" &&
+                {(mode === "arrange" || view.selection.includes(c.id)) &&
                   (!c.appearance?.detail || c.appearance.detail === "full") && (
                     <button
                       className="resize-handle"
