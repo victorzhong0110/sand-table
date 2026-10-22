@@ -1,5 +1,7 @@
 # 领域包与连接器
 
+> **历史文档（v2）。** v3 的包与类型契约见 [`docs/kernel-v3/03-types-and-extensions.md`](../kernel-v3/03-types-and-extensions.md)；冲突时以 v3 为准。
+
 > 契约版本 v1（2026-10-20）。本文是 #13（代码领域包与连接器）、
 > #14（小说与科研纵向验证）的共同规格。
 > 契约文档见 `docs/architecture/domain-packs.zh-CN.md`；上位契约见 `docs/architecture/workspace-kernel.zh-CN.md`。

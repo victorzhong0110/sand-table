@@ -1,5 +1,7 @@
 # 集成契约：#5 + #12 + #16 + #19 合成一个可用版本
 
+> **历史文档（v2）。** 2026-10-22 起以 [`docs/kernel-v3/`](../kernel-v3/README.md) 为准。
+
 > issue #20 的实现规格。本文件是本轮集成的**共同规格**：
 > 生产者按这里的 API 与语义写代码；冲突裁决按这里的决策，不各写各的。
 > 术语沿用 `docs/architecture/workspace-kernel.zh-CN.md`（内核契约）与 `core/objects.ts`（共享类型）。

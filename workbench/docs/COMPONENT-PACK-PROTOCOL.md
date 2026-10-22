@@ -1,5 +1,7 @@
 # 组件包导入协议（Component Pack Protocol）
 
+> **v2 协议。** v3 用数据包（`formatVersion: 2`）取代本协议，v1 清单导入时自动转换，见 [`docs/kernel-v3/03-types-and-extensions.md`](../../docs/kernel-v3/03-types-and-extensions.md) §6。
+
 > 状态：v1 · 2026-10-20（已接入通用工作空间内核：板级撤销 + 随白板落盘恢复）
 > 目标：让**别人能把自己要用的组件包**导入 Sand Table，用的组件与左侧栏里那些**同一种**。
 > 配套实现：`core/packs.ts`（规范与校验）、`core/pack-fetch.ts`（防 SSRF 取件）、`server/packs.ts`（导入／导出工具）、`board/Toolbox.tsx`（左侧栏入口）。
