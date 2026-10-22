@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon.tsx";
+import { indentOf } from "./history-layout.ts";
 import type { HistorySnapshot, TimelineRecord } from "../core/history.ts";
 import "./history.css";
 
@@ -11,27 +12,6 @@ function clock(at: number) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(
     d.getMinutes(),
   ).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
-}
-
-/**
- * 每条记录在树里的深度：用来把分支缩进，让「哪条是从哪条分出来的」一眼看得出。
- * 父指针成环（坏数据）时停住，不让面板卡死。
- */
-function depthOf(records: TimelineRecord[]): Map<string, number> {
-  const parents = new Map(records.map((r) => [r.id, r.parentId]));
-  const depth = new Map<string, number>();
-  for (const record of records) {
-    let value = 0;
-    let current = record.parentId;
-    const seen = new Set<string>([record.id]);
-    while (current && !seen.has(current)) {
-      seen.add(current);
-      value++;
-      current = parents.get(current);
-    }
-    depth.set(record.id, value);
-  }
-  return depth;
 }
 
 /**
@@ -117,7 +97,6 @@ export function HistoryPanel({
   const records = snapshot?.records ?? [];
   /* 折叠时只留最近的一段：时间线是按时间正序的，最近的在末尾。 */
   const visible = expanded ? records : records.slice(-10);
-  const depths = depthOf(records);
   const boardId = snapshot?.boardId ?? history?.boardId;
   const disabled = Boolean(busy) || pending;
 
@@ -205,7 +184,6 @@ export function HistoryPanel({
         <ol className="history-timeline">
           {visible.map((record) => {
             const tag = stateTag(record);
-            const depth = depths.get(record.id) ?? 0;
             return (
               <li
                 key={record.id}
@@ -215,7 +193,7 @@ export function HistoryPanel({
                   record.authorKind +
                   (tag ? " " + tag.className : "")
                 }
-                style={{ paddingLeft: `${depth * 14}px` }}
+                style={{ paddingLeft: `${indentOf(record) * 16}px` }}
               >
                 <button
                   className="history-entry"
@@ -230,7 +208,9 @@ export function HistoryPanel({
                 >
                   <span className="history-dot" aria-hidden="true" />
                   <span className="history-body">
-                    <span className="history-label">{record.label}</span>
+                    <span className="history-label" title={record.label}>
+                      {record.label}
+                    </span>
                     <small>
                       {clock(record.at)} · {authorBadge(record)} {record.author}
                     </small>

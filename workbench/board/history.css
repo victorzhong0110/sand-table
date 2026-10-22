@@ -34,7 +34,8 @@
   transform: scaleX(-1);
 }
 
-/* The line the records hang on. */
+/* The line the records hang on. The panel is a fixed width: records never
+   push it sideways, so a long run of edits cannot make it scroll. */
 .history-timeline {
   list-style: none;
   margin: 0;
@@ -43,13 +44,15 @@
   flex-direction: column;
   gap: 2px;
   overflow: auto;
+  overflow-x: hidden;
   min-height: 0;
 }
 .history-node {
   position: relative;
 }
-/* The rail: one vertical line per depth level, so a branch reads as a
-   branch. It stops at the first and the last node of the level. */
+/* The rail: one vertical line, drawn behind the records. A branch that a
+   later edit replaced sits one step to the right, on its own line, so it
+   reads as a side line instead of a step in the main chain. */
 .history-node::before {
   content: "";
   position: absolute;
@@ -58,6 +61,9 @@
   bottom: 0;
   width: 1px;
   background: var(--line);
+}
+.history-node.is-branch::before {
+  left: 20px;
 }
 .history-node:first-child::before {
   top: 11px;
@@ -108,7 +114,10 @@
 .history-entry .history-label {
   font-size: 12px;
   line-height: 1.4;
-  overflow-wrap: anywhere;
+  /* A long label is cut off; the full text is in the title. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .history-entry small {
   font-size: 10px;
