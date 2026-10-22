@@ -1,0 +1,87 @@
+{
+  "name": "sand-table-desktop",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Sand Table 桌面版：在 Windows 上双击即用的本地白板工作台",
+  "author": {
+    "name": "victorzhong0110",
+    "email": "victorzhong0110@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/victorzhong0110/sand-table.git"
+  },
+  "homepage": "https://github.com/victorzhong0110/sand-table",
+  "main": "main/main.cjs",
+  "scripts": {
+    "assets": "node scripts/prepare-assets.mjs",
+    "dev": "node scripts/prepare-assets.mjs && electron .",
+    "pack": "node scripts/prepare-assets.mjs && electron-builder --win --x64",
+    "dist": "node scripts/prepare-assets.mjs && electron-builder --win --x64",
+    "dist:linux": "node scripts/prepare-assets.mjs && electron-builder --linux dir"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "electron-builder": "26.15.3",
+    "playwright": "1.62.1"
+  },
+  "build": {
+    "appId": "com.victorzhong0110.sandtable",
+    "productName": "Sand Table",
+    "copyright": "Copyright 2026 victorzhong0110",
+    "asar": false,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": ".stage/workbench",
+        "to": "workbench"
+      }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "SandTable-${version}-${arch}-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "SandTable-${version}-portable.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Sand Table",
+      "installerLanguages": [
+        "zh_CN"
+      ],
+      "language": "2052"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "target": [
+        "dir"
+      ],
+      "category": "Development"
+    }
+  }
+}

@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { bind } from "../connectors/git.ts";
 import { startLocal } from "./service.ts";
 import { defaultSessionFile } from "./session.ts";
+import type { McpEntry } from "./config.ts";
 let open = false,
   port = 0,
   sessionFile = defaultSessionFile,
@@ -11,6 +12,22 @@ let open = false,
     : undefined,
   workspaceId: string | undefined = process.env.SAND_WORKSPACE_ID,
   preset: "blank" | "code" = "blank";
+type LocalRuntime = { serverEnv?: Record<string, string>; mcpEntry?: McpEntry };
+let runtime: LocalRuntime | undefined;
+const readRuntime = (raw: string): LocalRuntime => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw Error("Invalid runtime descriptor: it must be a JSON object.");
+  }
+  if (!parsed || typeof parsed !== "object")
+    throw Error("Invalid runtime descriptor.");
+  return parsed as LocalRuntime;
+};
+// 桌面版把自身的可执行文件当作运行时来跑服务端与桥接进程，
+// 需要的启动方式通过 --runtime 或 SAND_RUNTIME 显式传进来。
+if (process.env.SAND_RUNTIME) runtime = readRuntime(process.env.SAND_RUNTIME);
 const roots: string[] = [];
 const embedOrigins: string[] = [];
 const args = process.argv.slice(2);
@@ -19,7 +36,11 @@ for (let i = 0; i < args.length; i++) {
   if (arg === "--code-board") preset = "code";
   else if (arg === "--open") open = true;
   else if (arg === "--no-open") open = false;
-  else if (
+  else if (arg === "--runtime") {
+    const value = args[++i];
+    if (!value) throw Error("Missing value for --runtime");
+    runtime = readRuntime(value);
+  } else if (
     [
       "--workspace",
       "--port",
@@ -63,6 +84,8 @@ try {
     workspaceDir,
     workspaceId,
     embedOrigins,
+    ...(runtime?.serverEnv ? { serverEnv: runtime.serverEnv } : {}),
+    ...(runtime?.mcpEntry ? { mcpEntry: runtime.mcpEntry } : {}),
   });
   console.log(
     [

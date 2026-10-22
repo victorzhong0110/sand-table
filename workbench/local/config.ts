@@ -1,16 +1,32 @@
 import { fileURLToPath } from "node:url";
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-export function connectionConfig(sessionFile: string) {
+
+/**
+ * MCP 客户端条目：客户端按它启动一个 stdio 进程，与工作台共享同一张板。
+ * 打包成桌面版后，命令是应用自己的可执行文件，需要附带运行环境变量
+ * （例如 ELECTRON_RUN_AS_NODE=1），否则客户端会拉起界面而不是桥接进程。
+ */
+export type McpEntry = {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+};
+
+export function connectionConfig(sessionFile: string, entry?: McpEntry) {
   const args = [
     "--experimental-strip-types",
     fileURLToPath(new URL("./bridge.ts", import.meta.url)),
     "--session-file",
     sessionFile,
   ];
-  const entry = { command: process.execPath, args };
+  const resolved: McpEntry = {
+    command: entry?.command ?? process.execPath,
+    args: entry?.args ?? args,
+    ...(entry?.env ? { env: entry.env } : {}),
+  };
   return {
-    json: JSON.stringify({ mcpServers: { "sand-table": entry } }, null, 2),
-    codex: `codex mcp add sand-table -- ${[entry.command, ...args].map(quote).join(" ")}`,
-    toml: `[mcp_servers.sand-table]\ncommand = ${JSON.stringify(entry.command)}\nargs = ${JSON.stringify(args)}\n`,
+    json: JSON.stringify({ mcpServers: { "sand-table": resolved } }, null, 2),
+    codex: `codex mcp add sand-table -- ${[resolved.command, ...resolved.args].map(quote).join(" ")}`,
+    toml: `[mcp_servers.sand-table]\ncommand = ${JSON.stringify(resolved.command)}\nargs = ${JSON.stringify(resolved.args)}\n`,
   };
 }

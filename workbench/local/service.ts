@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { connectionConfig } from "./config.ts";
+import { connectionConfig, type McpEntry } from "./config.ts";
 import {
   readConnection,
   writeConnection,
@@ -20,6 +20,14 @@ export async function startLocal(options: {
   /** 工作空间 ID。 */
   workspaceId?: string;
   embedOrigins?: string[];
+  /**
+   * 启动 MCP 服务端子进程时附加的环境变量。
+   * stdio 传输只继承白名单变量（PATH、HOME 等），自定义变量必须显式传，
+   * 否则子进程会在一个没有这些变量的环境里启动。
+   */
+  serverEnv?: Record<string, string>;
+  /** 展示给用户的 MCP 客户端条目；不传时按当前进程推导。 */
+  mcpEntry?: McpEntry;
 }) {
   const embedOrigins = (options.embedOrigins ?? []).map((value) => {
     const u = new URL(value);
@@ -69,6 +77,7 @@ export async function startLocal(options: {
           : []),
         ...(options.workspaceId ? ["--workspace-id", options.workspaceId] : []),
       ],
+      env: options.serverEnv,
     }),
   );
   let primaryBoardId: string | undefined,
@@ -80,7 +89,7 @@ export async function startLocal(options: {
     string,
     { lastSeen: number; lastTool?: string }
   >();
-  const config = connectionConfig(options.sessionFile);
+  const config = connectionConfig(options.sessionFile, options.mcpEntry);
   // The browser always attaches Origin to same-origin POSTs, so the same
   // comparison that guards /rpc also proves a request came from our own page.
   const sameOrigin = (req: IncomingMessage) => req.headers.origin === origin;
