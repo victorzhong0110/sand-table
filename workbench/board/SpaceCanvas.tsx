@@ -467,7 +467,8 @@ export function SpaceCanvas({
       </section>
     );
   const visible = filtered.filter((c) => {
-    const r = displayRect(c, draft[c.id] || c.rect);
+    if (draft[c.id]) return true;
+    const r = displayRect(c, c.rect);
     const w = canvas.current?.clientWidth || 900,
       h = canvas.current?.clientHeight || 660;
     return (

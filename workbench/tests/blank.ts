@@ -250,6 +250,79 @@ try {
     "Moving a pinned component moves it and releases the pin.",
   );
 
+  /* 拖出视口再拖回来时，同一张卡片的 DOM 节点必须还在。
+     选中项不参与裁剪，所以先点空白处取消选择。再把画布收窄，
+     指针才能停在 iframe 里、同时把卡片算到视口外。 */
+  b = await read();
+  const probeId = b.instances[0].id;
+  const probe = frame.locator(`[data-instance-id="${probeId}"]`);
+  const canvas = frame.locator(".canvas");
+  await canvas.click({ position: { x: 420, y: 80 } });
+  let deselected = false;
+  for (let i = 0; i < 20; i++) {
+    const cls = (await probe.getAttribute("class")) || "";
+    if (!cls.includes("selected")) {
+      deselected = true;
+      break;
+    }
+    await page.waitForTimeout(50);
+  }
+  assert.equal(deselected, true, "The probe card has to leave the selection.");
+  await probe.evaluate((el) => {
+    el.dataset.probe = "1";
+  });
+  await canvas.evaluate((el) => {
+    el.style.right = "auto";
+    el.style.width = "520px";
+  });
+  b = await read();
+  const probeBefore = b.instances[0].rect;
+  const probeBox = (await probe.boundingBox())!;
+  const canvasBox = (await canvas.boundingBox())!;
+  const zoom = await frame.locator(".world").evaluate((el) => {
+    const scale = new DOMMatrixReadOnly(getComputedStyle(el).transform).a;
+    return scale || 1;
+  });
+  const downX = probeBox.x + probeBox.width / 2;
+  const downY = probeBox.y + probeBox.height / 2;
+  const outsideX = canvasBox.x + canvasBox.width + probeBox.width / 2 + 180;
+  const releaseX = Math.min(downX + 80, canvasBox.x + canvasBox.width - 40);
+  const releaseY = downY - 30;
+  await page.mouse.move(downX, downY);
+  await page.mouse.down();
+  await page.mouse.move(outsideX, downY, { steps: 12 });
+  assert.equal(
+    await probe.getAttribute("data-probe"),
+    "1",
+    "The card must stay mounted while it is dragged outside the viewport.",
+  );
+  await page.mouse.move(releaseX, releaseY, { steps: 12 });
+  await page.mouse.up();
+  await canvas.evaluate((el) => {
+    el.style.width = "";
+    el.style.right = "";
+  });
+  assert.equal(
+    await probe.getAttribute("data-probe"),
+    "1",
+    "Coming back must be the same DOM node, not a remount.",
+  );
+  const released = {
+    x: probeBefore.x + (releaseX - downX) / zoom,
+    y: probeBefore.y + (releaseY - downY) / zoom,
+  };
+  b = await until(
+    (board) =>
+      Math.abs(board.instances[0].rect.x - released.x) < 0.6 &&
+      Math.abs(board.instances[0].rect.y - released.y) < 0.6,
+  );
+  assert.ok(
+    Math.abs(b.instances[0].rect.x - released.x) < 0.6 &&
+      Math.abs(b.instances[0].rect.y - released.y) < 0.6,
+    "The server stores the position where the pointer was released.",
+  );
+  await probe.click();
+
   /* #9.4: the property panel's content field saves itself — no button.
      内容在对象上：断言要读解析后的内容，不是实例自己的空壳。 */
   const contentText = (board: any, instance: any) => {
