@@ -13,6 +13,7 @@ import {
   CommandError,
   WorkspaceOpenError,
   getMeta,
+  setMeta,
   newId,
   openWorkspaceDb,
   toObjectRow,
@@ -350,3 +351,39 @@ function row(db: Db, table: string, id: string) {
     unknown
   >;
 }
+
+test("锁冲突后同一连接可以重试事务", () => {
+  const dir = tempDir();
+  const file = join(dir, "workspace.db");
+  const writer = openWorkspaceDb(file, { create: true, workspaceId: "demo" });
+  const contender = openWorkspaceDb(file, { create: false });
+  contender.exec("PRAGMA busy_timeout = 1");
+  let called = false;
+  try {
+    writer.exec("BEGIN IMMEDIATE");
+    assert.throws(
+      () =>
+        transaction(contender, () => {
+          called = true;
+        }),
+      /locked/,
+    );
+    assert.equal(called, false);
+    writer.exec("ROLLBACK");
+    transaction(contender, () => setMeta(contender, "title", "重试成功"));
+    assert.equal(getMeta(writer, "title"), "重试成功");
+    assert.throws(
+      () =>
+        transaction(contender, () => {
+          throw Error("原始错误");
+        }),
+      /原始错误/,
+    );
+    transaction(contender, () => setMeta(contender, "title", "再次成功"));
+    assert.equal(getMeta(writer, "title"), "再次成功");
+  } finally {
+    writer.close();
+    contender.close();
+    remove(dir);
+  }
+});
