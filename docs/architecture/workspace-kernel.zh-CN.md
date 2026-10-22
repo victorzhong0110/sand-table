@@ -1,5 +1,7 @@
 # 通用工作空间内核：契约与迁移映射
 
+> **历史文档（v2）。** v3 内核见 [`docs/kernel-v3/`](../kernel-v3/README.md)；冲突时以 v3 为准。
+
 依据：[issue #11 架构规划](https://github.com/victorzhong0110/sand-table/issues/11)（2026-10-20 确认）。
 状态：**契约已确认，实现分阶段推进**。本文描述目标契约与各阶段当前落地情况，不把规划写成已实现。
 
