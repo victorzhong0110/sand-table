@@ -374,6 +374,80 @@ try {
     path: "artifacts/material-note.png",
     fullPage: true,
   });
+  /* #30: 选中就能改大小、Delete 删除、Esc 取消选择——不切换任何模式。 */
+  /* 板面读回来的 selection 是对象 id；视图里的才是实例 id。 */
+  const selectedInstances = (board: any) =>
+    Object.values(board.views as Record<string, any>).flatMap(
+      (v: any) => v.selection as string[],
+    );
+  await frame.getByRole("button", { name: "浏览", exact: true }).click();
+  const t02 = frame.locator('[data-instance-id="' + noteId + '"]');
+  await t02.click();
+  b = await until((b) => selectedInstances(b).includes(noteId));
+  assert.ok(
+    selectedInstances(b).includes(noteId),
+    "Clicking a card in browse mode selects it.",
+  );
+  const handle = t02.locator(".resize-handle");
+  await handle.waitFor({ state: "visible" });
+  const sizeBefore = b.instances[0].rect;
+  const grip = (await handle.boundingBox())!;
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    grip.x + grip.width / 2 + 60,
+    grip.y + grip.height / 2 + 40,
+    { steps: 8 },
+  );
+  await page.mouse.up();
+  b = await until((b) => b.instances[0].rect.width > sizeBefore.width);
+  assert.ok(
+    b.instances[0].rect.width > sizeBefore.width &&
+      b.instances[0].rect.height > sizeBefore.height,
+    "Dragging the handle resizes the selected component.",
+  );
+  /* Delete 移除选中的组件，撤销一次把它带回来。 */
+  await page.keyboard.press("Delete");
+  b = await until((b) => !b.instances.some((i: any) => i.id === noteId));
+  assert.equal(
+    b.instances.filter((i: any) => i.id === noteId).length,
+    0,
+    "Delete removes the selected component.",
+  );
+  await page.keyboard.press("Control+z");
+  b = await until((b) => b.instances.some((i: any) => i.id === noteId));
+  assert.ok(
+    b.instances.some((i: any) => i.id === noteId),
+    "One undo brings the removed component back.",
+  );
+  /* Esc 取消选择。 */
+  await t02.click();
+  b = await until((b) => selectedInstances(b).includes(noteId));
+  await page.keyboard.press("Escape");
+  b = await until((b) => selectedInstances(b).length === 0);
+  assert.equal(selectedInstances(b).length, 0, "Escape clears the selection.");
+  /* 输入框里的 Backspace 是删字，不是删组件。 */
+  await t02.click();
+  b = await until((b) => selectedInstances(b).includes(noteId));
+  const nameField = frame.getByRole("textbox", { name: "编辑组件名称" });
+  await nameField.click();
+  await nameField.press("Backspace");
+  await page.waitForTimeout(200);
+  b = await read();
+  assert.ok(
+    b.instances.some((i: any) => i.id === noteId),
+    "Backspace in a text field does not remove the component.",
+  );
+  await nameField.fill("我的计划");
+  /* 第一次 Escape 归输入框（撤销改动并失焦），第二次才是取消选择。 */
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  b = await until((b) => selectedInstances(b).length === 0);
+  /* 重新选中，属性面板回到打开的状态。 */
+  await t02.click();
+  b = await until((b) => selectedInstances(b).includes(noteId));
+  /* 回到编排态：工具箱开着，和这段测试原本的样子一致。 */
+  await frame.getByRole("button", { name: "编排", exact: true }).click();
   await frame.getByRole("button", { name: "编排", exact: true }).click();
   assert.equal(await frame.locator(".floating-tool-wrap").isVisible(), false);
   await frame.getByRole("button", { name: "编排", exact: true }).click();
@@ -767,7 +841,7 @@ try {
   );
   assert.deepEqual(errors, []);
   console.log(
-    "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",
+    "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",
   );
 } catch (e) {
   const failedPage = browser?.contexts()[0]?.pages()[0];
