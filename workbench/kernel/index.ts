@@ -31,4 +31,6 @@ export {
 } from "./db.ts";
 export type { Db } from "./db.ts";
 export { newId } from "./ids.ts";
+export { createRegistry, PackSpecError } from "./registry.ts";
+export type { Registry } from "./registry.ts";
 export { toObjectRow, toPresentationRow, toRelationRow } from "./rows.ts";
