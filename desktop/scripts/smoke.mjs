@@ -1,7 +1,9 @@
 // 桌面版冒烟检查：用 Playwright 启动真实的 Electron 应用，
 // 确认窗口确实打开了本地工作台、白板渲染出来、会话凭据有效。
 //
-// 用法：node desktop/scripts/smoke.mjs [--keep-screenshot]
+// 用法：
+//   node desktop/scripts/smoke.mjs                     # 用仓库里的 workbench/
+//   node desktop/scripts/smoke.mjs --workbench <目录>    # 用别的目录（例如打包后的布局）
 // 截图落在 desktop/dist/smoke/ 下，作为「窗口里真的有东西」的证据。
 
 import { mkdirSync, existsSync } from "node:fs";
@@ -13,6 +15,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(here, "..");
 const outputDir = join(desktopRoot, "dist", "smoke");
 const sessionDir = join(desktopRoot, "dist", "smoke", "session");
+
+const workbenchArg = process.argv.indexOf("--workbench");
+const workbenchRoot =
+  workbenchArg === -1 ? undefined : resolve(process.argv[workbenchArg + 1]);
 
 mkdirSync(outputDir, { recursive: true });
 // 会话文件要求目录只有本人可读写。
@@ -33,6 +39,7 @@ const app = await electron.launch({
     ELECTRON_DISABLE_SANDBOX: "1",
     SAND_DESKTOP_LOG: "1",
     SAND_DESKTOP_SMOKE: "1",
+    ...(workbenchRoot ? { SAND_DESKTOP_WORKBENCH: workbenchRoot } : {}),
   },
 });
 

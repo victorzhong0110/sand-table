@@ -11,9 +11,13 @@ const path = require("node:path");
 
 const isPackaged = app.isPackaged;
 // 打包后工作台在 resources/workbench，开发时在仓库的 workbench/。
-const workbenchRoot = isPackaged
-  ? path.join(process.resourcesPath, "workbench")
-  : path.join(__dirname, "..", "..", "workbench");
+// SAND_DESKTOP_WORKBENCH 用来按打包后的目录结构跑检查（布局不一样，
+// 依赖解析就会出问题，仓库里跑不出来）。
+const workbenchRoot = process.env.SAND_DESKTOP_WORKBENCH
+  ? path.resolve(process.env.SAND_DESKTOP_WORKBENCH)
+  : isPackaged
+    ? path.join(process.resourcesPath, "workbench")
+    : path.join(__dirname, "..", "..", "workbench");
 const sessionFile = path.join(app.getPath("userData"), "session", "connection.json");
 
 let service = null;
