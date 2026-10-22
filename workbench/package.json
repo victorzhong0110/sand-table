@@ -22,7 +22,8 @@
     "test:blank": "node --experimental-strip-types tests/blank.ts",
     "test:host": "node --experimental-strip-types tests/host-browser.ts",
     "format:check": "prettier --check \"{board,core,connectors,domains,server,local,dev,scripts,tests}/**/*.{ts,tsx}\"",
-    "test:recovery": "node --experimental-strip-types tests/recovery-browser.ts"
+    "test:recovery": "node --experimental-strip-types tests/recovery-browser.ts",
+    "test:reopen": "node --experimental-strip-types tests/reopen-browser.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.0.0",

@@ -65,6 +65,8 @@ jobs:
         env:
           SAND_EXTERNAL_REPO: /tmp/sand-clsx
 
+      - run: npm run test:reopen
+
       - run: npm run test:full
         env:
           SAND_EXTERNAL_REPO: /tmp/sand-clsx

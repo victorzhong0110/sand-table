@@ -26,7 +26,10 @@ const hadUrlToken = Boolean(
 let currentToken = "",
   bridge: AppBridge | undefined,
   boardId = "",
-  connecting = false;
+  connecting = false,
+  opening = false,
+  openCycle = 0,
+  openTimer = 0;
 function rememberToken(token: string) {
   currentToken = token;
   window.__sandToken = token;
@@ -178,9 +181,32 @@ window.addEventListener("message", (event) => {
     window.parent.postMessage(event.data, hostOrigin);
   }
 });
-async function mount() {
+function startOpening() {
+  opening = true;
+  const cycle = ++openCycle;
+  element("opening").hidden = false;
   element("error").hidden = true;
+  window.clearTimeout(openTimer);
+  openTimer = window.setTimeout(() => {
+    if (cycle !== openCycle) return;
+    openCycle += 1;
+    opening = false;
+    element("opening").hidden = true;
+    showError(
+      Error("白板没有加载出来。数据已保存在本机，可以点「重新连接」再试。"),
+    );
+  }, 15000);
+  return cycle;
+}
+function stopOpening(cycle: number) {
+  if (cycle !== openCycle) return;
+  window.clearTimeout(openTimer);
+  opening = false;
+  element("opening").hidden = true;
+}
+async function mount(cycle: number) {
   const boot = await request("/bootstrap");
+  if (cycle !== openCycle) return;
   boardId = resultData(boot.boardResult).id;
   window.__sandBoardId = boardId;
   for (const key of ["codex", "json", "toml"])
@@ -191,9 +217,13 @@ async function mount() {
     method: "resources/read",
     params: { uri: "ui://sand-table/overview.html" },
   });
+  if (cycle !== openCycle) return;
   await bridge?.close();
-  const old = document.querySelector("iframe")!;
-  const frame = old.cloneNode() as HTMLIFrameElement;
+  const old = document.querySelector("iframe");
+  if (!old) throw Error("页面上没有白板框架，无法重新连接。");
+  const frame = document.createElement("iframe");
+  frame.title = "Sand Table 白板";
+  frame.setAttribute("sandbox", "allow-scripts");
   old.replaceWith(frame);
   frame.addEventListener("load", () => {
     if (hostHandshake) toBoard(hostHandshake);
@@ -253,10 +283,12 @@ async function mount() {
   bridge.oninitialized = async () => {
     await bridge!.sendToolInput({ arguments: { boardId } });
     await bridge!.sendToolResult(boot.boardResult);
+    stopOpening(cycle);
   };
   await bridge.connect(
     new PostMessageTransport(frame.contentWindow!, frame.contentWindow!),
   );
+  if (cycle !== openCycle) return;
   frame.srcdoc = resource.contents[0].text.replace(
     "<head>",
     `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; connect-src 'none'">`,
@@ -276,22 +308,30 @@ async function copy(id: string) {
   }
 }
 async function connect(force = false) {
-  element("error").hidden = true;
+  if (opening) return;
+  const cycle = startOpening();
   connecting = true;
   try {
     const token = await ensureToken(force);
+    if (cycle !== openCycle) return;
     rememberToken(token);
     scrubUrl();
     try {
-      await mount();
+      await mount(cycle);
     } catch (e) {
       // A rejected credential means the instance rotated its token: fetch a
       // fresh one from the same origin instead of dying on a red bar.
+      if (cycle !== openCycle) return;
       if (!isAuthError(e)) throw e;
       const fresh = await requestSessionToken();
+      if (cycle !== openCycle) return;
       rememberToken(fresh);
-      await mount();
+      await mount(cycle);
     }
+  } catch (e) {
+    if (cycle !== openCycle) return;
+    stopOpening(cycle);
+    throw e;
   } finally {
     connecting = false;
   }
