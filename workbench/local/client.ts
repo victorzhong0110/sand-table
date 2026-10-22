@@ -223,7 +223,7 @@ async function mount() {
       .join("\n");
     showSetup(true);
     element("setup-status").textContent =
-      "编排请求已准备。复制下面的消息，到你自己的 AI 客户端发送。";
+      "AI 发来一条编排消息。点「复制这条消息」，再到你的 AI 客户端发送。";
     return {};
   };
   bridge.ondownloadfile = async ({ contents }) => {
@@ -321,13 +321,14 @@ element("ask").onclick = async () => {
   try {
     const r = await rpc("sand_read_board");
     const b = resultData(r);
-    element<HTMLTextAreaElement>("prompt").value = makePrompt(
+    /* 提问写进自己的框子：#prompt 里是 Agent 发来的原文，不能被覆盖。 */
+    element<HTMLTextAreaElement>("ask-text").value = makePrompt(
       boardId,
       b.objects
         .filter((o: any) => b.selection.includes(o.id))
         .map((o: any) => o.title),
     );
-    await copy("prompt");
+    await copy("ask-text");
   } catch (e) {
     showError(e);
   }

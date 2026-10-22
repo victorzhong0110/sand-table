@@ -266,6 +266,57 @@ try {
   assert.equal(noToken.status(), 403);
   await page.getByRole("button", { name: "连接我的 AI", exact: true }).click();
   assert.ok((await page.locator("#prompt").inputValue()).includes(browserId));
+  /* #31: Agent 发来的消息要能原样复制，「复制当前选区提问」不能把它冲掉。 */
+  assert.equal(
+    await page.locator('[data-copy="prompt"]').count(),
+    1,
+    "There is a copy button for the message itself.",
+  );
+  const appFrame = () => page.frames().find((f) => f !== page.mainFrame())!;
+  const agentMessage =
+    "用沙盘搭一个比较两个方案的白板：左边证据，右边图表，最后是结论。";
+  /* 模拟一次 App 发来的消息（App 就是这样把消息递给宿主的）。 */
+  await appFrame().evaluate((text) => {
+    (window as any).parent.postMessage(
+      {
+        jsonrpc: "2.0",
+        id: 990001,
+        method: "ui/message",
+        params: { role: "user", content: [{ type: "text", text }] },
+      },
+      "*",
+    );
+  }, agentMessage);
+  await page.waitForFunction(
+    (text) =>
+      (document.getElementById("prompt") as HTMLTextAreaElement)?.value ===
+      text,
+    agentMessage,
+    { timeout: 10000 },
+  );
+  assert.equal(
+    await page.locator("#prompt").inputValue(),
+    agentMessage,
+    "The message lands in the prompt field as it arrived.",
+  );
+  const promptBefore = await page.locator("#prompt").inputValue();
+  await page.getByRole("button", { name: "复制当前选区提问" }).click();
+  await page.waitForFunction(
+    () =>
+      (document.getElementById("ask-text") as HTMLTextAreaElement)?.value
+        .length > 0,
+    undefined,
+    { timeout: 10000 },
+  );
+  assert.equal(
+    await page.locator("#prompt").inputValue(),
+    promptBefore,
+    "Copying the selection question leaves the agent's message alone.",
+  );
+  assert.ok(
+    (await page.locator("#ask-text").inputValue()).length > 0,
+    "The selection question has its own field.",
+  );
   await page.screenshot({ path: "artifacts/local-connect.png" });
   await page.getByRole("button", { name: "返回白板" }).click();
   await page.screenshot({ path: "artifacts/local-board.png" });
