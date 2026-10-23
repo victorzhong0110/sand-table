@@ -817,24 +817,24 @@ function Workbench() {
   /**
    * v3：活动报告单独读一次。
    *
-   * 活动表不在增量集里（增量只带内容与布局），所以每 5 秒读一次上下文，
-   * 拿别人的活动报告。这一条很小，不是整块拉白板。
+   * 活动表不在增量集里（增量只带内容与布局），所以每 5 秒读一次活动列表。
+   * 用 app_activity 而不是 sand_context：sand_context 会写 agent_reads
+   * （把 Agent 的读取游标往前推），而且它按上报者排除自己，
+   * 本地桥接下界面与别的调用共用一个身份，界面就看不到自己那条。
    */
   useEffect(() => {
     if (kernel !== "v3") return;
     const readActivities = async () => {
-      const context: any = await callTool("sand_context");
-      activitiesRef.current = (context?.otherAgents ?? []).map(
-        (agent: any) => ({
-          agentId: String(agent.actor ?? ""),
-          workspaceId: "",
-          objectIds: [],
-          task: String(agent.task ?? ""),
-          action: "",
-          state: agent.state ?? "unknown",
-          reportedAt: 0,
-        }),
-      );
+      const data: any = await callTool("app_activity", { action: "list" });
+      activitiesRef.current = (data?.activities ?? []).map((activity: any) => ({
+        agentId: String(activity.actor ?? ""),
+        workspaceId: "",
+        objectIds: activity.objectIds ?? [],
+        task: String(activity.task ?? ""),
+        action: String(activity.action ?? ""),
+        state: activity.state ?? "unknown",
+        reportedAt: activity.reportedAt ?? 0,
+      }));
       refreshV3Board();
     };
     const timer = setInterval(() => {
