@@ -85,7 +85,6 @@ export const novelPack: PackSpec = {
       schema: {
         type: "object",
         additionalProperties: false,
-        required: ["summary"],
         properties: {
           summary: {
             type: "string",

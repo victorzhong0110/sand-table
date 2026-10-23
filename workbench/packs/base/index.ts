@@ -12,6 +12,9 @@
 
 import type { PackSpec } from "../../kernel/index.ts";
 
+/** 空字符串表示还没填；填了就必须是 http 或 https。 */
+const HTTP_URL = "^(?:[hH][tT][tT][pP][sS]?://\\S+)?$";
+
 export const basePack: PackSpec = {
   id: "base",
   title: "基础",
@@ -132,6 +135,7 @@ export const basePack: PackSpec = {
           url: {
             type: "string",
             maxLength: 2000,
+            pattern: HTTP_URL,
             "x-sand-label": "链接",
             "x-sand-widget": "url",
           },
@@ -161,7 +165,7 @@ export const basePack: PackSpec = {
         properties: {
           blob: {
             type: "string",
-            maxLength: 64,
+            pattern: "^[0-9a-f]{64}$",
             "x-sand-label": "附件",
             "x-sand-widget": "blob",
           },
@@ -290,6 +294,7 @@ export const basePack: PackSpec = {
           sourceUrl: {
             type: "string",
             maxLength: 2000,
+            pattern: HTTP_URL,
             "x-sand-label": "状态来源",
             "x-sand-widget": "url",
           },
@@ -415,7 +420,6 @@ export const basePack: PackSpec = {
             items: {
               type: "object",
               additionalProperties: false,
-              required: ["at", "label"],
               properties: {
                 at: {
                   type: "string",
@@ -576,7 +580,6 @@ export const basePack: PackSpec = {
           left: {
             type: "object",
             additionalProperties: false,
-            required: ["title", "text"],
             properties: {
               title: {
                 type: "string",
@@ -597,7 +600,6 @@ export const basePack: PackSpec = {
           right: {
             type: "object",
             additionalProperties: false,
-            required: ["title", "text"],
             properties: {
               title: {
                 type: "string",

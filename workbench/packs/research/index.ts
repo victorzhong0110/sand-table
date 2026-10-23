@@ -24,7 +24,6 @@ export const researchPack: PackSpec = {
       schema: {
         type: "object",
         additionalProperties: false,
-        required: ["statement"],
         properties: {
           statement: {
             type: "string",
@@ -67,7 +66,6 @@ export const researchPack: PackSpec = {
       schema: {
         type: "object",
         additionalProperties: false,
-        required: ["summary"],
         properties: {
           summary: {
             type: "string",
@@ -169,7 +167,6 @@ export const researchPack: PackSpec = {
       schema: {
         type: "object",
         additionalProperties: false,
-        required: ["statement"],
         properties: {
           statement: {
             type: "string",

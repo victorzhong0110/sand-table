@@ -11,6 +11,14 @@
 
 import type { PackSpec } from "../../kernel/index.ts";
 
+/** 源文件路径：允许空字符串；禁止绝对路径、反斜杠，以及单独的 . / .. 段。 */
+const SOURCE_PATH =
+  "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$)).*$";
+
+/** 工作树路径：不能为空，禁止盘符、绝对路径、反斜杠、空段、. / .. / .git 段。 */
+const WORKTREE_PATH =
+  "^(?![A-Za-z]:)(?!/)(?!\\.(?:/|$))(?!\\.\\.(?:/|$))(?!\\.[gG][iI][tT](?:/|$))[^/\\\\]+(?:/(?!\\.(?:/|$))(?!\\.\\.(?:/|$))(?!\\.[gG][iI][tT](?:/|$))[^/\\\\]+)*$";
+
 export const codePack: PackSpec = {
   derivedIdPrefix: "code:",
   id: "code",
@@ -68,13 +76,15 @@ export const codePack: PackSpec = {
           path: {
             type: "string",
             maxLength: 500,
+            pattern: SOURCE_PATH,
             "x-sand-label": "路径",
             "x-sand-widget": "text",
           },
           hash: {
-            type: "string",
-            maxLength: 64,
-            pattern: "^[0-9a-fA-F]{64}$",
+            anyOf: [
+              { type: "string", pattern: "^[0-9a-fA-F]{64}$" },
+              { type: "null" },
+            ],
             "x-sand-label": "内容指纹",
             "x-sand-widget": "text",
           },
@@ -133,31 +143,31 @@ export const codePack: PackSpec = {
       schema: {
         type: "object",
         additionalProperties: false,
-        required: ["request"],
         properties: {
           request: {
             type: "string",
-            maxLength: 2000,
+            maxLength: 4000,
             "x-sand-label": "改动请求",
             "x-sand-widget": "markdown",
           },
           allowedFiles: {
             type: "array",
-            maxItems: 100,
+            maxItems: 12,
             items: {
               type: "object",
               additionalProperties: false,
-              required: ["path"],
+              required: ["workspaceId", "path"],
               properties: {
                 workspaceId: {
                   type: "string",
-                  maxLength: 200,
+                  maxLength: 500,
                   "x-sand-label": "工作空间",
                   "x-sand-widget": "text",
                 },
                 path: {
                   type: "string",
                   maxLength: 500,
+                  pattern: WORKTREE_PATH,
                   "x-sand-label": "路径",
                   "x-sand-widget": "text",
                 },
@@ -165,6 +175,12 @@ export const codePack: PackSpec = {
             },
             "x-sand-label": "允许修改的文件",
             "x-sand-widget": "list",
+          },
+          arrangement: {
+            type: "object",
+            "x-sand-label": "冻结布局",
+            "x-sand-widget": "list",
+            "x-sand-hidden": true,
           },
         },
       },
@@ -192,17 +208,16 @@ export const codePack: PackSpec = {
       schema: {
         type: "object",
         additionalProperties: false,
-        required: ["title"],
         properties: {
           title: {
             type: "string",
-            maxLength: 200,
+            maxLength: 120,
             "x-sand-label": "标题",
             "x-sand-widget": "text",
           },
           explanation: {
             type: "string",
-            maxLength: 2000,
+            maxLength: 4000,
             "x-sand-label": "说明",
             "x-sand-widget": "markdown",
           },
@@ -217,6 +232,24 @@ export const codePack: PackSpec = {
             maxLength: 200,
             "x-sand-label": "摘要",
             "x-sand-widget": "text",
+          },
+          intentVersion: {
+            type: "integer",
+            minimum: 1,
+            "x-sand-label": "意图版本",
+            "x-sand-widget": "integer",
+          },
+          agentId: {
+            type: "string",
+            maxLength: 500,
+            "x-sand-label": "提交者",
+            "x-sand-widget": "text",
+          },
+          decidedAt: {
+            type: "integer",
+            minimum: 0,
+            "x-sand-label": "决定时间",
+            "x-sand-widget": "integer",
           },
           decision: {
             type: "string",
@@ -234,15 +267,22 @@ export const codePack: PackSpec = {
           },
           files: {
             type: "array",
-            maxItems: 200,
+            maxItems: 12,
             items: {
               type: "object",
               additionalProperties: false,
-              required: ["path"],
+              required: ["workspaceId", "path"],
               properties: {
+                workspaceId: {
+                  type: "string",
+                  maxLength: 500,
+                  "x-sand-label": "工作空间",
+                  "x-sand-widget": "text",
+                },
                 path: {
                   type: "string",
                   maxLength: 500,
+                  pattern: WORKTREE_PATH,
                   "x-sand-label": "路径",
                   "x-sand-widget": "text",
                 },
@@ -258,10 +298,35 @@ export const codePack: PackSpec = {
                   "x-sand-label": "改后指纹",
                   "x-sand-widget": "text",
                 },
+                before: {
+                  type: ["string", "null"],
+                  maxLength: 200000,
+                  "x-sand-label": "改前内容",
+                  "x-sand-widget": "longtext",
+                },
+                after: {
+                  type: ["string", "null"],
+                  maxLength: 200000,
+                  "x-sand-label": "改后内容",
+                  "x-sand-widget": "longtext",
+                },
               },
             },
             "x-sand-label": "改动的文件",
             "x-sand-widget": "list",
+          },
+          baseline: {
+            type: "array",
+            items: { type: "object" },
+            "x-sand-label": "基线",
+            "x-sand-widget": "list",
+            "x-sand-hidden": true,
+          },
+          verification: {
+            type: "object",
+            "x-sand-label": "核对结果",
+            "x-sand-widget": "list",
+            "x-sand-hidden": true,
           },
         },
       },
@@ -290,7 +355,6 @@ export const codePack: PackSpec = {
       schema: {
         type: "object",
         additionalProperties: false,
-        required: ["command", "outcome"],
         properties: {
           command: {
             type: "string",
@@ -300,7 +364,7 @@ export const codePack: PackSpec = {
           },
           environment: {
             type: "string",
-            maxLength: 200,
+            maxLength: 1000,
             "x-sand-label": "环境",
             "x-sand-widget": "text",
           },
@@ -317,7 +381,7 @@ export const codePack: PackSpec = {
           },
           output: {
             type: "string",
-            maxLength: 20000,
+            maxLength: 8000,
             "x-sand-label": "输出",
             "x-sand-widget": "markdown",
           },
@@ -329,7 +393,7 @@ export const codePack: PackSpec = {
           },
           workspaceId: {
             type: "string",
-            maxLength: 200,
+            maxLength: 500,
             "x-sand-label": "工作空间",
             "x-sand-widget": "text",
           },
@@ -338,6 +402,26 @@ export const codePack: PackSpec = {
             maxLength: 200,
             "x-sand-label": "内容指纹",
             "x-sand-widget": "text",
+          },
+          digest: {
+            type: "string",
+            maxLength: 200,
+            "x-sand-label": "摘要",
+            "x-sand-widget": "text",
+          },
+          agentId: {
+            type: "string",
+            maxLength: 500,
+            "x-sand-label": "提交者",
+            "x-sand-widget": "text",
+          },
+          source: {
+            type: "string",
+            enum: ["agent-report"],
+            "x-sand-label": "来源",
+            "x-sand-widget": "enum",
+            "x-sand-default": "agent-report",
+            "x-sand-enum-labels": { "agent-report": "代理自报" },
           },
         },
       },

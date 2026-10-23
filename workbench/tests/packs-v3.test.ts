@@ -36,8 +36,8 @@ const samples: {
   },
   {
     type: "base.link",
-    ok: [{ url: "https://example.com/a", description: "说明" }],
-    bad: [{ url: 12 }, { description: 12 }],
+    ok: [{ url: "https://example.com/a", description: "说明" }, { url: "" }],
+    bad: [{ url: 12 }, { description: 12 }, { url: "javascript:alert(1)" }],
   },
   {
     type: "base.media",
@@ -49,7 +49,12 @@ const samples: {
         alt: "替代文字",
       },
     ],
-    bad: [{ blob: 12 }, { mime: "image/png", caption: 12 }],
+    bad: [
+      { blob: 12 },
+      { mime: "image/png", caption: 12 },
+      { blob: "A".repeat(64) },
+      { blob: "not-a-sha256" },
+    ],
   },
   {
     type: "base.code_snippet",
@@ -70,12 +75,19 @@ const samples: {
         sourceUrl: "https://status.example.com",
       },
     ],
-    bad: [{ state: "broken" }, { state: 12 }],
+    bad: [
+      { state: "broken" },
+      { state: 12 },
+      { sourceUrl: "javascript:alert(1)" },
+    ],
   },
   {
     type: "base.table",
     ok: [
-      { columns: ["项目", "内容"], rows: [["甲", 1, true, null]] },
+      {
+        columns: ["名称", "数量", "完成", "备注"],
+        rows: [["甲", 1, true, null]],
+      },
       { columns: [], rows: [] },
     ],
     bad: [{ columns: new Array(21).fill("列") }, { rows: "不是数组" }],
@@ -88,7 +100,10 @@ const samples: {
   {
     type: "base.events",
     ok: [{ events: [{ at: "10:00", label: "开始", detail: "详情" }] }],
-    bad: [{ events: [{ at: "10:00" }] }, { events: [{ at: 1, label: "x" }] }],
+    bad: [
+      { events: [{ at: "10:00", label: "开始", detail: 1 }] },
+      { events: [{ at: 1, label: "x" }] },
+    ],
   },
   {
     type: "base.task",
@@ -120,7 +135,7 @@ const samples: {
         conclusion: "A 更稳",
       },
     ],
-    bad: [{ left: { title: "方案 A" } }, { conclusion: 12 }],
+    bad: [{ left: { title: 1, text: "内容" } }, { conclusion: 12 }],
   },
   {
     type: "base.tour",
@@ -205,8 +220,18 @@ const samples: {
   },
   {
     type: "code.file",
-    ok: [{ path: "src/app/main.ts", hash: "a".repeat(64) }],
-    bad: [{ hash: "不是内容指纹" }, { path: 12 }],
+    ok: [
+      { path: "src/app/main.ts", hash: "a".repeat(64) },
+      { path: "", hash: null },
+      { path: ".gitignore" },
+    ],
+    bad: [
+      { hash: "不是内容指纹" },
+      { path: 12 },
+      { path: "../secret" },
+      { path: "/etc/passwd" },
+      { path: "foo\\bar" },
+    ],
   },
   {
     type: "code.symbol",
@@ -219,9 +244,22 @@ const samples: {
       {
         request: "把导出按钮补上",
         allowedFiles: [{ workspaceId: "w1", path: "src/app/main.ts" }],
+        arrangement: { viewId: "main" },
       },
+      { request: "a".repeat(4000) },
     ],
-    bad: [{ allowedFiles: [{ path: 12 }] }, { request: 12 }],
+    bad: [
+      { allowedFiles: [{ path: 12 }] },
+      { request: 12 },
+      { request: "a".repeat(4001) },
+      {
+        allowedFiles: Array.from({ length: 13 }, () => ({
+          workspaceId: "w1",
+          path: "src/app/main.ts",
+        })),
+      },
+      { allowedFiles: [{ workspaceId: "w1", path: "../secret" }] },
+    ],
   },
   {
     type: "code.proposal",
@@ -232,16 +270,36 @@ const samples: {
         testPlan: "跑一遍测试",
         digest: "digest-1",
         decision: "pending",
+        intentVersion: 1,
+        agentId: "agent-1",
         files: [
           {
+            workspaceId: "w1",
             path: "src/app/main.ts",
             beforeHash: null,
             afterHash: "b".repeat(64),
+            before: "const a = 1;\n",
+            after: null,
+          },
+        ],
+        baseline: [
+          {
+            workspaceId: "w1",
+            head: "abc",
+            files: {},
+            omitted: [],
+            fingerprint: "f",
           },
         ],
       },
     ],
-    bad: [{ decision: "unknown-decision" }, { files: [{ path: 12 }] }],
+    bad: [
+      { decision: "unknown-decision" },
+      { files: [{ path: 12 }] },
+      { title: "题".repeat(121) },
+      { explanation: "说".repeat(4001) },
+      { files: [{ workspaceId: "w1", path: "../secret" }] },
+    ],
   },
   {
     type: "code.validation",
@@ -252,9 +310,19 @@ const samples: {
         outcome: "passed",
         output: "全部通过",
         reportedAt: 1,
+        workspaceId: "w1",
+        digest: "c".repeat(64),
+        agentId: "agent-1",
+        source: "agent-report",
       },
     ],
-    bad: [{ outcome: "maybe" }, { command: 12 }],
+    bad: [
+      { outcome: "maybe" },
+      { command: 12 },
+      { environment: "e".repeat(1001) },
+      { output: "o".repeat(8001) },
+      { source: "server" },
+    ],
   },
 ];
 
@@ -384,4 +452,154 @@ test("代码包声明派生 ID 前缀，且只有代码包声明", () => {
   for (const pack of builtinPacks)
     if (pack.id !== "code")
       assert.equal(pack.derivedIdPrefix, undefined, `${pack.id} 不该声明前缀`);
+});
+
+const WIDGETS = new Set([
+  "text",
+  "longtext",
+  "markdown",
+  "number",
+  "integer",
+  "boolean",
+  "enum",
+  "tags",
+  "date",
+  "url",
+  "color",
+  "locator",
+  "blob",
+  "table",
+  "list",
+]);
+
+/** 每个具名字段都要有中文标签和控件。嵌套的 items / anyOf 里的字段也算。 */
+function fieldsMissingHints(schema: unknown, path: string, hits: string[]) {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return;
+  const record = schema as Record<string, unknown>;
+  const properties = record.properties;
+  if (
+    properties &&
+    typeof properties === "object" &&
+    !Array.isArray(properties)
+  )
+    for (const [name, child] of Object.entries(properties)) {
+      const here = `${path}/${name}`;
+      if (!child || typeof child !== "object" || Array.isArray(child)) {
+        hits.push(`${here} 不是对象`);
+        continue;
+      }
+      const field = child as Record<string, unknown>;
+      const label = field["x-sand-label"];
+      const widget = field["x-sand-widget"];
+      if (typeof label !== "string" || !/\p{Script=Han}/u.test(label))
+        hits.push(`${here} 缺少中文标签`);
+      if (typeof widget !== "string" || !WIDGETS.has(widget))
+        hits.push(`${here} 的控件不合格`);
+      fieldsMissingHints(child, here, hits);
+    }
+  for (const key of ["items", "additionalProperties"])
+    if (key in record) fieldsMissingHints(record[key], `${path}/${key}`, hits);
+  for (const key of ["anyOf", "oneOf", "allOf"]) {
+    const list = record[key];
+    if (!Array.isArray(list)) continue;
+    list.forEach((child, index) =>
+      fieldsMissingHints(child, `${path}/${key}/${index}`, hits),
+    );
+  }
+}
+
+function visibleFields(schema: Record<string, unknown>) {
+  const properties = schema.properties;
+  if (
+    !properties ||
+    typeof properties !== "object" ||
+    Array.isArray(properties)
+  )
+    return [];
+  return Object.entries(properties).filter(([, child]) => {
+    if (!child || typeof child !== "object" || Array.isArray(child))
+      return true;
+    return (child as Record<string, unknown>)["x-sand-hidden"] !== true;
+  });
+}
+
+test("每个字段都有中文标签和控件，摘要只取可见字段", () => {
+  for (const pack of builtinPacks) {
+    assert.equal(pack.registerTools, undefined, `${pack.id} 不该注册工具`);
+    for (const type of pack.types ?? []) {
+      assert.equal(
+        type.display.view,
+        undefined,
+        `${type.type} 不该指定自定义视图`,
+      );
+      const hits: string[] = [];
+      fieldsMissingHints(type.schema, type.type, hits);
+      assert.deepEqual(hits, []);
+      const visible = visibleFields(type.schema as Record<string, unknown>).map(
+        ([name]) => name,
+      );
+      const summary = type.display.summary ?? [];
+      for (const field of summary)
+        assert.ok(
+          visible.includes(field),
+          `${type.type} 的摘要「${field}」不是可见字段`,
+        );
+      if (visible.length >= 2)
+        assert.ok(
+          summary.length >= 2 && summary.length <= 3,
+          `${type.type} 的摘要应是 2 到 3 个字段，现在是 ${summary.join("、")}`,
+        );
+      else
+        assert.equal(
+          summary.length,
+          visible.length,
+          `${type.type} 的摘要应覆盖它仅有的字段`,
+        );
+    }
+  }
+});
+
+test("模板里新建对象的数据能通过该类型的校验", () => {
+  const registry = registryWithBuiltins();
+  for (const pack of builtinPacks)
+    for (const template of pack.templates ?? [])
+      for (const command of template.commands) {
+        if (command.op !== "object.create") continue;
+        const result = registry.validateData(command.type, command.data ?? {});
+        assert.equal(
+          result.ok,
+          true,
+          `${template.id} 里 ${command.ref ?? command.type} 的数据不合格：${JSON.stringify(result)}`,
+        );
+      }
+});
+
+test("关系两端和槽的目标类型都存在", () => {
+  const registry = registryWithBuiltins();
+  const types = new Set(
+    builtinPacks.flatMap((pack) => (pack.types ?? []).map((type) => type.type)),
+  );
+  for (const pack of builtinPacks) {
+    for (const relation of pack.relationKinds ?? [])
+      for (const name of [
+        ...(relation.sourceTypes ?? []),
+        ...(relation.targetTypes ?? []),
+      ])
+        assert.ok(
+          types.has(name),
+          `${relation.kind} 指向了不存在的类型「${name}」`,
+        );
+    for (const type of pack.types ?? [])
+      for (const slot of type.relationSlots ?? []) {
+        assert.ok(
+          registry.getRelationKind(slot.kind),
+          `${type.type} 的槽「${slot.key}」用了不存在的关系「${slot.kind}」`,
+        );
+        for (const name of slot.targetTypes ?? [])
+          assert.ok(
+            types.has(name),
+            `${type.type} 的槽「${slot.key}」指向了不存在的类型「${name}」`,
+          );
+      }
+  }
 });
