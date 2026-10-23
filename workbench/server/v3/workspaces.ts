@@ -4,7 +4,7 @@
 // 这里只负责开关连接和改 meta.title。
 
 import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   CommandError,
   getMeta,
@@ -18,6 +18,34 @@ import {
 
 /** 工作空间编号要能当目录名用。 */
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
+
+/**
+ * 工作空间编号过同一道关。
+ *
+ * 先看编号拼出来的路径还在不在根目录下面，再看编号本身合不合规：
+ * 越界是最危险的一种，先挡掉。两道关都过才放行。
+ */
+function assertWorkspaceId(root: string, id: string): void {
+  const base = resolve(root);
+  const inside = relative(base, resolve(base, id));
+  if (
+    !inside ||
+    inside === ".." ||
+    inside.startsWith(`..${sep}`) ||
+    isAbsolute(inside)
+  )
+    throw new CommandError(
+      "FORBIDDEN",
+      `工作空间编号「${id}」指向的位置不在工作空间根目录里面，不能这样操作。请先列出工作空间，用列表里的编号再试。`,
+      null,
+    );
+  if (!ID.test(id))
+    throw new CommandError(
+      "INVALID_DATA",
+      "工作空间编号只能以字母或数字开头，后面用字母、数字、连字符或下划线，最长 64 位。请先列出工作空间，用列表里的编号再试。",
+      null,
+    );
+}
 
 /** 当前打开的工作空间。切换工作空间就是换掉这一份。 */
 export type WorkspaceSession = {
@@ -88,12 +116,7 @@ export function createWorkspace(
   options: { id?: string; title?: string },
 ): { id: string; title: string } {
   const id = options.id ?? newId();
-  if (!ID.test(id))
-    throw new CommandError(
-      "INVALID_DATA",
-      "工作空间编号只能以字母或数字开头，后面用字母、数字、连字符或下划线，最长 64 位。请换一个编号再试。",
-      null,
-    );
+  assertWorkspaceId(root, id);
   if (existsSync(join(root, id)))
     throw new CommandError(
       "INVALID_DATA",
@@ -121,6 +144,7 @@ export function switchWorkspace(
   session: WorkspaceSession,
   id: string,
 ): WorkspaceSession {
+  assertWorkspaceId(session.root, id);
   const file = join(session.root, id, "workspace.db");
   if (!existsSync(file))
     throw new CommandError(
@@ -144,6 +168,7 @@ export function renameWorkspace(
   id: string,
   title: string,
 ): { id: string; title: string } {
+  assertWorkspaceId(session.root, id);
   if (!title.trim())
     throw new CommandError(
       "INVALID_DATA",
@@ -165,6 +190,7 @@ export function deleteWorkspace(
   session: WorkspaceSession,
   id: string,
 ): { id: string; deleted: true } {
+  assertWorkspaceId(session.root, id);
   if (id === session.workspaceId)
     throw new CommandError(
       "FORBIDDEN",

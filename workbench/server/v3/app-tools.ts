@@ -42,6 +42,8 @@ export type AppToolsHost = {
   afterWrite: (result: CommandResult) => void;
   /** 切换工作空间之后同步包工具的启停。 */
   afterSwitch: () => void;
+  /** 历史导航之后同步包工具的启停。 */
+  afterHistory: () => void;
 };
 
 /** 一次上传的字节上限。 */
@@ -116,6 +118,20 @@ export function registerAppTools(
     { appOnly: true },
   );
 
+  /**
+   * 历史导航：内核走完再同步包工具的启停。
+   *
+   * 导航会把 packs 表一起还原，工具的启停要跟着数据库走；
+   * 导航失败时抛错，句柄保持原样。
+   */
+  const navigate = (
+    run: () => { revision: number; cursorId: string | null },
+  ) => {
+    const result = run();
+    host.afterHistory();
+    return result;
+  };
+
   registrar.tool(
     "app_history",
     "The person's undo, redo and jump along the board history.",
@@ -126,15 +142,17 @@ export function registerAppTools(
     },
     (args, ctx) => {
       if (args.action === "list") return historyList(ctx.db, args.limit ?? 20);
-      if (args.action === "undo") return undo(ctx.db, ctx.actor);
-      if (args.action === "redo") return redo(ctx.db, ctx.actor);
+      if (args.action === "undo")
+        return navigate(() => undo(ctx.db, ctx.actor));
+      if (args.action === "redo")
+        return navigate(() => redo(ctx.db, ctx.actor));
       if (!args.entryId)
         throw new CommandError(
           "INVALID_DATA",
           "跳转要给出历史记录的编号。请先列出历史，再跳到其中一条。",
           null,
         );
-      return jump(ctx.db, ctx.actor, args.entryId);
+      return navigate(() => jump(ctx.db, ctx.actor, args.entryId));
     },
     { appOnly: true },
   );

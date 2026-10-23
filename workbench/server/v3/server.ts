@@ -155,7 +155,17 @@ export function createServerV3(options: ServerOptions) {
       if (change.table === "packs") syncPackTools(change.id);
   }
 
-  registerCoreTools(registrar, { host: hostInfo, afterWrite });
+  /* 历史导航不知道哪条记录动了哪个包，整体同步一遍。
+     转发模式没有包状态，一律列出来，由真正的服务端裁决。 */
+  function syncAllPackTools() {
+    for (const packId of packTools.keys()) syncPackTools(packId);
+  }
+
+  registerCoreTools(registrar, {
+    host: hostInfo,
+    afterWrite,
+    afterHistory: syncAllPackTools,
+  });
   registerAppTools(registrar, {
     session: () => {
       const current = session;
@@ -166,9 +176,8 @@ export function createServerV3(options: ServerOptions) {
       session = next;
     },
     afterWrite,
-    afterSwitch: () => {
-      for (const packId of packTools.keys()) syncPackTools(packId);
-    },
+    afterSwitch: syncAllPackTools,
+    afterHistory: syncAllPackTools,
   });
 
   /* 包工具：每个内置包都注册一次，启用与否交给包状态决定。 */

@@ -13,6 +13,33 @@ import {
   writeConnection,
   removeConnection,
 } from "./session.ts";
+
+/**
+ * 桥接进程用的 MCP 客户端条目。
+ *
+ * 桥接由 MCP 客户端启动，它看到的是客户端自己的环境变量，
+ * 生成的条目里必须带上内核版本，桥接才会走同一套工具面；
+ * 自定义条目自己的环境变量要留着，只补内核版本。
+ * 没有自定义条目时用本机的 node 跑 bridge.ts，和 config.ts 的默认一致。
+ */
+export function bridgeEntry(
+  kernel: string | undefined,
+  entry: McpEntry | undefined,
+  sessionFile: string,
+): McpEntry | undefined {
+  if (kernel !== "v3") return entry;
+  return {
+    command: entry?.command ?? process.execPath,
+    args: entry?.args ?? [
+      "--experimental-strip-types",
+      fileURLToPath(new URL("./bridge.ts", import.meta.url)),
+      "--session-file",
+      sessionFile,
+    ],
+    env: { ...entry?.env, SAND_KERNEL: "v3" },
+  };
+}
+
 export async function startLocal(options: {
   workspaces: string[];
   sessionFile: string;
@@ -69,15 +96,7 @@ export async function startLocal(options: {
     version: "0.2.0",
   });
   const kernel = process.env.SAND_KERNEL;
-  /* 桥接进程由 MCP 客户端启动，它看到的是客户端的环境变量。
-     生成的 MCP 配置里要带上内核版本，桥接才会走同一套工具面。 */
-  const mcpEntry: McpEntry | undefined =
-    kernel === "v3" && options.mcpEntry
-      ? {
-          ...options.mcpEntry,
-          env: { ...options.mcpEntry.env, SAND_KERNEL: "v3" },
-        }
-      : options.mcpEntry;
+  const mcpEntry = bridgeEntry(kernel, options.mcpEntry, options.sessionFile);
   await client.connect(
     new StdioClientTransport({
       command: process.execPath,

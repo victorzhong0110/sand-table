@@ -28,6 +28,8 @@ export type CoreToolsHost = {
   host: () => { taskSubmit: boolean };
   /** 写入之后同步包工具的启停。 */
   afterWrite: (result: CommandResult) => void;
+  /** 历史导航之后同步包工具的启停。 */
+  afterHistory: () => void;
 };
 
 const QUERY_DEFAULT_LIMIT = 20;
@@ -146,6 +148,20 @@ export function registerCoreTools(
     },
   );
 
+  /**
+   * 历史导航：内核走完再同步包工具的启停。
+   *
+   * 导航会把 packs 表一起还原，工具的启停要跟着数据库走；
+   * 导航失败时抛错，句柄保持原样。
+   */
+  const navigate = (
+    run: () => { revision: number; cursorId: string | null },
+  ) => {
+    const result = run();
+    host.afterHistory();
+    return result;
+  };
+
   registrar.tool(
     "sand_history",
     "List, undo, redo or jump in the board history. Undo and redo move one step along the current path; jump goes to any recorded step, including old branches.",
@@ -157,15 +173,17 @@ export function registerCoreTools(
     (args, ctx) => {
       if (args.action === "list")
         return historyList(ctx.db, args.limit ?? HISTORY_DEFAULT_LIMIT);
-      if (args.action === "undo") return undo(ctx.db, ctx.actor);
-      if (args.action === "redo") return redo(ctx.db, ctx.actor);
+      if (args.action === "undo")
+        return navigate(() => undo(ctx.db, ctx.actor));
+      if (args.action === "redo")
+        return navigate(() => redo(ctx.db, ctx.actor));
       if (!args.entryId)
         throw new CommandError(
           "INVALID_DATA",
           "跳转要给出历史记录的编号。请先列出历史，再跳到其中一条。",
           null,
         );
-      return jump(ctx.db, ctx.actor, args.entryId);
+      return navigate(() => jump(ctx.db, ctx.actor, args.entryId));
     },
   );
 

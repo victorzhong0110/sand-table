@@ -4,12 +4,14 @@
 // 工作空间放在临时目录里，跑完就删。
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { createServerV3 } from "../server/v3/server.ts";
+import { connectionConfig } from "../local/config.ts";
+import { bridgeEntry } from "../local/service.ts";
 import { basePack } from "../packs/base/index.ts";
 import type { PackSpec } from "../kernel/index.ts";
 
@@ -421,4 +423,143 @@ test("包停用时它的工具也跟着停用", async () => {
   } finally {
     await session.close();
   }
+});
+
+test("撤销或重做之后，包工具的启停跟数据库一致", async () => {
+  const demo: PackSpec = {
+    id: "demo",
+    title: "演示包",
+    version: 1,
+    registerTools: (registrar) => {
+      registrar.tool("demo_ping", "演示包的工具。", {}, () => ({ ok: true }));
+    },
+  };
+  const session = await open("test", [basePack, demo]);
+  try {
+    const client = session.client;
+    const listed = async () =>
+      (await client.listTools()).tools.some(
+        (tool) => tool.name === "demo_ping",
+      );
+
+    const disabled = await call(client, "app_edit", {
+      commands: [{ op: "pack.disable", id: "demo" }],
+    });
+    assert.equal(disabled.isError, false, disabled.text);
+    assert.equal(await listed(), false, "包停了，工具不在列表里");
+
+    const undone = await call(client, "sand_history", { action: "undo" });
+    assert.equal(undone.isError, false, undone.text);
+    assert.equal(await listed(), true, "撤销之后包恢复启用，工具也要回来");
+
+    const redone = await call(client, "sand_history", { action: "redo" });
+    assert.equal(redone.isError, false, redone.text);
+    assert.equal(await listed(), false, "重做之后包又停用，工具也要停");
+
+    const undoneByApp = await call(client, "app_history", { action: "undo" });
+    assert.equal(undoneByApp.isError, false, undoneByApp.text);
+    assert.equal(await listed(), true, "界面撤销之后，工具也要回来");
+  } finally {
+    await session.close();
+  }
+});
+
+test("工作空间编号越界或不合规时拒绝，目录一个都不动", async () => {
+  const session = await open("first");
+  try {
+    const client = session.client;
+    const created = await call(client, "app_workspace", {
+      action: "create",
+      id: "second",
+    });
+    assert.equal(created.isError, false, created.text);
+
+    for (const id of [".", "..", "../backup", "../../outside"]) {
+      for (const action of ["delete", "switch", "rename"] as const) {
+        const failed = await call(client, "app_workspace", {
+          action,
+          id,
+          ...(action === "rename" ? { title: "改过的名字" } : {}),
+        });
+        assert.equal(failed.isError, true, `${action}「${id}」必须被拒`);
+        assert.equal(
+          failed.data.code,
+          "FORBIDDEN",
+          `${action}「${id}」的错误码`,
+        );
+      }
+    }
+
+    const malformed = await call(client, "app_workspace", {
+      action: "create",
+      id: "带空格的编号",
+    });
+    assert.equal(malformed.isError, true, "不合规的编号要被拒");
+    assert.equal(malformed.data.code, "INVALID_DATA");
+
+    assert.ok(existsSync(session.root), "工作空间根目录还在");
+    assert.ok(
+      existsSync(join(session.root, "first", "workspace.db")),
+      "当前工作空间还在",
+    );
+    assert.ok(
+      existsSync(join(session.root, "second", "workspace.db")),
+      "另一个工作空间还在",
+    );
+    const listed = await call(client, "app_workspace", { action: "list" });
+    assert.equal(
+      (listed.data.workspaces as unknown[]).length,
+      2,
+      "两个工作空间都还在",
+    );
+  } finally {
+    await session.close();
+  }
+});
+
+test("v3 默认生成的 MCP 条目也带 SAND_KERNEL=v3", () => {
+  const sessionFile = join(tmpdir(), "sand-tools-v3-session.json");
+  const entry = bridgeEntry("v3", undefined, sessionFile);
+  assert.equal(entry?.env?.SAND_KERNEL, "v3");
+
+  const config = connectionConfig(sessionFile, entry);
+  const parsed = JSON.parse(config.json) as {
+    mcpServers: Record<
+      string,
+      { command: string; args: string[]; env?: Record<string, string> }
+    >;
+  };
+  const server = parsed.mcpServers["sand-table"];
+  assert.ok(server, "配置里要有 sand-table 这一条");
+  assert.equal(server.env?.SAND_KERNEL, "v3", "桥接命令要带上内核版本");
+  assert.ok(server.args.includes("--session-file"), "桥接命令要指明会话文件");
+  assert.match(config.codex, /'--env' 'SAND_KERNEL=v3'/);
+  assert.match(config.toml, /"SAND_KERNEL" = "v3"/);
+});
+
+test("自定义 MCP 条目保留自己的环境变量，只补内核版本", () => {
+  const entry = bridgeEntry(
+    "v3",
+    {
+      command: "/app/sand-table",
+      args: ["--mcp"],
+      env: { ELECTRON_RUN_AS_NODE: "1" },
+    },
+    join(tmpdir(), "sand-tools-v3-session.json"),
+  );
+  assert.deepEqual(entry?.env, {
+    ELECTRON_RUN_AS_NODE: "1",
+    SAND_KERNEL: "v3",
+  });
+  assert.equal(entry?.command, "/app/sand-table");
+  assert.deepEqual(entry?.args, ["--mcp"]);
+});
+
+test("不设内核版本时，条目跟以前一样", () => {
+  const custom = { command: "/app/sand-table", args: ["--mcp"] };
+  assert.equal(
+    bridgeEntry(undefined, undefined, "/tmp/session.json"),
+    undefined,
+  );
+  assert.equal(bridgeEntry(undefined, custom, "/tmp/session.json"), custom);
 });
