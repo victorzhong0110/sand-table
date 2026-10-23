@@ -133,13 +133,23 @@ function countOf(db: Db, table: "history" | "audit", action?: string) {
 
 function deletedRev(
   db: Db,
-  table: "objects" | "presentations" | "relations",
+  table: "objects" | "presentations" | "relations" | "settings" | "packs",
   id: string,
 ) {
+  const column = table === "settings" ? "key" : "id";
   const row = db
-    .prepare(`SELECT deleted_rev FROM ${table} WHERE id = ?`)
-    .get(id) as { deleted_rev: number | null };
+    .prepare(`SELECT deleted_rev FROM ${table} WHERE ${column} = ?`)
+    .get(id) as { deleted_rev: number | null } | undefined;
+  assert.ok(row, `${table} 里没有 ${id}`);
   return row.deleted_rev;
+}
+
+function settingValue(db: Db, key: string) {
+  const row = db
+    .prepare("SELECT value FROM settings WHERE key = ?")
+    .get(key) as { value: string } | undefined;
+  assert.ok(row);
+  return JSON.parse(row.value) as unknown;
 }
 
 function beforeTitle(db: Db, historyId: string, objectId: string) {
@@ -515,6 +525,342 @@ test("游标为空时撤销、没有子记录时重做，都不报错也不改�
     assert.equal(redone.cursorId, cursor);
     assert.equal(countOf(lined, "audit", "redo"), 0);
     assert.equal(revision(lined), rev);
+  } finally {
+    close();
+  }
+});
+
+test("撤销创建后再重做或跳回，墓碑不产生冲突", () => {
+  const { db, registry, boardId, close } = scene();
+  try {
+    const made = applyCommands(db, registry, {
+      actor,
+      intentId: "make-all",
+      commands: [
+        {
+          op: "object.create",
+          ref: "card",
+          type: "demo.card",
+          title: "新建的",
+          data: { age: 1 },
+        },
+        {
+          op: "object.create",
+          ref: "other",
+          type: "demo.card",
+          title: "另一张",
+          data: { age: 2 },
+        },
+        {
+          op: "presentation.create",
+          ref: "placed",
+          boardId,
+          objectId: "@card",
+          x: 12,
+          y: 24,
+          width: 80,
+          height: 40,
+        },
+        {
+          op: "relation.create",
+          ref: "link",
+          kind: "demo.link",
+          sourceId: "@card",
+          targetId: "@other",
+        },
+      ],
+    });
+    const entryId = made.historyId;
+    const cardId = made.created.card!;
+    const presentationId = made.created.placed!;
+    const relationId = made.created.link!;
+    assert.ok(entryId);
+    const history = countOf(db, "history");
+    undo(db, actor);
+    assert.notEqual(deletedRev(db, "objects", cardId), null);
+    assert.notEqual(deletedRev(db, "presentations", presentationId), null);
+    assert.notEqual(deletedRev(db, "relations", relationId), null);
+    redo(db, actor);
+    assert.equal(countOf(db, "history"), history);
+    assert.equal(deletedRev(db, "objects", cardId), null);
+    assert.equal(deletedRev(db, "presentations", presentationId), null);
+    assert.equal(deletedRev(db, "relations", relationId), null);
+    assert.equal(titleOf(db, cardId), "新建的");
+    undo(db, actor);
+    const jumped = jump(db, actor, entryId);
+    assert.equal(jumped.cursorId, entryId);
+    assert.equal(deletedRev(db, "objects", cardId), null);
+    assert.equal(titleOf(db, cardId), "新建的");
+
+    const themed = applyCommands(db, registry, {
+      actor,
+      intentId: "theme",
+      commands: [
+        { op: "setting.set", key: "demo.theme", value: { mode: "夜" } },
+      ],
+    });
+    const themeId = themed.historyId;
+    assert.ok(themeId);
+    undo(db, actor);
+    assert.notEqual(deletedRev(db, "settings", "demo.theme"), null);
+    redo(db, actor);
+    assert.equal(deletedRev(db, "settings", "demo.theme"), null);
+    assert.deepEqual(settingValue(db, "demo.theme"), { mode: "夜" });
+    undo(db, actor);
+    assert.equal(jump(db, actor, themeId).cursorId, themeId);
+    assert.deepEqual(settingValue(db, "demo.theme"), { mode: "夜" });
+
+    const source = manifest();
+    const imported = applyCommands(db, registry, {
+      actor,
+      intentId: "extra-pack",
+      commands: [
+        {
+          op: "pack.import",
+          manifest: {
+            ...source,
+            id: "extra",
+            title: "额外",
+            types: [{ ...source.types[1]!, type: "extra.note" }],
+            relationKinds: [
+              { ...source.relationKinds[0]!, kind: "extra.link" },
+            ],
+          },
+        },
+      ],
+    });
+    const packId = imported.historyId;
+    assert.ok(packId);
+    undo(db, actor);
+    assert.notEqual(deletedRev(db, "packs", "extra"), null);
+    redo(db, actor);
+    assert.equal(deletedRev(db, "packs", "extra"), null);
+    undo(db, actor);
+    assert.equal(jump(db, actor, packId).cursorId, packId);
+    assert.equal(deletedRev(db, "packs", "extra"), null);
+
+    undo(db, actor);
+    undo(db, actor);
+    const cursor = getMeta(db, "history_cursor");
+    applyCommands(db, registry, {
+      actor,
+      record: false,
+      commands: [
+        { op: "setting.set", key: "demo.theme", value: { mode: "被人改过" } },
+      ],
+    });
+    const rev = revision(db);
+    assert.throws(
+      () => redo(db, actor),
+      (error: unknown) => {
+        assert.ok(error instanceof CommandError);
+        assert.equal(error.code, "HISTORY_CONFLICT");
+        const ids = error.details?.ids;
+        assert.ok(Array.isArray(ids) && ids.includes("demo.theme"));
+        return true;
+      },
+    );
+    assert.equal(revision(db), rev);
+    assert.equal(getMeta(db, "history_cursor"), cursor);
+    assert.deepEqual(settingValue(db, "demo.theme"), { mode: "被人改过" });
+    assert.equal(deletedRev(db, "settings", "demo.theme"), null);
+  } finally {
+    close();
+  }
+});
+
+test("撤销、重做、跳转写入审计后仍把审计裁到 20000 条", () => {
+  const { db, registry, close } = scene();
+  try {
+    const created = applyCommands(db, registry, {
+      actor,
+      intentId: "create-card",
+      commands: [
+        {
+          op: "object.create",
+          type: "demo.card",
+          title: "起点",
+          data: { age: 1 },
+        },
+      ],
+    });
+    const cardId = created.created["0"]!;
+    applyCommands(db, registry, {
+      actor,
+      intentId: "a",
+      commands: [{ op: "object.update", id: cardId, title: "甲" }],
+    });
+    applyCommands(db, registry, {
+      actor,
+      intentId: "b",
+      commands: [{ op: "object.update", id: cardId, title: "乙" }],
+    });
+    const tip = getMeta(db, "history_cursor");
+    assert.ok(tip);
+    const mid = (
+      db.prepare("SELECT parent_id FROM history WHERE id = ?").get(tip) as {
+        parent_id: string | null;
+      }
+    ).parent_id;
+    assert.ok(mid);
+    const have = countOf(db, "audit");
+    assert.ok(have < 20_000);
+    transaction(db, () => {
+      const insert = db.prepare(
+        "INSERT INTO audit (at, actor, actor_kind, action) VALUES (?, ?, 'human', 'note')",
+      );
+      for (let step = 0; step < 20_000 - have; step += 1)
+        insert.run(1_700_000_000_000 + step, actor.id);
+    });
+    assert.equal(countOf(db, "audit"), 20_000);
+    const history = countOf(db, "history");
+    const oldest = () =>
+      (
+        db.prepare("SELECT seq FROM audit ORDER BY seq ASC LIMIT 1").get() as {
+          seq: number;
+        }
+      ).seq;
+    const latestAction = () =>
+      (
+        db
+          .prepare("SELECT action FROM audit ORDER BY seq DESC LIMIT 1")
+          .get() as {
+          action: string;
+        }
+      ).action;
+
+    const first = oldest();
+    const undone = undo(db, actor);
+    assert.equal(undone.cursorId, mid);
+    assert.equal(countOf(db, "audit"), 20_000);
+    assert.equal(countOf(db, "history"), history);
+    assert.equal(countOf(db, "audit", "undo"), 1);
+    assert.equal(latestAction(), "undo");
+    assert.equal(
+      db.prepare("SELECT seq FROM audit WHERE seq = ?").get(first),
+      undefined,
+    );
+
+    const second = oldest();
+    const redone = redo(db, actor);
+    assert.equal(redone.cursorId, tip);
+    assert.equal(countOf(db, "audit"), 20_000);
+    assert.equal(latestAction(), "redo");
+    assert.equal(
+      db.prepare("SELECT seq FROM audit WHERE seq = ?").get(second),
+      undefined,
+    );
+
+    const third = oldest();
+    const jumped = jump(db, actor, mid);
+    assert.equal(jumped.cursorId, mid);
+    assert.equal(countOf(db, "audit"), 20_000);
+    assert.equal(latestAction(), "jump");
+    assert.equal(titleOf(db, cardId), "甲");
+    assert.equal(
+      db.prepare("SELECT seq FROM audit WHERE seq = ?").get(third),
+      undefined,
+    );
+  } finally {
+    close();
+  }
+});
+
+test("游标撤空后，当前路径从序号最大的根标到可重做的后代", () => {
+  const { db, registry, close } = scene();
+  try {
+    const boardHistory = getMeta(db, "history_cursor");
+    assert.ok(boardHistory);
+    const packHistory = (
+      db
+        .prepare("SELECT parent_id FROM history WHERE id = ?")
+        .get(boardHistory) as {
+        parent_id: string | null;
+      }
+    ).parent_id;
+    assert.ok(packHistory);
+    const created = applyCommands(db, registry, {
+      actor,
+      intentId: "create-card",
+      commands: [
+        {
+          op: "object.create",
+          type: "demo.card",
+          title: "初稿",
+          data: { age: 1 },
+        },
+      ],
+    });
+    const cardHistory = created.historyId;
+    const cardId = created.created["0"]!;
+    assert.ok(cardHistory);
+    applyCommands(db, registry, {
+      actor,
+      intentId: "jia",
+      commands: [{ op: "object.update", id: cardId, title: "甲" }],
+    });
+    applyCommands(db, registry, {
+      actor,
+      intentId: "yi",
+      commands: [{ op: "object.update", id: cardId, title: "乙" }],
+    });
+    const abandonedId = getMeta(db, "history_cursor");
+    assert.ok(abandonedId);
+    undo(db, actor);
+    undo(db, actor);
+    assert.equal(getMeta(db, "history_cursor"), cardHistory);
+    const branched = applyCommands(db, registry, {
+      actor,
+      intentId: "branch",
+      commands: [{ op: "object.update", id: cardId, title: "分支" }],
+    });
+    const branchId = branched.historyId;
+    assert.ok(branchId);
+    for (let step = 0; step < 20 && getMeta(db, "history_cursor"); step += 1)
+      undo(db, actor);
+    assert.equal(getMeta(db, "history_cursor") ?? "", "");
+
+    const list = historyList(db, 100);
+    assert.equal(list.cursorId, null);
+    assert.equal(list.entries.length, 6);
+    const onPath = new Set([packHistory, boardHistory, cardHistory, branchId]);
+    for (const entry of list.entries) {
+      assert.equal(entry.onCurrentPath, onPath.has(entry.id), entry.label);
+      assert.equal(entry.current, false);
+    }
+    assert.equal(
+      list.entries.find((entry) => entry.id === abandonedId)?.onCurrentPath,
+      false,
+    );
+
+    const redone = redo(db, actor);
+    assert.equal(redone.cursorId, packHistory);
+    const atRoot = historyList(db, 100);
+    assert.equal(
+      atRoot.entries.find((entry) => entry.id === packHistory)?.current,
+      true,
+    );
+    assert.equal(
+      atRoot.entries.find((entry) => entry.id === packHistory)?.onCurrentPath,
+      true,
+    );
+    assert.equal(
+      atRoot.entries.find((entry) => entry.id === branchId)?.onCurrentPath,
+      true,
+    );
+
+    undo(db, actor);
+    assert.equal(getMeta(db, "history_cursor") ?? "", "");
+    db.prepare("UPDATE history SET parent_id = NULL WHERE id = ?").run(
+      branchId,
+    );
+    const rooted = historyList(db, 100);
+    assert.deepEqual(
+      rooted.entries
+        .filter((entry) => entry.onCurrentPath)
+        .map((entry) => entry.id),
+      [branchId],
+    );
   } finally {
     close();
   }

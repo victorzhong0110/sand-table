@@ -95,8 +95,15 @@ function undoIn(db: Db, actor: Actor) {
   const now = Date.now();
   undoEntry(db, current, rev, actor, now);
   setCursor(db, current.parentId);
-  writeAudit(db, actor, "undo", current.id, rev, now);
-  return { revision: rev, cursorId: current.parentId };
+  return commitNavigation(
+    db,
+    actor,
+    "undo",
+    current.id,
+    rev,
+    now,
+    current.parentId,
+  );
 }
 
 function redoIn(db: Db, actor: Actor) {
@@ -118,8 +125,7 @@ function redoIn(db: Db, actor: Actor) {
   const now = Date.now();
   redoEntry(db, entry, rev, actor, now);
   setCursor(db, entry.id);
-  writeAudit(db, actor, "redo", entry.id, rev, now);
-  return { revision: rev, cursorId: entry.id };
+  return commitNavigation(db, actor, "redo", entry.id, rev, now, entry.id);
 }
 
 function jumpIn(db: Db, actor: Actor, entryId: string) {
@@ -147,8 +153,7 @@ function jumpIn(db: Db, actor: Actor, entryId: string) {
   for (const id of undos) undoEntry(db, mustEntry(db, id), rev, actor, now);
   for (const id of redos) redoEntry(db, mustEntry(db, id), rev, actor, now);
   setCursor(db, entryId);
-  writeAudit(db, actor, "jump", entryId, rev, now);
-  return { revision: rev, cursorId: entryId };
+  return commitNavigation(db, actor, "jump", entryId, rev, now, entryId);
 }
 
 function listIn(db: Db, limit: number) {
@@ -248,6 +253,8 @@ function refuseConflicts(
   for (const change of changes) {
     const current = currentSnapshot(db, change.table, change.id);
     if (sameContent(current, change[side])) continue;
+    // 撤销创建会软删除并留下墓碑，before 仍是 null。墓碑和“当时还不存在”是同一状态。
+    if (change[side] === null && current?.alive === false) continue;
     if (!ids.includes(change.id)) ids.push(change.id);
   }
   if (ids.length === 0) return;
@@ -809,7 +816,7 @@ function walkUntil(
 
 function currentPath(map: Map<string, Link>, cursor: string | null) {
   const ids = new Set(walkUntil(map, cursor, null));
-  if (!cursor || !map.has(cursor)) return ids;
+  if (cursor && !map.has(cursor)) return ids;
   const next = new Map<string, { id: string; seq: number }>();
   for (const [id, link] of map) {
     if (!link.parentId) continue;
@@ -817,7 +824,18 @@ function currentPath(map: Map<string, Link>, cursor: string | null) {
     if (!previous || link.seq > previous.seq)
       next.set(link.parentId, { id, seq: link.seq });
   }
-  let node: string | null = cursor;
+  // 游标为空时，重做从 seq 最大的根记录开始，这条路径也要标成当前路径。
+  let node = cursor;
+  if (!node) {
+    let root: { id: string; seq: number } | null = null;
+    for (const [id, link] of map) {
+      if (link.parentId) continue;
+      if (!root || link.seq > root.seq) root = { id, seq: link.seq };
+    }
+    if (!root) return ids;
+    ids.add(root.id);
+    node = root.id;
+  }
   const seen = new Set<string>();
   while (node && !seen.has(node)) {
     seen.add(node);
@@ -849,6 +867,21 @@ function bump(db: Db) {
   const next = readRevision(db) + 1;
   setMeta(db, "revision", String(next));
   return next;
+}
+
+function commitNavigation(
+  db: Db,
+  actor: Actor,
+  action: "undo" | "redo" | "jump",
+  historyId: string,
+  rev: number,
+  now: number,
+  cursor: string | null,
+) {
+  writeAudit(db, actor, action, historyId, rev, now);
+  // 导航不新增历史记录，审计条数仍要守住上限。
+  pruneHistory(db);
+  return { revision: rev, cursorId: cursor };
 }
 
 function writeAudit(
