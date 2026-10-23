@@ -74,7 +74,7 @@ export class CommandError extends Error {
 
 `applyCommands(db, registry, batch): CommandResult`，失败时抛 `CommandError`，数据库里什么都没变。
 
-唯一的例外是 v2 导入器（`kernel/legacy/import-v2.ts`）：它需要保留旧 id 和时间戳，所以在 `kernel/` 内部直接写行，不经过 `applyCommands`，也不做 Schema 校验（见 `01-data-model.md` §10）。除导入器外，`kernel/` 里也不允许绕过 `applyCommands` 写对象、展示、关系、设置和包。
+内容导入例外之一是 v2 导入器（`kernel/legacy/import-v2.ts`）：它需要保留旧 id 和时间戳，所以在 `kernel/` 内部直接写行，不经过 `applyCommands`，也不做 Schema 校验（见 `01-data-model.md` §10）。T25 的 `kernel/bundle.ts` 也可在尚未发布的新临时库中恢复内容行，须按 `05-delivery-contracts.md` §3 全量校验并原子发布。在线内容不能走这两个入口。运行状态专用内核接口只可修改其对应表，不写内容表。
 
 ### 1.2 处理顺序
 
@@ -311,7 +311,7 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
 | `app_history` | 同 `sand_history` | 人的撤销、重做、跳转 |
 | `app_view` | `{ action: "get" \| "select" \| "camera" \| "navigate", viewId, ... }` | 视角、选区、进入或返回白板；不进历史 |
 | `app_asset` | `{ action: "upload", name, mime, base64 }` / `{ action: "read", sha256 }` | 上传返回 sha256；建 `base.media` 对象由界面再调 `app_edit` |
-| `app_workspace` | `{ action: "list" \| "create" \| "switch" \| "rename" \| "delete", ... }` | 管理工作空间 |
+| `app_workspace` | `{ action: "list" \| "create" \| "switch" \| "rename" \| "delete" \| "export" \| "import", ... }` | 管理工作空间。`export`、`import` 由 T25 实现，T20 只做前五个 |
 | `app_pack` | `{ action: "export", id }` | 导出数据包；导入走 `app_edit` 的 `pack.import` |
 | `code_decide` | `{ proposalId, decision: "approve" \| "reject", digest }` | 代码包注册；人批准或拒绝提案 |
 
@@ -383,3 +383,7 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
 | `sand_delete_workspace` | `app_workspace` `delete` |
 
 DSH 插件（`workbench/dsh-plugin/`）的 4 个工具改为转调 `sand_status`、`sand_query`、`sand_read`、`sand_edit`，在切换阶段一并修改。
+
+## 后续阶段契约补充
+
+新增评论/引用、运行、时间/分支/观察者及组件接口的正式约束见 [05-delivery-contracts.md](05-delivery-contracts.md)。各责任卡实现时同步本文件的具体类型/表/工具签名；不能仅根据旧的基础清单拒绝已经授权的扩展。

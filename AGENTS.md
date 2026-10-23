@@ -6,13 +6,13 @@
 
 1. 读完本页。
 2. 读你的任务卡 `docs/kernel-v3/tasks/Txx-*.md`。**只做卡片上写的事。**
-3. 只读卡片“先读”里列出的文档和文件。
+3. 读卡片“先读”及 `docs/kernel-v3/05-delivery-contracts.md`。允许沿 import、测试和调用点追踪直接依赖；不得从历史文档补猜新设计。
 4. 不要从下列文档推断设计，它们是历史记录，很多决定已被推翻：`docs/DEVELOPMENT_PLAN.zh-CN.md`、`docs/architecture/`、`docs/reviews/`、`workbench/docs/ARCHITECTURE-HANDOVER.md`、`workbench/docs/ISSUES-CLEARANCE-PLAN.md`、`workbench/docs/ISSUE-RESOLUTIONS.md`。
-5. 任务卡与 `docs/kernel-v3/` 的设计文档冲突，或者你拿不准时：**停下来**，在 PR 描述里写“需要架构确认：……”，不要自己猜。
+5. 任务卡与正式契约存在实质语义冲突时，暂停受影响部分并写明证据；路径移动、同义 API 更名和卡片授权范围内的实现细节按 `05` §1 处理，继续完成不受影响部分。
 
 ## 硬规则
 
-- 只改任务卡“可改文件”里列出的文件。确实需要改别的文件，先停下来问。
+- 修改范围为任务卡“可改文件”加 `05` §1 的公共集成范围。新增产品能力或放宽核心约束不属于公共集成。
 - 不重构任务以外的代码；不顺手改格式、改名、挪文件。
 - 只引入卡片点名的依赖，版本号写死（不写 `^`、`~`）。
 - 一张卡一个分支一个 PR。分支名 `task/Txx-简短英文`，PR 标题 `Txx: 中文标题`，描述按 `.github/pull_request_template.md` 填写。

@@ -1,0 +1,24 @@
+name: Task plan consistency
+on:
+  pull_request:
+    paths:
+      - 'docs/kernel-v3/**'
+      - 'AGENTS.md'
+      - '.github/workflows/task-plan.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/kernel-v3/**'
+      - 'AGENTS.md'
+      - '.github/workflows/task-plan.yml'
+permissions:
+  contents: read
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 docs/kernel-v3/check_plan.py

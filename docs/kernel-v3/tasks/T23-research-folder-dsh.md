@@ -13,6 +13,7 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/kernel-v3/02-commands-and-tools.md` §3.3、§4 最后一段（DSH）
 - v2 实现（只读）：`workbench/domains/research/tools.ts`、`workbench/connectors/pdf.ts`、`workbench/connectors/folder.ts`、`workbench/connectors/tools.ts`、`workbench/dsh-plugin/index.js`
 - v2 测试：`workbench/tests/pdf.test.ts`、`connectors.test.ts`、`dsh-plugin.test.ts`

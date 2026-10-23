@@ -2,8 +2,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 执行 | grok |
-| 依赖 | T20 |
+| 执行 | minimax |
+| 依赖 | T20、T74 |
 | 分支 | `task/T21-ui-switch` |
 | 说明 | 改动大，可以拆成两个 PR：先读路径（显示），再写路径（编辑）。两个 PR 都引用本卡 |
 
@@ -14,6 +14,7 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/kernel-v3/02-commands-and-tools.md` §3.4、§4（旧工具对照）
 - `docs/kernel-v3/01-data-model.md` §1（对照表）、§6（增量同步）、§10.1（类型改名表）
 - `workbench/board/main.tsx`（`call`、`action`、轮询 `setInterval`、`absorb`）
@@ -50,3 +51,7 @@
 - 新增断言（只在 v3 下跑）：界面上新建便签、改正文、拖动、删除、撤销、重做后，用 `sand_query` / `sand_read` 读到的结果与界面一致。
 - 打开浏览器 DevTools 网络面板（或在测试里计数），空闲时每秒只有一次很小的 `app_changes` 请求，不再每 5 秒拉整块白板。在 PR 描述里写明观察结果。
 - `npm run format:check`、`npm run typecheck`、`npm test`、`SAND_KERNEL=v3 npm test` 全部通过。
+
+## 交接与边界验收
+
+版本冲突保留草稿；工作空间切换使用 workspaceId+加载代号隔离旧响应，不能把旧板增量合入新库。store 同时维护 packs，未知类型不丢内容。提供 app_activity 读取供 T37，界面不借 sand_context 改 Agent 读取游标。
