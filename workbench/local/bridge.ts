@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { createServer } from "../server/server.ts";
+import { createServerV3 } from "../server/v3/server.ts";
 import { defaultSessionFile, request } from "./session.ts";
 const args = process.argv.slice(2);
 if (args.length && !(args.length === 2 && args[0] === "--session-file"))
@@ -15,8 +16,8 @@ const touch = () =>
     connectionId,
     state: "connected",
   }).catch(() => undefined);
-const { server, dispose } = createServer([], {
-  tool: (name, arguments_) =>
+const forward = {
+  tool: (name: string, arguments_: Record<string, unknown>) =>
     request(sessionFile, "/agent/rpc", {
       connectionId,
       method: "tools/call",
@@ -28,7 +29,17 @@ const { server, dispose } = createServer([], {
       method: "resources/read",
       params: { uri: "ui://sand-table/overview.html" },
     }),
-});
+};
+const { server, dispose } =
+  process.env.SAND_KERNEL === "v3"
+    ? createServerV3({
+        // 转发模式不打开工作空间：调用都交给本地服务，
+        // 这里只需要一份同样的工具清单。
+        workspaceRoot: process.env.SAND_WORKSPACE_DIR ?? "",
+        workspaceId: process.env.SAND_WORKSPACE_ID ?? "default",
+        forward,
+      })
+    : createServer([], forward);
 await server.connect(new StdioServerTransport());
 // The bridge can be installed before launching the board. It reconnects through the descriptor.
 await touch();

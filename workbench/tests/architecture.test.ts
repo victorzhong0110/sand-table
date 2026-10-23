@@ -5,14 +5,20 @@ import { posix } from "node:path";
 // 规则出处：docs/kernel-v3/01-data-model.md §1（术语与禁用名词）、§9（V8），
 // 以及 00-decisions.md K1（通用内核 + 包）。任务卡：docs/kernel-v3/tasks/T16-architecture-tests.md。
 //
+// 工具数量规则的出处：docs/kernel-v3/02-commands-and-tools.md §3.5，
+// 任务卡：docs/kernel-v3/tasks/T20-tools-v3.md。
+//
 // 每条规则一个 test()，失败时列出违规的文件和行号。
 // 检查函数只吃「文件列表」，所以既能扫真实仓库，也能用几段示例源码自检。
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { createServerV3 } from "../server/v3/server.ts";
 
 /** workbench/ 目录：仓库里 v2 与 v3 并存的地方。 */
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -410,6 +416,101 @@ test("禁用 v2 名词", () => {
 
 test("只从入口导入内核", () => {
   assertClean(checkKernelEntry(files));
+});
+
+// —— 工具数量规则：docs/kernel-v3/02-commands-and-tools.md §3.5 ——
+
+/** 只启用 base 时，模型能看到的工具个数。 */
+const CORE_TOOL_COUNT = 8;
+/** 每个领域包最多带来的工具个数。 */
+const PACK_TOOL_LIMIT = 2;
+/** 领域包的个数（novel、research、code）。 */
+const DOMAIN_PACK_COUNT = 3;
+/** 文件夹连接器带来的工具个数。 */
+const FOLDER_TOOL_COUNT = 1;
+
+/** 起一个临时工作空间，把客户端接上去。 */
+async function connectTools() {
+  const root = mkdtempSync(join(tmpdir(), "sand-arch-tools-"));
+  const created = createServerV3({ workspaceRoot: root, workspaceId: "arch" });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "arch-tester", version: "1" });
+  await Promise.all([
+    client.connect(clientTransport),
+    created.server.connect(serverTransport),
+  ]);
+  return {
+    client,
+    close: async () => {
+      created.dispose();
+      await client.close();
+      rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
+
+/** 模型能看到的工具：visibility 缺省或含 model，且没有被停用。 */
+async function modelVisibleTools(client: Client) {
+  const listed = await client.listTools();
+  return listed.tools
+    .filter((tool) => {
+      const visibility = (
+        tool._meta as { ui?: { visibility?: string[] } } | undefined
+      )?.ui?.visibility;
+      return !visibility || visibility.includes("model");
+    })
+    .map((tool) => tool.name);
+}
+
+test("只启用 base 时，模型可见工具正好 8 个", async () => {
+  const session = await connectTools();
+  try {
+    const changed = await session.client.callTool({
+      name: "app_edit",
+      arguments: {
+        commands: ["novel", "research", "code"].map((id) => ({
+          op: "pack.disable",
+          id,
+        })),
+      },
+    });
+    assert.equal(changed.isError, undefined);
+    const names = await modelVisibleTools(session.client);
+    assert.equal(
+      names.length,
+      CORE_TOOL_COUNT,
+      `模型可见工具是 ${names.join("、")}`,
+    );
+  } finally {
+    await session.close();
+  }
+});
+
+test("启用全部内置包时，模型可见工具不超过 8 + 2 × 3 + 1", async () => {
+  const session = await connectTools();
+  try {
+    const changed = await session.client.callTool({
+      name: "app_edit",
+      arguments: {
+        commands: [
+          { op: "pack.enable", id: "novel" },
+          { op: "pack.enable", id: "research" },
+          { op: "pack.enable", id: "code" },
+        ],
+      },
+    });
+    assert.equal(changed.isError, undefined);
+    const names = await modelVisibleTools(session.client);
+    const limit =
+      CORE_TOOL_COUNT + PACK_TOOL_LIMIT * DOMAIN_PACK_COUNT + FOLDER_TOOL_COUNT;
+    assert.ok(
+      names.length <= limit,
+      `模型可见工具 ${names.length} 个，超过上限 ${limit}：${names.join("、")}`,
+    );
+  } finally {
+    await session.close();
+  }
 });
 
 // —— 自检：检查函数本身要能找出问题，也不能被注释和字符串骗到 ——
