@@ -91,11 +91,14 @@ try {
   assert.ok(existsSync(entry.command) && existsSync(entry.args[1]));
   await page.screenshot({ path: join(output, "portable-window.png") });
   const session = await browser.newBrowserCDPSession();
-  await session.send("Browser.close").catch(() => {});
-  await Promise.race([
-    once(child, "exit"),
-    new Promise((r) => setTimeout(r, 10000)),
-  ]);
+  // Electron 退出时可能不回复关闭命令；用启动器退出确认实际关闭。
+  const exited = new Promise((resolve, reject) => {
+    if (child.exitCode !== null) return resolve();
+    const timer = setTimeout(() => reject(Error("便携窗口关闭超时")), 15000);
+    child.once("exit", () => { clearTimeout(timer); resolve(); });
+  });
+  void session.send("Browser.close").catch(() => {});
+  await exited;
   const runtime = spawnSync(entry.command, ["--version"], {
     env: { ...process.env, ...entry.env },
     encoding: "utf8",
