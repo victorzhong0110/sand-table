@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 执行 | grok |
+| 执行 | minimax |
 | 依赖 | T15 |
 | 分支 | `task/T26-type-migrations` |
 
@@ -13,12 +13,13 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/kernel-v3/03-types-and-extensions.md` §2（`version`、`migrations`）、§6（数据包不能带迁移，升级必须兼容旧数据）
 - `workbench/kernel/` 全部文件（重点 `commands.ts`、`read.ts`、`registry.ts`）
 
 ## 开工前核对
 
-确认 `TypeSpec.migrations` 的类型在 `main` 上仍是 `{ from: number; migrate(data) }[]`，`applyCommands` 和 `readObjects` 存在。不一致先停下来问。
+确认 `TypeSpec.migrations` 的类型在 `main` 上仍是 `{ from: number; migrate(data) }[]`，`applyCommands` 和 `readObjects` 存在。依赖未完成则等待；机械差异按 05 §1 适配，语义冲突只暂停受影响部分。
 
 ## 可改文件
 
@@ -57,3 +58,7 @@ export function migrateData(
 5. 迁移函数修改了入参对象：数据库里的原数据不受影响。
 
 命令：`npm run format:check`、`npm run typecheck`、`npm test`。
+
+## 交接与边界验收
+
+增加未来版本不降级、迁移后 Schema 不合法、仅改标题、撤销/重做后读迁移、跨进程增量读等回归；工具契约按 05 §3 同步。

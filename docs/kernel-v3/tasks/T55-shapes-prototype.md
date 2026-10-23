@@ -2,8 +2,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 执行 | grok |
-| 依赖 | T54（决策记录已合并）、T35 |
+| 执行 | minimax |
+| 依赖 | T54、T35、T38、T39、T72 |
 | 分支 | `task/T55-shapes-prototype` |
 | 关联 issue | #42 |
 
@@ -14,13 +14,14 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/adr/0005-design-and-export.md`（**数据结构和消息协议以它为准**）
 - `docs/kernel-v3/03-types-and-extensions.md` §7
 - `workbench/board/theme/`（T38）、`workbench/board/widgets/`（T35）
 
 ## 开工前核对
 
-确认 ADR 0005 已合并，并给出了 `base.shape`、`base.prototype` 的结构和原型消息协议。与本卡冲突的地方以 ADR 为准；ADR 没说清的，停下来问。
+确认 ADR 0005 已合并，并给出了 `base.shape`、`base.prototype` 的结构和原型消息协议。技术选型按 ADR；ADR 不得覆盖 00–05 的语义契约。缺少实现接口由本卡在公共集成范围内补齐并记录。
 
 ## 可改文件
 
@@ -39,12 +40,12 @@
 
 1. **图形**：按 ADR 的结构实现；颜色默认取主题变量，单独设置后保存在对象数据里；线和箭头的端点可以吸附到其他组件的边（吸附只影响绘制，不建关系）。
 2. **原型**：
-   - 原型的 HTML 存在对象数据里（超过 1 MB 存为附件）。
+   - 原型的 HTML 存在对象数据里（超过 data 1 MB 上限时存为 htmlBlob 附件，不能同时存 html）。
    - 编辑模式（默认）：显示一张静态截图或占位，可拖动、选中、调整尺寸。
    - 运行模式：卡片上点“运行”，在 `sandbox="allow-scripts"` 的 iframe 里加载，CSP 禁止一切网络；iframe 外加一层边框和“停止”按钮；运行中卡片不能拖动，Escape 或“停止”回到编辑模式。
    - 参数：原型声明的参数 Schema 在表单里用 T35 的控件编辑，改动通过消息发给运行中的原型。
    - 消息：只接受 ADR 列出的消息类型，每条校验来源是该 iframe；其他一律丢弃。
-3. 原型运行出错时，在卡片上显示错误信息，不影响白板。
+3. 可捕获异常显示在卡片上；死循环等资源问题按 `05` §6 的宿主隔离能力处理，不能用 iframe 权限隔离冒充 CPU 隔离。
 
 ## 验收
 
@@ -56,3 +57,7 @@
   4. 在表单里改原型的“按钮文字”参数，运行中的原型立即更新。
 - 构建后体积符合 ADR 0002。
 - `npm run format:check`、`npm run typecheck`、`npm test`、`npm run test:blank` 全部通过。
+
+## 交接与边界验收
+
+落实 05 §6：图形吸附是展示 anchors，不在 data 存对象 ID；升级 Appearance 类型/Schema。受限宿主不保证任意原型可执行；保存源码与静态模式始终可用。

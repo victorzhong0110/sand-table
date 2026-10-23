@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 执行 | grok |
+| 执行 | minimax |
 | 依赖 | T30 |
 | 分支 | `task/T41-bundle-loading-spike` |
 | 类型 | 技术验证。产出决策记录，不改产品代码 |
@@ -22,6 +22,7 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `workbench/vite.config.ts`、`workbench/scripts/build-host.ts`、`workbench/server/server.ts`（UI 资源注册）、`workbench/local/client.ts`（`srcdoc` 与 CSP）
 - `docs/kernel-v3/00-decisions.md` K8
 
@@ -44,4 +45,4 @@
 3. 结论：选哪种做法；Phase 4 的体积预算（主包上限、每个按需块上限）；pdf.js worker 的做法。
 4. 给 T42–T56 的约束：每个组件实现卡必须遵守的规则（例如“新依赖 gzip 超过 50 KB 必须走按需加载”）。
 
-架构负责人审过这份记录、合并后，Phase 4 的实现卡才开工。
+ADR 合并后由 T72 实现正式运行适配；需要资源加载的组件必须等待 T72。未经验证的宿主列未测，不可凭夹具声称真机通过。

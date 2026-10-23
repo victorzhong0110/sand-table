@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 执行 | grok |
+| 执行 | minimax |
 | 依赖 | T30、T26 |
 | 分支 | `task/T34-generic-view` |
 | 关联 issue | #33 |
@@ -14,6 +14,7 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/kernel-v3/03-types-and-extensions.md` §2、§3、§4、§5
 - `docs/kernel-v3/02-commands-and-tools.md` §1.3（只对本次改动字段严格校验，其余作为警告）
 - `workbench/board/canvas/`（T30 产物）
@@ -22,7 +23,7 @@
 
 ## 开工前核对
 
-确认：`sand_types { types }` 返回完整类型声明（含 Schema、关系槽、能力）；`readObjects` 返回 `migrationError`（T26）。不一致先停下来问。
+确认：`sand_types { types }` 返回完整类型声明（含 Schema、关系槽、能力）；`readObjects` 返回 `migrationError`（T26）。依赖未完成则等待；机械差异按 05 §1 适配，语义冲突只暂停受影响部分。
 
 ## 可改文件
 
@@ -70,3 +71,7 @@
   4. 停用小说包后人物卡显示“未启用”提示且只读；重新启用后可编辑。
   5. 折叠成 `label`、`icon` 再展开，存储的宽高不变。
 - `npm run format:check`、`npm run typecheck`、`npm test`、`npm run test:blank` 全部通过。
+
+## 交接与边界验收
+
+表单对象类型递归渲染，不把 object 值写成字符串；migrationError 时数据只读但标题可编辑。用我的覆盖也必须先读取新 version、只覆盖显式修改字段并带 expectedVersion 重试，不能删掉并发校验。实现 05 §4 的宿主动作服务。

@@ -14,6 +14,7 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/kernel-v3/04-canvas.md` §5
 - `docs/kernel-v3/02-commands-and-tools.md` §3.2（`sand_history` 的输出：`current`、`onCurrentPath`、`parentId`）
 - `workbench/board/HistoryPanel.tsx`、`history-layout.ts`、`history.css`（现有面板）
@@ -21,7 +22,7 @@
 
 ## 开工前核对
 
-确认 T37 已合并，左侧导航里预留了“历史”入口；`app_history list` 的输出与 `02` 一致。不一致先停下来问。
+确认 T37 已合并，左侧导航里预留了“历史”入口；`app_history list` 的输出与 `02` 一致。依赖未完成则等待；机械差异按 05 §1 适配，语义冲突只暂停受影响部分。
 
 ## 可改文件
 

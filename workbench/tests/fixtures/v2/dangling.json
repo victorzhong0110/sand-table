@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 2,
+  "id": "dangling-workspace",
+  "title": "指向不存在的对象",
+  "createdAt": 1700003000000,
+  "updatedAt": 1700003001000,
+  "revision": 1,
+  "contentRevision": 1,
+  "boards": [
+    {
+      "id": "board-dangling",
+      "title": "主白板",
+      "revision": 1,
+      "contentRevision": 1,
+      "spaces": [{ "id": "overview", "title": "总览" }],
+      "presentations": [
+        {
+          "id": "p-ok",
+          "spaceId": "overview",
+          "type": "text",
+          "binding": { "kind": "object", "objectId": "obj-ok" },
+          "objectId": "obj-ok",
+          "title": "还在的便签",
+          "data": {},
+          "rect": { "x": 10, "y": 20, "width": 280, "height": 180, "pinned": false },
+          "updatedAt": 1700003001000,
+          "author": "lin"
+        },
+        {
+          "id": "p-dangling",
+          "spaceId": "overview",
+          "type": "text",
+          "binding": { "kind": "object", "objectId": "obj-vanished" },
+          "objectId": "obj-vanished",
+          "title": "指向已删除对象的便签",
+          "data": {},
+          "rect": { "x": 340, "y": 20, "width": 280, "height": 180, "pinned": false },
+          "updatedAt": 1700003001000,
+          "author": "lin"
+        },
+        {
+          "id": "p-code",
+          "spaceId": "overview",
+          "type": "object",
+          "objectId": "w-1:src/app.ts",
+          "title": "src/app.ts",
+          "data": {},
+          "rect": { "x": 670, "y": 20, "width": 252, "height": 120, "pinned": false },
+          "updatedAt": 1700003001000,
+          "author": "source-index"
+        }
+      ],
+      "views": {},
+      "selection": [],
+      "placements": {},
+      "notes": {},
+      "groups": [],
+      "spaceLinks": [],
+      "assets": [],
+      "activities": [],
+      "guides": [],
+      "intents": [],
+      "proposals": [],
+      "validations": []
+    }
+  ],
+  "objects": [
+    {
+      "id": "obj-ok",
+      "kind": "native",
+      "type": "text",
+      "typeVersion": 1,
+      "title": "还在的便签",
+      "data": { "text": "内容还在" },
+      "source": { "origin": "human", "author": "lin" },
+      "version": 1,
+      "createdAt": 1700003001000,
+      "updatedAt": 1700003001000,
+      "author": "lin"
+    }
+  ],
+  "relations": [],
+  "resources": [],
+  "activities": [],
+  "audit": []
+}

@@ -14,6 +14,7 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/kernel-v3/03-types-and-extensions.md` §2、§6（数据包规则与 v1 转换）
 - `docs/kernel-v3/02-commands-and-tools.md` §1.1（`object.create`、`template.apply`、`pack.*`）、§3.4（`app_pack`）
 - `workbench/board/Toolbox.tsx`（现有工具箱）
@@ -21,7 +22,7 @@
 
 ## 开工前核对
 
-确认 `sand_types` 不带参数时返回类型、关系类型、模板的精简列表；`app_pack export` 存在。不一致先停下来问。
+确认 `sand_types` 不带参数时返回类型、关系类型、模板的精简列表；`app_pack export` 存在。依赖未完成则等待；机械差异按 05 §1 适配，语义冲突只暂停受影响部分。
 
 ## 可改文件
 

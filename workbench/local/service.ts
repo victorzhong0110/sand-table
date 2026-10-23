@@ -3,13 +3,43 @@ import { readFileSync, existsSync, unlinkSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
-import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import {
+  getDefaultEnvironment,
+  StdioClientTransport,
+} from "@modelcontextprotocol/client/stdio";
 import { connectionConfig, type McpEntry } from "./config.ts";
 import {
   readConnection,
   writeConnection,
   removeConnection,
 } from "./session.ts";
+
+/**
+ * 桥接进程用的 MCP 客户端条目。
+ *
+ * 桥接由 MCP 客户端启动，它看到的是客户端自己的环境变量，
+ * 生成的条目里必须带上内核版本，桥接才会走同一套工具面；
+ * 自定义条目自己的环境变量要留着，只补内核版本。
+ * 没有自定义条目时用本机的 node 跑 bridge.ts，和 config.ts 的默认一致。
+ */
+export function bridgeEntry(
+  kernel: string | undefined,
+  entry: McpEntry | undefined,
+  sessionFile: string,
+): McpEntry | undefined {
+  if (kernel !== "v3") return entry;
+  return {
+    command: entry?.command ?? process.execPath,
+    args: entry?.args ?? [
+      "--experimental-strip-types",
+      fileURLToPath(new URL("./bridge.ts", import.meta.url)),
+      "--session-file",
+      sessionFile,
+    ],
+    env: { ...entry?.env, SAND_KERNEL: "v3" },
+  };
+}
+
 export async function startLocal(options: {
   workspaces: string[];
   sessionFile: string;
@@ -65,6 +95,8 @@ export async function startLocal(options: {
     name: "sand-table-local-workbench",
     version: "0.2.0",
   });
+  const kernel = process.env.SAND_KERNEL;
+  const mcpEntry = bridgeEntry(kernel, options.mcpEntry, options.sessionFile);
   await client.connect(
     new StdioClientTransport({
       command: process.execPath,
@@ -77,7 +109,16 @@ export async function startLocal(options: {
           : []),
         ...(options.workspaceId ? ["--workspace-id", options.workspaceId] : []),
       ],
-      env: options.serverEnv,
+      // stdio 传输只继承白名单变量，内核版本要显式传过去，
+      // 否则子进程会在一个没有它的环境里启动。
+      env:
+        kernel === "v3"
+          ? {
+              ...getDefaultEnvironment(),
+              ...options.serverEnv,
+              SAND_KERNEL: "v3",
+            }
+          : options.serverEnv,
     }),
   );
   let primaryBoardId: string | undefined,
@@ -89,7 +130,7 @@ export async function startLocal(options: {
     string,
     { lastSeen: number; lastTool?: string }
   >();
-  const config = connectionConfig(options.sessionFile, options.mcpEntry);
+  const config = connectionConfig(options.sessionFile, mcpEntry);
   // The browser always attaches Origin to same-origin POSTs, so the same
   // comparison that guards /rpc also proves a request came from our own page.
   const sameOrigin = (req: IncomingMessage) => req.headers.origin === origin;
@@ -99,6 +140,8 @@ export async function startLocal(options: {
     throw Error("Unsupported RPC method.");
   };
   const primary = async () => {
+    // v3 的工作空间启动时就打开了首页白板，没有「再打开一块板」这一步。
+    if (process.env.SAND_KERNEL === "v3") return null;
     if (primaryBoardId) {
       const r = await client.callTool({
         name: "sand_read_board",

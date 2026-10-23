@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 执行 | grok |
+| 执行 | minimax |
 | 依赖 | T41 |
 | 分支 | `task/T42-text-spike` |
 | 类型 | 技术验证。产出决策记录，不改产品代码 |
@@ -25,6 +25,7 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/kernel-v3/00-decisions.md` K8、`03-types-and-extensions.md` §3.1 第 3 条（`sand://object/<id>` 链接）
 - `docs/adr/0002-bundle-loading.md`（T41 产物）
 - issue #37

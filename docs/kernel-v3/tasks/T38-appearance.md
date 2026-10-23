@@ -14,6 +14,7 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - issue #25 的 §1.1、§1.3
 - `docs/kernel-v3/02-commands-and-tools.md` §1.1（`setting.set`）
 - `docs/kernel-v3/01-data-model.md` §4（`settings` 表）、§5（`Appearance.accent`）
@@ -21,7 +22,7 @@
 
 ## 开工前核对
 
-确认 T37 已合并，设置面板入口存在；`setting.set` 可用。不一致先停下来问。
+确认 T37 已合并，设置面板入口存在；`setting.set` 可用。依赖未完成则等待；机械差异按 05 §1 适配，语义冲突只暂停受影响部分。
 
 ## 可改文件
 
@@ -66,3 +67,7 @@
 - `workbench/tests/blank.ts`：切换到黑白主题后根元素的背景变量改变；撤销一次回到暖纸；为某块白板设置覆盖后，进入它颜色变化，返回后恢复。
 - 在 PR 里附两套主题的截图。
 - `npm run format:check`、`npm run typecheck`、`npm test`、`npm run test:blank` 全部通过。
+
+## 交接与边界验收
+
+白板主题覆盖是 settings 的布局配置键，不能用来表达语义对象关联；清除走 setting.delete（若当前命令无此 op，由本卡在共享命令事务中补齐及测试），不存 undefined。

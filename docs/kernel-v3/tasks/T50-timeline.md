@@ -2,8 +2,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 执行 | grok |
-| 依赖 | T40、T26 |
+| 执行 | minimax |
+| 依赖 | T40、T26、T33 |
 | 分支 | `task/T50-timeline` |
 | 关联 issue | #40 |
 
@@ -14,13 +14,14 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - issue #40、#35（时间与变化部分）
 - `docs/kernel-v3/03-types-and-extensions.md` §8.2（小说包）、§9
 - `workbench/board/views/bindings.ts`（T40）、`workbench/kernel/migrate.ts`（T26）
 
 ## 开工前核对
 
-确认 T40、T26 已合并；`novel.event` 当前字段与 `03` §8.2 一致。不一致先停下来问。
+确认 T40、T26 已合并；`novel.event` 当前字段与 `03` §8.2 一致。依赖未完成则等待；机械差异按 05 §1 适配，语义冲突只暂停受影响部分。
 
 ## 可改文件
 
@@ -33,7 +34,7 @@
 ## 不要做
 
 - 不解析自由文本的 `storyTime`（如“三年前的冬天”）；它只作为标签显示。
-- 不做回放和日历视图（以后再开卡）。
+- 不做日历与自动回放；过程范围由已有 T73 交付。
 
 ## 做法
 
@@ -52,3 +53,7 @@
   3. 修改某个事件的叙述顺序，时间轴在 2 秒内更新。
   4. 旧的 `novel.event` 数据（没有新字段）正常显示。
 - `npm run format:check`、`npm run typecheck`、`npm test`、`npm run test:blank` 全部通过。
+
+## 交接与边界验收
+
+按 05 §5 明确日期/数值维度与范围错误；T73 接过程范围，本卡不留下未定义的独立时间格式。

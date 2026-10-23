@@ -3,7 +3,7 @@
 | 项 | 内容 |
 |---|---|
 | 执行 | minimax |
-| 依赖 | T41（决策记录已合并）、T35 |
+| 依赖 | T72、T35、T26 |
 | 分支 | `task/T44-media` |
 | 关联 issue | #38 |
 
@@ -14,6 +14,7 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - issue #38 第一阶段
 - `docs/adr/0002-bundle-loading.md`
 - `docs/kernel-v3/01-data-model.md` §2（`blobs/`）、`03-types-and-extensions.md` §3.2（`blob` 控件）、§8.1（`base.media`、`base.link`）
@@ -22,7 +23,7 @@
 
 ## 开工前核对
 
-确认 `app_asset upload` / `read` 可用，`base.media` 的字段有 `blob`、`mime`、`caption`、`alt`。不一致先停下来问。
+确认 `app_asset upload` / `read` 可用，`base.media` 的字段有 `blob`、`mime`、`caption`、`alt`。依赖未完成则等待；机械差异按 05 §1 适配，语义冲突只暂停受影响部分。
 
 ## 可改文件
 
@@ -57,3 +58,7 @@
   4. 删除磁盘上的附件文件后，组件显示“附件缺失”且对象仍在。
 - 构建后体积符合 ADR 0002 的预算。
 - `npm run format:check`、`npm run typecheck`、`npm test`、`npm run test:blank` 全部通过。
+
+## 交接与边界验收
+
+补 base.media 的 filename/size 可选字段并无损迁移；上传返回元数据供文件显示。外部资源引用保留 source.external 并标明“外部引用”，不冒充已随作品保存；缺失不自动删除。coverBlob/crop 是展示外观而非对象语义引用，更新 Appearance 校验并测独立展示封面。

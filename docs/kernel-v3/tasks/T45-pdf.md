@@ -2,8 +2,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 执行 | grok |
-| 依赖 | T41（决策记录已合并）、T44 |
+| 执行 | minimax |
+| 依赖 | T72、T44 |
 | 分支 | `task/T45-pdf` |
 | 关联 issue | #38、#41 |
 
@@ -14,6 +14,7 @@ PDF 能在白板上直接翻页、缩放；选中某一页可以“引用这一�
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/adr/0002-bundle-loading.md`（pdf.js 和 worker 的做法以它为准）
 - `docs/kernel-v3/03-types-and-extensions.md` §10（PDF 锚点格式）
 - `workbench/packs/research/`（科研包的 PDF 工具 `research_pdf`，T23 产物）
@@ -21,7 +22,7 @@ PDF 能在白板上直接翻页、缩放；选中某一页可以“引用这一�
 
 ## 开工前核对
 
-确认 ADR 0002 写明了 pdf.js worker 的做法，T44 已合并。不一致先停下来问。
+确认 ADR 0002 写明了 pdf.js worker 的做法，T44 已合并。依赖未完成则等待；机械差异按 05 §1 适配，语义冲突只暂停受影响部分。
 
 ## 可改文件
 
@@ -39,7 +40,7 @@ PDF 能在白板上直接翻页、缩放；选中某一页可以“引用这一�
 ## 做法
 
 1. **查看**：卡片上显示当前页；上一页、下一页、页码输入、缩放；双击打开大查看器。翻页和缩放只是视图状态，不进历史。
-2. **页级引用**：查看器里“引用这一页” → 新建一个 `research.evidence`（科研包启用时）或 `base.note`（否则），`citation` / 正文里带 `ExternalLocator`：`kind: "pdf"`、`uri: "blob:<sha256>"`、`fragment: "page=<N>"`、`fingerprint`（该页文字的 sha256）；同时建 `base.about` 关系指向 PDF 对象。
+2. **页级引用**：查看器里“引用这一页” → 新建一个 `research.evidence`（科研包启用时）或 `base.note`（否则），引用对象正文保存摘录文字；`base.cites` 关系的 `attributes.anchor` 带 `ExternalLocator`：`kind: "pdf"`、`uri: "blob:<sha256>"`、`fragment: "page=<N>"`、`fingerprint`（该页文字的 sha256）；同时建 `base.cites` 关系指向 PDF 对象（本卡注册该关系；内部引用以此关系的锚点为唯一定位权威，外部文件导入仍沿用 `research.evidence.citation`）。
 3. **回跳**：点击引用里的定位，打开 PDF 查看器并翻到那一页。
 4. **失效检查**：PDF 被替换（sha256 变了）后，引用显示“原文件已更换，页码可能对不上”；同一文件但该页文字指纹不同时显示“该页内容已变化”。
 
@@ -49,3 +50,7 @@ PDF 能在白板上直接翻页、缩放；选中某一页可以“引用这一�
 - `workbench/tests/blank.ts`：放入一个 3 页的测试 PDF（放在 `tests/fixtures/`，自己生成，不用有版权的文件），翻到第 2 页并引用，生成的引用带 `page=2`；点击引用回到第 2 页；替换 PDF 后引用显示失效提示。
 - 构建后体积符合 ADR 0002。
 - `npm run format:check`、`npm run typecheck`、`npm test`、`npm run test:blank` 全部通过。
+
+## 交接与边界验收
+
+新增 base.cites 及属性契约；生成 fixture 目录在可改范围。research 未启用时 note 引用同样可回跳，anchor 不塞进正文 JSON。

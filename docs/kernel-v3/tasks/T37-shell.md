@@ -2,8 +2,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 执行 | grok |
-| 依赖 | T30 |
+| 执行 | minimax |
+| 依赖 | T30、T31、T33 |
 | 分支 | `task/T37-shell` |
 | 关联 issue | #25（§1.2 外壳与信息架构）、#28、#31 |
 
@@ -14,6 +14,7 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - issue #25 的 §1.1、§1.2（视觉与外壳原则）
 - `docs/kernel-v3/04-canvas.md` §6
 - `docs/kernel-v3/02-commands-and-tools.md` §3.2（`sand_activity`）、§3.4
@@ -21,7 +22,7 @@
 
 ## 开工前核对
 
-确认 T30 已合并；`sand_context` 的 `otherAgents` 或等价数据能在界面拿到 Agent 活动。不一致先停下来问。
+确认 T30 已合并；`sand_context` 的 `otherAgents` 或等价数据能在界面拿到 Agent 活动。依赖未完成则等待；机械差异按 05 §1 适配，语义冲突只暂停受影响部分。
 
 ## 可改文件
 
@@ -54,3 +55,7 @@
 - Agent 活动：用 MCP 客户端调用 `sand_activity` 报告某对象，界面出现标签，且镜头位置不变。
 - `workbench/tests/reopen-browser.ts` 仍通过（重新连接入口改在出错条里）。
 - `npm run format:check`、`npm run typecheck`、`npm test`、`npm run test:blank`、`npm run test:local`、`npm run test:reopen` 全部通过。
+
+## 交接与边界验收
+
+依赖 T31/T33 后才接快捷键和定位；活动通过 app_activity list 读取。白板是有向图而非唯一父子树，导航树按展示路径展开并检测路径重复，允许同一白板在不同路径出现。权限/断线/超时应保留现有作品，不能显示成新空白板。

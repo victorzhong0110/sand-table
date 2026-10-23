@@ -3,7 +3,7 @@
 | 项 | 内容 |
 |---|---|
 | 执行 | minimax |
-| 依赖 | T30 |
+| 依赖 | T30、T31 |
 | 分支 | `task/T32-arrange-context-menu` |
 | 关联 issue | #30 |
 
@@ -14,6 +14,7 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/kernel-v3/04-canvas.md` §2
 - `docs/kernel-v3/01-data-model.md` §4（`presentations` 的 `z`、`locked`、`parent_id`，以及框内坐标是相对坐标）、§8（删除语义）
 - `docs/kernel-v3/02-commands-and-tools.md` §1.1
@@ -21,7 +22,7 @@
 
 ## 开工前核对
 
-确认 T30 已合并；`base.frame` 类型在内置包里存在。不一致先停下来问。
+确认 T30 已合并；`base.frame` 类型在内置包里存在。依赖未完成则等待；机械差异按 05 §1 适配，语义冲突只暂停受影响部分。
 
 ## 可改文件
 
@@ -60,3 +61,7 @@
   4. 右键“移除展示”只删展示；“彻底删除对象”确认后对象被删除，撤销后对象和它在其他白板上的展示都回来。
   5. 菜单键盘操作可用。
 - `npm run format:check`、`npm run typecheck`、`npm test`、`npm run test:blank` 全部通过。
+
+## 交接与边界验收
+
+锁定展示不能被对齐/成框间接移动；成框选择含祖先和子项时只移动最高层选择，不重复变换。跨父框坐标必须递归换算；解除嵌套框恢复到原父框。超过 200 命令整批拒绝。

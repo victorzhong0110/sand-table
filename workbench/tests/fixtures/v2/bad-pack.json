@@ -1,0 +1,656 @@
+{
+  "schemaVersion": 2,
+  "id": "bad-pack-workspace",
+  "title": "组件包不合格的工作空间",
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000005000,
+  "revision": 1,
+  "contentRevision": 1,
+  "boards": [
+    {
+      "id": "board-1",
+      "title": "主白板",
+      "revision": 1,
+      "contentRevision": 1,
+      "spaces": [
+        {
+          "id": "overview",
+          "title": "总览"
+        }
+      ],
+      "presentations": [
+        {
+          "id": "p-ok",
+          "spaceId": "overview",
+          "type": "text",
+          "binding": {
+            "kind": "object",
+            "objectId": "obj-ok"
+          },
+          "objectId": "obj-ok",
+          "title": "便签",
+          "data": {},
+          "rect": {
+            "x": 40,
+            "y": 40,
+            "width": 280,
+            "height": 180,
+            "pinned": false
+          },
+          "updatedAt": 1700000005000,
+          "author": "lin"
+        }
+      ],
+      "views": {},
+      "selection": [],
+      "placements": {},
+      "notes": {},
+      "groups": [],
+      "spaceLinks": [],
+      "assets": [],
+      "activities": [],
+      "guides": [],
+      "intents": [],
+      "proposals": [],
+      "validations": [],
+      "componentPacks": [
+        {
+          "id": "big-pack",
+          "name": "大包",
+          "version": 1,
+          "description": "预设超过 50 个",
+          "author": "lin",
+          "homepage": "",
+          "source": "json",
+          "importedAt": 1700000005000,
+          "importedBy": "lin",
+          "components": [
+            {
+              "key": "preset-1",
+              "type": "text",
+              "title": "预设 1",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 1"
+              }
+            },
+            {
+              "key": "preset-2",
+              "type": "text",
+              "title": "预设 2",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 2"
+              }
+            },
+            {
+              "key": "preset-3",
+              "type": "text",
+              "title": "预设 3",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 3"
+              }
+            },
+            {
+              "key": "preset-4",
+              "type": "text",
+              "title": "预设 4",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 4"
+              }
+            },
+            {
+              "key": "preset-5",
+              "type": "text",
+              "title": "预设 5",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 5"
+              }
+            },
+            {
+              "key": "preset-6",
+              "type": "text",
+              "title": "预设 6",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 6"
+              }
+            },
+            {
+              "key": "preset-7",
+              "type": "text",
+              "title": "预设 7",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 7"
+              }
+            },
+            {
+              "key": "preset-8",
+              "type": "text",
+              "title": "预设 8",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 8"
+              }
+            },
+            {
+              "key": "preset-9",
+              "type": "text",
+              "title": "预设 9",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 9"
+              }
+            },
+            {
+              "key": "preset-10",
+              "type": "text",
+              "title": "预设 10",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 10"
+              }
+            },
+            {
+              "key": "preset-11",
+              "type": "text",
+              "title": "预设 11",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 11"
+              }
+            },
+            {
+              "key": "preset-12",
+              "type": "text",
+              "title": "预设 12",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 12"
+              }
+            },
+            {
+              "key": "preset-13",
+              "type": "text",
+              "title": "预设 13",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 13"
+              }
+            },
+            {
+              "key": "preset-14",
+              "type": "text",
+              "title": "预设 14",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 14"
+              }
+            },
+            {
+              "key": "preset-15",
+              "type": "text",
+              "title": "预设 15",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 15"
+              }
+            },
+            {
+              "key": "preset-16",
+              "type": "text",
+              "title": "预设 16",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 16"
+              }
+            },
+            {
+              "key": "preset-17",
+              "type": "text",
+              "title": "预设 17",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 17"
+              }
+            },
+            {
+              "key": "preset-18",
+              "type": "text",
+              "title": "预设 18",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 18"
+              }
+            },
+            {
+              "key": "preset-19",
+              "type": "text",
+              "title": "预设 19",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 19"
+              }
+            },
+            {
+              "key": "preset-20",
+              "type": "text",
+              "title": "预设 20",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 20"
+              }
+            },
+            {
+              "key": "preset-21",
+              "type": "text",
+              "title": "预设 21",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 21"
+              }
+            },
+            {
+              "key": "preset-22",
+              "type": "text",
+              "title": "预设 22",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 22"
+              }
+            },
+            {
+              "key": "preset-23",
+              "type": "text",
+              "title": "预设 23",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 23"
+              }
+            },
+            {
+              "key": "preset-24",
+              "type": "text",
+              "title": "预设 24",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 24"
+              }
+            },
+            {
+              "key": "preset-25",
+              "type": "text",
+              "title": "预设 25",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 25"
+              }
+            },
+            {
+              "key": "preset-26",
+              "type": "text",
+              "title": "预设 26",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 26"
+              }
+            },
+            {
+              "key": "preset-27",
+              "type": "text",
+              "title": "预设 27",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 27"
+              }
+            },
+            {
+              "key": "preset-28",
+              "type": "text",
+              "title": "预设 28",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 28"
+              }
+            },
+            {
+              "key": "preset-29",
+              "type": "text",
+              "title": "预设 29",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 29"
+              }
+            },
+            {
+              "key": "preset-30",
+              "type": "text",
+              "title": "预设 30",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 30"
+              }
+            },
+            {
+              "key": "preset-31",
+              "type": "text",
+              "title": "预设 31",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 31"
+              }
+            },
+            {
+              "key": "preset-32",
+              "type": "text",
+              "title": "预设 32",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 32"
+              }
+            },
+            {
+              "key": "preset-33",
+              "type": "text",
+              "title": "预设 33",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 33"
+              }
+            },
+            {
+              "key": "preset-34",
+              "type": "text",
+              "title": "预设 34",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 34"
+              }
+            },
+            {
+              "key": "preset-35",
+              "type": "text",
+              "title": "预设 35",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 35"
+              }
+            },
+            {
+              "key": "preset-36",
+              "type": "text",
+              "title": "预设 36",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 36"
+              }
+            },
+            {
+              "key": "preset-37",
+              "type": "text",
+              "title": "预设 37",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 37"
+              }
+            },
+            {
+              "key": "preset-38",
+              "type": "text",
+              "title": "预设 38",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 38"
+              }
+            },
+            {
+              "key": "preset-39",
+              "type": "text",
+              "title": "预设 39",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 39"
+              }
+            },
+            {
+              "key": "preset-40",
+              "type": "text",
+              "title": "预设 40",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 40"
+              }
+            },
+            {
+              "key": "preset-41",
+              "type": "text",
+              "title": "预设 41",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 41"
+              }
+            },
+            {
+              "key": "preset-42",
+              "type": "text",
+              "title": "预设 42",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 42"
+              }
+            },
+            {
+              "key": "preset-43",
+              "type": "text",
+              "title": "预设 43",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 43"
+              }
+            },
+            {
+              "key": "preset-44",
+              "type": "text",
+              "title": "预设 44",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 44"
+              }
+            },
+            {
+              "key": "preset-45",
+              "type": "text",
+              "title": "预设 45",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 45"
+              }
+            },
+            {
+              "key": "preset-46",
+              "type": "text",
+              "title": "预设 46",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 46"
+              }
+            },
+            {
+              "key": "preset-47",
+              "type": "text",
+              "title": "预设 47",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 47"
+              }
+            },
+            {
+              "key": "preset-48",
+              "type": "text",
+              "title": "预设 48",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 48"
+              }
+            },
+            {
+              "key": "preset-49",
+              "type": "text",
+              "title": "预设 49",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 49"
+              }
+            },
+            {
+              "key": "preset-50",
+              "type": "text",
+              "title": "预设 50",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 50"
+              }
+            },
+            {
+              "key": "preset-51",
+              "type": "text",
+              "title": "预设 51",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": {
+                "text": "占位 51"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "id": "obj-ok",
+      "kind": "native",
+      "type": "text",
+      "typeVersion": 1,
+      "title": "便签",
+      "data": {
+        "text": "这个要导进来"
+      },
+      "source": {
+        "origin": "human",
+        "author": "lin"
+      },
+      "version": 1,
+      "createdAt": 1700000000000,
+      "updatedAt": 1700000005000,
+      "author": "lin"
+    }
+  ],
+  "relations": [],
+  "audit": []
+}

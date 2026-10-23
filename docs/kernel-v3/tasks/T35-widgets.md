@@ -14,12 +14,13 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/kernel-v3/03-types-and-extensions.md` §3.2（控件列表与提示关键字）、§10（锚点格式，`locator` 控件要用）
 - `workbench/board/views/registry.ts`、`format.ts`（T34 定的控件接口）
 
 ## 开工前核对
 
-确认 `views/registry.ts` 里的 `Widget`、`WidgetProps` 与 T34 卡片一致。不一致先停下来问。
+确认 `views/registry.ts` 里的 `Widget`、`WidgetProps` 与 T34 卡片一致。依赖未完成则等待；机械差异按 05 §1 适配，语义冲突只暂停受影响部分。
 
 ## 可改文件
 
@@ -60,3 +61,7 @@
 - `workbench/tests/blank.ts`：在人物表单里分别编辑定位（文字）、年龄（整数）、性格（标签），服务端数据正确；清空年龄后字段从数据里消失。
 - 表单在 200% 文字缩放下仍可用（在 PR 里附截图）。
 - `npm run format:check`、`npm run typecheck`、`npm test`、`npm run test:blank` 全部通过。
+
+## 交接与边界验收
+
+blob/locator 编辑通过宿主注入服务，不让任意自定义视图直接调用工具；清空与 null 分开，嵌套对象/list 编辑遵守 Schema。

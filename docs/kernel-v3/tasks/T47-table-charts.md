@@ -2,8 +2,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 执行 | grok |
-| 依赖 | T46（决策记录已合并）、T40、T26 |
+| 执行 | minimax |
+| 依赖 | T46、T40、T26、T32、T72 |
 | 分支 | `task/T47-table-charts` |
 | 关联 issue | #39 第一阶段 |
 
@@ -14,6 +14,7 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/adr/0004-charts.md`（**图表库和配置格式以它为准**）、`docs/adr/0002-bundle-loading.md`
 - `docs/kernel-v3/03-types-and-extensions.md` §2（`migrations`）、§4、§9
 - `workbench/kernel/migrate.ts`（T26）、`workbench/board/views/bindings.ts`（T40）
@@ -21,7 +22,7 @@
 
 ## 开工前核对
 
-确认 ADR 0004 已合并；`Bindings.read` / `subscribe` 可用；`migrateData` 可用。不一致先停下来问。
+确认 ADR 0004 已合并；`Bindings.read` / `subscribe` 可用；`migrateData` 可用。依赖未完成则等待；机械差异按 05 §1 适配，语义冲突只暂停受影响部分。
 
 ## 可改文件
 
@@ -64,3 +65,7 @@
   5. 打开一个含 v1 表格的旧工作空间，表格正常显示和编辑。
 - 构建后体积符合 ADR 0002。
 - `npm run format:check`、`npm run typecheck`、`npm test`、`npm run test:blank` 全部通过。
+
+## 交接与边界验收
+
+按 05 §5 的 key、缺值、无数字列和无损迁移契约实现；测试旧值含布尔/空串/日期/混合数字时不丢内容。

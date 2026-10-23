@@ -2,8 +2,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 执行 | grok |
-| 依赖 | T43、T45、T51 |
+| 执行 | minimax |
+| 依赖 | T43、T45、T51、T47 |
 | 分支 | `task/T53-anchors` |
 | 关联 issue | #38 第二阶段、#41 第二阶段 |
 
@@ -14,12 +14,13 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/kernel-v3/03-types-and-extensions.md` §10（锚点格式，**以它为准**）
 - `workbench/board/richtext/`（T43）、`workbench/board/media/`（T44、T45）、`workbench/board/comments/`（T51）
 
 ## 开工前核对
 
-确认 `03` §10 的格式在 `main` 上未被修改；T43、T45、T51 已合并。不一致先停下来问。
+确认 `03` §10 的格式在 `main` 上未被修改；T43、T45、T51 已合并。依赖未完成则等待；机械差异按 05 §1 适配，语义冲突只暂停受影响部分。
 
 ## 可改文件
 
@@ -40,7 +41,7 @@
    - PDF、图片：在查看器里框选一个区域。
    - 音视频：在当前播放位置打点，或拖出一个区间。
    - 表格：选中若干单元格。
-   生成的锚点放进批注关系的 `attributes.anchor`（`ExternalLocator`）或引用的定位字段，同时记 `fingerprint`。
+   生成的锚点只放进 base.comments_on 或 base.cites 关系的 `attributes.anchor`（`ExternalLocator`），同时记 fingerprint；新引用建 base.note，引用文字与原文分开。
 3. **显示**：在原内容上高亮锚点；悬停显示对应的批注或引用；点击引用跳到原内容并高亮。
 4. **重新定位**（`relocate.ts`）：原内容的指纹变了时：
    - 文字：在新内容里找 `quote`；有多处匹配时用 `prefix` / `suffix` 区分；唯一匹配就更新位置并标“已自动跟上”；找不到或仍有歧义就标失效。
@@ -56,3 +57,7 @@
   2. 在测试 PDF 第 2 页框选一个区域写批注，点击批注回到该区域。
   3. 在测试视频 3 秒处打点批注，点击批注跳到 3 秒。
 - `npm run format:check`、`npm run typecheck`、`npm test`、`npm run test:blank` 全部通过。
+
+## 交接与边界验收
+
+音视频内容换 blob 或时段越界判失效；locator 对象 kind 和 relation anchor 校验同步共享类型。关系更新携带版本条件，重定位结果仅唯一匹配可采纳。

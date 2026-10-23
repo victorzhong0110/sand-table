@@ -14,6 +14,7 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/kernel-v3/04-canvas.md` §1、§2
 - `docs/kernel-v3/02-commands-and-tools.md` §3.4（`app_board`、`app_changes`、`app_edit`、`app_view`）
 - `docs/kernel-v3/01-data-model.md` §4（`presentations`，注意 `parent_id` 非空时坐标是相对父框的）
@@ -66,3 +67,7 @@
   7. 在卡片里的输入框打字、用中文输入法，不会拖动卡片。
 - 在 PR 描述里写：构建后 `board.html` 的体积变化。
 - `npm run format:check`、`npm run typecheck`、`npm test`、`npm run test:blank` 全部通过。
+
+## 交接与边界验收
+
+空白新工作空间的首页不 fitView 到示例对象；主画布禁止页面整体滚动。拖动冲突不吞错误，恢复权威位置并提示。关系有多份展示时每个端点取当前选择优先、否则 id 排序第一份，避免笛卡尔积连线；确定规则写入 mapping 单测。
