@@ -39,6 +39,7 @@ const collect = (key) => (chunk) => {
 child.stdout.on("data", collect("stdout"));
 child.stderr.on("data", collect("stderr"));
 try {
+  const started = Date.now();
   const end = Date.now() + 90000;
   let ws;
   while (Date.now() < end) {
@@ -55,10 +56,15 @@ try {
     await new Promise((r) => setTimeout(r, 250));
   }
   assert.ok(ws, "便携窗口未开放调试端口，未能完成真实窗口验收。");
-  browser = await chromium.connectOverCDP(ws);
+  /* 桌面主进程给本地服务 60 秒就绪预算，CDP 握手也得留够时间：
+     慢的 runner 上默认 30 秒会不够。 */
+  browser = await chromium.connectOverCDP(ws, { timeout: 60000 });
   const context = browser.contexts()[0];
   let page;
-  for (let i = 0; i < 120; i++) {
+  /* 等页面的耐心不能比程序自己的就绪预算还短：
+     桌面主进程给本地服务 60 秒，这里给 90 秒。 */
+  const pageDeadline = Date.now() + 90000;
+  while (Date.now() < pageDeadline) {
     page = context
       .pages()
       .find((p) => /^http:\/\/127\.0\.0\.1:\d+/.test(p.url()));
@@ -78,6 +84,7 @@ try {
     console.error(
       [
         "便携窗口没有打开本地工作台。",
+        `各阶段耗时：调试端口 ${Math.round((Date.now() - started) / 1000)} 秒内拿到；找页面又等了 ${Math.round((Date.now() - started) / 1000)} 秒（共 ${Math.round((Date.now() - started) / 1000)} 秒）。`,
         `窗口里的页面：${pages.join(" || ") || "(没有页面)"}`,
         `页面正文：${body || "(空)"}`,
         `子进程 stdout 尾部：${childOutput.stdout || "(空)"}`,
