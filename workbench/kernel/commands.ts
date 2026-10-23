@@ -568,10 +568,10 @@ function updatePresentation(
     command.y !== undefined ||
     command.width !== undefined ||
     command.height !== undefined;
-  if (row.locked && touches && command.locked !== false)
+  if (row.locked && touches)
     throw new CommandError(
       "LOCKED",
-      `「${object.title || "这个组件"}」已锁定。请先解锁，再移动或调整大小。`,
+      `「${object.title || "这个组件"}」已锁定。请先在前面的命令里解锁，再移动或调整大小。`,
       index,
     );
   if (hasCycle(ctx.db, row.objectId, row.boardId))
@@ -1206,7 +1206,7 @@ function classifyUpdateErrors(
 ) {
   const blocking = errors.filter((error) => {
     const key = topKey(error.path);
-    if (!key) return true;
+    if (!key) return false;
     return (
       Object.prototype.hasOwnProperty.call(set, key) || unset.includes(key)
     );

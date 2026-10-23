@@ -775,6 +775,37 @@ test("校验表里的每个错误码都带正确的 commandIndex", () => {
       "LOCKED",
       0,
     );
+    expectError(
+      () =>
+        applyCommands(db, registry, {
+          actor,
+          commands: [
+            {
+              op: "presentation.update",
+              id: presentationId,
+              locked: false,
+              x: 80,
+            },
+          ],
+        }),
+      "LOCKED",
+      0,
+    );
+    applyCommands(db, registry, {
+      actor,
+      commands: [
+        { op: "presentation.update", id: presentationId, locked: false },
+        { op: "presentation.update", id: presentationId, x: 80 },
+      ],
+    });
+    assert.equal(
+      (
+        db
+          .prepare("SELECT x, locked FROM presentations WHERE id = ?")
+          .get(presentationId) as { x: number; locked: number }
+      ).x,
+      80,
+    );
     const base = createRegistry();
     base.registerPack({ id: "base", title: "基础", version: 1 }, "builtin");
     syncPacks(db, base, actor);
@@ -831,6 +862,67 @@ test("旧数据的别的字段可以改，正在改的非法字段不行", () =>
       0,
     );
     assert.equal(JSON.parse(String(objectOf(db, id)?.data)).age, -1);
+
+    applyCommands(db, registry, {
+      actor,
+      commands: [
+        {
+          op: "pack.import",
+          manifest: {
+            format: "sand-table-pack",
+            formatVersion: 2,
+            id: "strict",
+            title: "严格",
+            version: 1,
+            types: [
+              {
+                type: "strict.item",
+                title: "条目",
+                description: "至少要有两个字段",
+                icon: "note",
+                version: 1,
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  minProperties: 2,
+                  properties: {
+                    label: { type: "string" },
+                    note: { type: "string" },
+                  },
+                },
+                display: {
+                  material: "paper",
+                  defaultSize: { width: 200, height: 80 },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const rootId = applyCommands(db, registry, {
+      actor,
+      commands: [
+        {
+          op: "object.create",
+          type: "strict.item",
+          title: "根",
+          data: { label: "原", note: "备注" },
+        },
+      ],
+    }).created["0"]!;
+    db.prepare("UPDATE objects SET data = ? WHERE id = ?").run(
+      JSON.stringify({ label: "原" }),
+      rootId,
+    );
+    const rootWarned = applyCommands(db, registry, {
+      actor,
+      commands: [{ op: "object.update", id: rootId, set: { label: "新" } }],
+    });
+    assert.ok(rootWarned.warnings.length > 0);
+    assert.equal(rootWarned.warnings[0]?.path, "");
+    assert.equal(rootWarned.warnings[0]?.commandIndex, 0);
+    assert.equal(JSON.parse(String(objectOf(db, rootId)?.data)).label, "新");
   } finally {
     close();
   }
@@ -888,6 +980,35 @@ test("删除对象会软删除它的展示和关系，并记在同一条历史",
       revision(db),
     );
     assert.equal(objectOf(db, other)?.deleted_rev, null);
+    const nestedBoard = applyCommands(db, registry, {
+      actor,
+      commands: [
+        { op: "object.create", type: "demo.board", title: "内层", data: {} },
+      ],
+    }).created["0"]!;
+    const kept = applyCommands(db, registry, {
+      actor,
+      commands: [card("板上的卡片")],
+    }).created["0"]!;
+    const innerPresentation = applyCommands(db, registry, {
+      actor,
+      commands: [
+        { op: "presentation.create", boardId: nestedBoard, objectId: kept },
+      ],
+    }).created["0"]!;
+    applyCommands(db, registry, {
+      actor,
+      commands: [{ op: "object.delete", id: nestedBoard }],
+    });
+    assert.equal(
+      (
+        db
+          .prepare("SELECT deleted_rev FROM presentations WHERE id = ?")
+          .get(innerPresentation) as { deleted_rev: number }
+      ).deleted_rev,
+      revision(db),
+    );
+    assert.equal(objectOf(db, kept)?.deleted_rev, null);
     const entry = history(db).find((item) => item.id === result.historyId)!;
     const changes = JSON.parse(entry.changes) as {
       table: string;
@@ -1122,6 +1243,15 @@ test("自动标签：新建、移动、修改、删除", () => {
       })),
     });
     assert.equal(history(db).at(-1)?.label, "移动 3 个组件");
+    assert.equal(history(db).at(-1)?.kind, "move");
+    applyCommands(db, registry, {
+      actor,
+      commands: [
+        { op: "presentation.update", id: presentations[0]!, x: 4, z: 2 },
+      ],
+    });
+    assert.equal(history(db).at(-1)?.kind, "edit");
+    assert.equal(history(db).at(-1)?.label, "编辑 1 处");
 
     applyCommands(db, registry, {
       actor,

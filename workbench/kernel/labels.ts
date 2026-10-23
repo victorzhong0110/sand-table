@@ -29,6 +29,14 @@ export function makeLabel(
     commands.length > 0 &&
     commands.every((command) => command.op === "presentation.update")
   ) {
+    const other = commands.some(
+      (command) =>
+        command.op === "presentation.update" &&
+        (command.z !== undefined ||
+          command.locked !== undefined ||
+          command.parentId !== undefined ||
+          command.appearance !== undefined),
+    );
     const sized = commands.some(
       (command) =>
         command.op === "presentation.update" &&
@@ -41,12 +49,13 @@ export function makeLabel(
         command.width === undefined &&
         command.height === undefined,
     );
-    if (!sized && moved) {
+    if (!other && !sized && moved) {
       if (commands.length === 1 && commands[0]?.op === "presentation.update")
         return `移动「${clip(lookup.presentationObjectTitle(commands[0].id))}」`;
       return `移动 ${commands.length} 个组件`;
     }
     if (
+      !other &&
       sized &&
       commands.length === 1 &&
       commands[0]?.op === "presentation.update"

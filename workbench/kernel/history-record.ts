@@ -18,7 +18,7 @@ export function historyKind(commands: Command[]): string {
     commands.length > 0 &&
     commands.every(
       (command) =>
-        command.op === "presentation.update" && changesGeometry(command),
+        command.op === "presentation.update" && changesOnlyGeometry(command),
     )
   )
     return "move";
@@ -100,14 +100,19 @@ function isDelete(command: Command) {
   );
 }
 
-function changesGeometry(command: Command) {
+function changesOnlyGeometry(command: Command) {
   if (command.op !== "presentation.update") return false;
-  return (
+  const geometry =
     command.x !== undefined ||
     command.y !== undefined ||
     command.width !== undefined ||
-    command.height !== undefined
-  );
+    command.height !== undefined;
+  const other =
+    command.z !== undefined ||
+    command.locked !== undefined ||
+    command.parentId !== undefined ||
+    command.appearance !== undefined;
+  return geometry && !other;
 }
 
 type HistoryRow = {
