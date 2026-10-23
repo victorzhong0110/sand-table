@@ -137,16 +137,20 @@ export function openWorkspaceDb(
 export function transaction<T>(db: Db, fn: () => T): T {
   if ((depth.get(db) ?? 0) > 0) throw new Error("不能在事务里再开启事务。");
   depth.set(db, 1);
-  db.exec("BEGIN IMMEDIATE");
+  let started = false;
   try {
+    db.exec("BEGIN IMMEDIATE");
+    started = true;
     const result = fn();
     db.exec("COMMIT");
     return result;
   } catch (error) {
-    try {
-      db.exec("ROLLBACK");
-    } catch {
-      /* 仍抛出事务里原来的错误 */
+    if (started) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* 仍抛出事务里原来的错误 */
+      }
     }
     throw error;
   } finally {
