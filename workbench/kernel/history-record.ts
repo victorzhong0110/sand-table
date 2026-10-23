@@ -1,5 +1,6 @@
 import { getMeta, setMeta, type Db } from "./db.ts";
 import { CommandError } from "./errors.ts";
+import { pruneHistory } from "./history.ts";
 import { newId } from "./ids.ts";
 import type { Change, Command, CommandBatch, Snapshot } from "./types.ts";
 
@@ -41,6 +42,28 @@ export function recordHistory(
   if (!intentId) {
     throw new CommandError("INTERNAL", "历史记录缺少 intentId。", null);
   }
+  const recorded = insertOrMerge(
+    db,
+    batch,
+    changes,
+    label,
+    kind,
+    now,
+    intentId,
+  );
+  pruneHistory(db);
+  return recorded;
+}
+
+function insertOrMerge(
+  db: Db,
+  batch: CommandBatch,
+  changes: Change[],
+  label: string,
+  kind: string,
+  now: number,
+  intentId: string,
+): string | null {
   const cursor = getMeta(db, "history_cursor") ?? "";
   const current = cursor ? readHistory(db, cursor) : undefined;
   if (current && canMerge(db, current, batch, intentId, now)) {

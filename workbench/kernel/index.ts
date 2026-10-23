@@ -38,6 +38,7 @@ export {
   applySystemCommands,
   parsePublicCommands,
 } from "./commands.ts";
+export { historyList, jump, pruneHistory, redo, undo } from "./history.ts";
 export { syncPacks, isPackEnabled } from "./packs-state.ts";
 export { createRegistry, PackSpecError } from "./registry.ts";
 export type { Registry } from "./registry.ts";
