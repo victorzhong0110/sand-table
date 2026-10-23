@@ -14,8 +14,11 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -63,6 +66,53 @@ function scene(fixture: string, workspaceId = "demo"): Scene {
     dir,
     registry,
     close: () => rmSync(root, { recursive: true, force: true }),
+  };
+}
+
+/** 把一份手写的旧文件写进临时目录。prepare 用来放 attachments。 */
+function sceneFrom(
+  json: unknown,
+  prepare?: (dir: string) => void,
+  workspaceId = "mini",
+): Scene {
+  const root = mkdtempSync(join(tmpdir(), "sand-import-"));
+  const dir = join(root, workspaceId);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "workspace.json"), JSON.stringify(json));
+  prepare?.(dir);
+  const registry = createRegistry();
+  for (const pack of builtinPacks) registry.registerPack(pack, "builtin");
+  return {
+    root,
+    dir,
+    registry,
+    close: () => rmSync(root, { recursive: true, force: true }),
+  };
+}
+
+function presentation(
+  id: string,
+  objectId: string,
+  rect: { x: number; y: number },
+  extra?: { type?: string; data?: Record<string, unknown>; binding?: boolean },
+) {
+  const type = extra?.type ?? "text";
+  const binding = extra?.binding !== false;
+  return {
+    id,
+    spaceId: "overview",
+    type,
+    ...(binding
+      ? {
+          binding: { kind: "object", objectId },
+          objectId,
+        }
+      : {}),
+    title: id,
+    data: extra?.data ?? {},
+    rect: { ...rect, width: 100, height: 80, pinned: false },
+    updatedAt: 1,
+    author: "lin",
   };
 }
 
@@ -252,16 +302,12 @@ test("原生对象、绑定展示、本地内容、嵌套空间、链接、关�
 
     // —— 对象关系：kind 改名，id 保留 ——
     const rel = relationsOf(db).find((r) => r.id === "rel-1");
-    assert.equal(
-      rel!.kind,
-      "novel.participates",
-      "「参与」变成 novel.participates",
-    );
+    assert.equal(rel!.kind, "参与", "§10.1 没有的对象关系 kind 原样保留");
     assert.equal(rel!.sourceId, "obj-char-1", "方向保留");
     assert.equal(rel!.targetId, "obj-event-1");
     assert.equal(rel!.status, "confirmed");
     const supports = relationsOf(db).find((r) => r.id === "rel-2");
-    assert.equal(supports!.kind, "research.supports");
+    assert.equal(supports!.kind, "支持");
     assert.equal(supports!.basis, "正文里写到了");
 
     // —— 分组：一个 base.frame 对象加一个框展示，组内展示挂它下面 ——
@@ -403,6 +449,15 @@ test("原生对象、绑定展示、本地内容、嵌套空间、链接、关�
     const importRow = audit.find((row) => row.action === "import");
     assert.ok(importRow, "写了一条 import 审计");
     assert.equal(importRow!.actor_kind, "system");
+    assert.ok(
+      audit.some(
+        (row) =>
+          row.action === "apply" &&
+          row.actor === "import" &&
+          row.actor_kind === "human",
+      ),
+      "syncPacks 用 actor import",
+    );
     const detail = JSON.parse(importRow!.detail!) as { objects: number };
     assert.equal(detail.objects, imported!.objects);
 
@@ -535,11 +590,11 @@ test("原始稳定 ID 的关系保留", () => {
     const { db } = openWorkspace(s.root, "demo", s.registry);
     const first = relationsOf(db).find((r) => r.id === "rel-stable-1");
     assert.ok(first, "关系的 id 保留");
-    assert.equal(first!.kind, "novel.precedes", "「先于」变成 novel.precedes");
+    assert.equal(first!.kind, "先于", "「先于」原样保留");
     assert.equal(first!.sourceId, "obj-same-1");
     assert.equal(first!.targetId, "obj-unique");
     const second = relationsOf(db).find((r) => r.id === "rel-stable-2");
-    assert.equal(second!.kind, "novel.causes");
+    assert.equal(second!.kind, "导致");
     assert.equal(second!.status, "inferred");
     db.close();
   } finally {
@@ -814,6 +869,286 @@ test("旧版本的文件先升到 v2 的形状再导入", () => {
     assert.ok(presentation, "老文件里的展示也导进来了");
     assert.equal(presentation!.boardId, "overview");
     assert.equal(getMeta(db, "home_board_id"), "overview");
+    db.close();
+  } finally {
+    s.close();
+  }
+});
+
+test("附件路径限制在 attachments 目录内", () => {
+  const s = sceneFrom(
+    {
+      schemaVersion: 2,
+      id: "attach-guard",
+      title: "附件",
+      revision: 1,
+      boards: [
+        {
+          id: "board-1",
+          title: "板",
+          spaces: [{ id: "overview", title: "总览" }],
+          assets: [
+            {
+              id: "asset-ok",
+              name: "ok.txt",
+              mime: "text/plain",
+              bytes: 9,
+            },
+            {
+              id: "asset-escape",
+              name: "../secret.txt",
+              mime: "text/plain",
+              bytes: 14,
+            },
+            {
+              id: "asset-passwd",
+              name: "../../../../../../etc/passwd",
+              mime: "text/plain",
+              bytes: 1,
+            },
+            {
+              id: "asset-link",
+              name: "escape",
+              mime: "text/plain",
+              bytes: 14,
+            },
+          ],
+        },
+      ],
+      objects: [],
+      relations: [],
+    },
+    (dir) => {
+      writeFileSync(join(dir, "secret.txt"), "SECRET_OUTSIDE");
+      const attachments = join(dir, "attachments");
+      mkdirSync(attachments);
+      writeFileSync(join(attachments, "ok.txt"), "inside-ok");
+      symlinkSync(join(dir, "secret.txt"), join(attachments, "escape"));
+    },
+  );
+  try {
+    const { db, imported } = openWorkspace(s.root, "mini", s.registry);
+    const reasons = imported!.skipped.map(
+      (item) => `${item.what} ${item.reason}`,
+    );
+    assert.ok(
+      reasons.some(
+        (line) => line.includes("../secret.txt") && line.includes("路径分隔"),
+      ),
+      "带 .. 的名字被拒绝",
+    );
+    assert.ok(
+      reasons.some(
+        (line) => line.includes("etc/passwd") && line.includes("路径分隔"),
+      ),
+      "逃出目录的名字被拒绝",
+    );
+    assert.ok(
+      reasons.some(
+        (line) => line.includes("escape") && line.includes("超出了"),
+      ),
+      "指向目录外的符号链接被拒绝",
+    );
+    const blobs = join(s.dir, "blobs");
+    const texts = existsSync(blobs)
+      ? readdirSync(blobs).map((name) =>
+          readFileSync(join(blobs, name)).toString("utf8"),
+        )
+      : [];
+    assert.ok(texts.includes("inside-ok"), "目录内的附件照常导入");
+    assert.equal(
+      texts.some((text) => text.includes("SECRET_OUTSIDE")),
+      false,
+      "目录外的文件没有被复制进 blobs",
+    );
+    const media = objectsOf(db, "base.media");
+    assert.deepEqual(
+      media.map((item) => item.id),
+      ["asset-ok"],
+    );
+    db.close();
+  } finally {
+    s.close();
+  }
+});
+
+test("引用附件的 resource 写成 base.media 的 blob", () => {
+  const s = sceneFrom(
+    {
+      schemaVersion: 2,
+      id: "resource-blob",
+      title: "媒体",
+      revision: 1,
+      boards: [
+        {
+          id: "board-1",
+          title: "板",
+          spaces: [{ id: "overview", title: "总览" }],
+          presentations: [
+            presentation("p-pic", "obj-pic", { x: 0, y: 0 }),
+            presentation(
+              "p-local",
+              "p-local",
+              { x: 200, y: 0 },
+              {
+                type: "resource",
+                binding: false,
+                data: { assetId: "asset-file" },
+              },
+            ),
+          ],
+          assets: [
+            {
+              id: "asset-1",
+              name: "a.png",
+              mime: "image/png",
+              dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+              bytes: 8,
+            },
+            {
+              id: "asset-file",
+              name: "note.txt",
+              mime: "text/plain",
+              bytes: 5,
+            },
+          ],
+        },
+      ],
+      objects: [
+        {
+          id: "obj-pic",
+          type: "resource",
+          title: "封面",
+          data: { assetId: "asset-1", caption: "封面" },
+        },
+        {
+          id: "obj-missing",
+          type: "resource",
+          title: "缺附件",
+          data: { assetId: "missing" },
+        },
+      ],
+      relations: [
+        {
+          id: "rel-custom",
+          source: "obj-pic",
+          target: "obj-missing",
+          kind: "自造",
+          status: "confirmed",
+        },
+      ],
+    },
+    (dir) => {
+      mkdirSync(join(dir, "attachments"));
+      writeFileSync(join(dir, "attachments", "note.txt"), "hello");
+    },
+  );
+  try {
+    const { db, imported } = openWorkspace(s.root, "mini", s.registry);
+    const pic = objectsOf(db).find((item) => item.id === "obj-pic");
+    const asset = objectsOf(db).find((item) => item.id === "asset-1");
+    assert.equal(pic!.type, "base.media");
+    assert.equal(pic!.data.assetId, "asset-1", "原来的 assetId 保留");
+    assert.equal(pic!.data.caption, "封面");
+    assert.equal(pic!.data.blob, asset!.data.blob, "blob 指向已导入的附件");
+    assert.equal(pic!.data.mime, "image/png");
+    assert.match(String(pic!.data.blob), /^[0-9a-f]{64}$/);
+    const shown = presentationsOf(db).find((item) => item.id === "p-pic");
+    assert.equal(shown!.objectId, "obj-pic", "展示仍绑在原来的对象上");
+
+    const local = objectsOf(db).find((item) => item.title === "p-local");
+    const fileAsset = objectsOf(db).find((item) => item.id === "asset-file");
+    assert.equal(local!.type, "base.media");
+    assert.equal(local!.data.blob, fileAsset!.data.blob);
+    assert.equal(
+      readFileSync(join(s.dir, "blobs", String(local!.data.blob)), "utf8"),
+      "hello",
+    );
+
+    const missing = objectsOf(db).find((item) => item.id === "obj-missing");
+    assert.equal(missing!.type, "base.media");
+    assert.equal(missing!.data.assetId, "missing");
+    assert.equal(missing!.data.blob, undefined);
+    assert.ok(
+      imported!.warnings.some(
+        (item) =>
+          item.what.includes("缺附件") && item.reason.includes("missing"),
+      ),
+    );
+
+    const custom = relationsOf(db).find((item) => item.id === "rel-custom");
+    assert.equal(custom!.kind, "自造", "未知对象关系 kind 不加 legacy 前缀");
+    db.close();
+  } finally {
+    s.close();
+  }
+});
+
+test("分组的展示 id 全部失效时改用对象 id", () => {
+  const s = sceneFrom({
+    schemaVersion: 2,
+    id: "groups",
+    title: "分组",
+    revision: 1,
+    boards: [
+      {
+        id: "board-1",
+        title: "板",
+        spaces: [{ id: "overview", title: "总览" }],
+        presentations: [
+          presentation("p1", "o1", { x: 10, y: 10 }),
+          presentation("p2", "o2", { x: 200, y: 10 }),
+          presentation("p3", "o3", { x: 10, y: 200 }),
+          presentation("p4", "o4", { x: 200, y: 200 }),
+        ],
+        groups: [
+          {
+            id: "g-stale",
+            title: "旧展示",
+            instanceIds: ["missing-a", "missing-b"],
+            objectIds: ["o1", "o2"],
+          },
+          {
+            id: "g-partial",
+            title: "只认展示",
+            instanceIds: ["p3"],
+            objectIds: ["o3", "o4"],
+          },
+        ],
+      },
+    ],
+    objects: [
+      { id: "o1", type: "text", title: "甲", data: { text: "甲" } },
+      { id: "o2", type: "text", title: "乙", data: { text: "乙" } },
+      { id: "o3", type: "text", title: "丙", data: { text: "丙" } },
+      { id: "o4", type: "text", title: "丁", data: { text: "丁" } },
+    ],
+    relations: [],
+  });
+  try {
+    const { db } = openWorkspace(s.root, "mini", s.registry);
+    const presentations = presentationsOf(db);
+    const stale = presentations.find((item) => item.objectId === "g-stale");
+    const partial = presentations.find((item) => item.objectId === "g-partial");
+    assert.ok(stale, "展示 id 全部失效时分组仍导入");
+    assert.equal(
+      presentations.find((item) => item.id === "p1")!.parentId,
+      stale!.id,
+    );
+    assert.equal(
+      presentations.find((item) => item.id === "p2")!.parentId,
+      stale!.id,
+    );
+    assert.ok(partial, "还有对得上的展示 id 时分组导入");
+    assert.equal(
+      presentations.find((item) => item.id === "p3")!.parentId,
+      partial!.id,
+    );
+    assert.equal(
+      presentations.find((item) => item.id === "p4")!.parentId,
+      null,
+      "对得上一部分时不把其余对象 id 再加进来",
+    );
     db.close();
   } finally {
     s.close();

@@ -12,8 +12,11 @@ import { syncPacks } from "./packs-state.ts";
 import type { Registry } from "./registry.ts";
 import type { Actor } from "./types.ts";
 
-/** 导入时写库的账号：不是人也不是助手，是系统自己。 */
-const SYSTEM_ACTOR: Actor = { id: "system", kind: "human" };
+/**
+ * 卡片没有给 openWorkspace 的调用者。同步内置包必须有 actor，
+ * 这条路径统一用「import」。
+ */
+const IMPORT_ACTOR: Actor = { id: "import", kind: "human" };
 
 /** 打开结果。imported 不是空就说明这次是从旧版文件导入的。 */
 export type OpenWorkspaceResult = {
@@ -41,13 +44,13 @@ export function openWorkspace(
   const jsonFile = join(dir, "workspace.json");
   if (existsSync(dbFile)) {
     const db = openWorkspaceDb(dbFile, { create: false });
-    syncPacks(db, registry, SYSTEM_ACTOR);
+    syncPacks(db, registry, IMPORT_ACTOR);
     return { db, imported: null };
   }
   if (existsSync(jsonFile)) {
     const report = importV2(jsonFile, dbFile, registry, now);
     const db = openWorkspaceDb(dbFile, { create: false });
-    syncPacks(db, registry, SYSTEM_ACTOR);
+    syncPacks(db, registry, IMPORT_ACTOR);
     return { db, imported: report };
   }
   mkdirSync(dir, { recursive: true });
@@ -57,6 +60,6 @@ export function openWorkspace(
     ...(options?.title ? { title: options.title } : {}),
     now,
   });
-  syncPacks(db, registry, SYSTEM_ACTOR);
+  syncPacks(db, registry, IMPORT_ACTOR);
   return { db, imported: null };
 }

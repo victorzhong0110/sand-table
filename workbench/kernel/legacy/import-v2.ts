@@ -10,10 +10,11 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   getMeta,
   openWorkspaceDb,
@@ -83,23 +84,15 @@ const RESEARCH_TYPES: Record<string, string> = {
   conclusion: "research.conclusion",
 };
 
-/** v2 的关系名 → v3 的关系名。空间链接用英文，领域关系用中文。 */
-const RELATION_KINDS: Record<string, string> = {
+/**
+ * 空间链接的 kind。对象关系的 kind 不在 §10.1 里，原样保留，不在这里改名。
+ */
+const SPACE_LINK_KINDS: Record<string, string> = {
   related: "base.related",
   "depends-on": "base.depends_on",
   supports: "base.supports",
   compares: "base.compares",
   "belongs-to": "base.belongs_to",
-  参与: "novel.participates",
-  导致: "novel.causes",
-  先于: "novel.precedes",
-  "埋设-回收": "novel.foreshadows",
-  支持: "research.supports",
-  反驳: "research.refutes",
-  contains: "code.contains",
-  imports: "code.imports",
-  calls: "code.calls",
-  "syntactic-call": "code.calls",
 };
 
 /** v3 的对象标题上限（与内核写入路径一致）。 */
@@ -162,9 +155,9 @@ export function mapV2Type(type: string, data: Record<string, unknown>): string {
   return `legacy.${type}`;
 }
 
-/** v2 的关系名换成 v3 的关系名。认不出来的按 legacy 前缀原样留下。 */
+/** 空间链接的 kind 换成 v3 的关系名。对象关系不走这里。 */
 export function mapV2RelationKind(kind: string): string {
-  return RELATION_KINDS[kind] ?? `legacy.${kind}`;
+  return SPACE_LINK_KINDS[kind] ?? kind;
 }
 
 /** 导入过程中的上下文：写到哪里、已经写了什么。 */
@@ -191,6 +184,8 @@ type Ctx = {
   titles: Map<string, string[]>;
   /** 已经导入的数据包 id。 */
   packIds: Set<string>;
+  /** 已写入 blobs 的附件：v2 asset id → sha256 与 mime。 */
+  assetsById: Map<string, { sha: string; mime: string }>;
 };
 
 type ObjectInput = {
@@ -282,6 +277,7 @@ function writeAll(
     presentationRect: new Map(),
     titles: new Map(),
     packIds: new Set(),
+    assetsById: new Map(),
   };
   transaction(db, () => {
     importSpaces(ctx, workspace);
@@ -290,6 +286,7 @@ function writeAll(
     importCodeFlow(ctx, workspace);
     importGuides(ctx, workspace);
     importPresentations(ctx, workspace);
+    linkResourceBlobs(ctx);
     importGroups(ctx, workspace);
     importNotes(ctx, workspace);
     importRelations(ctx, workspace);
@@ -388,16 +385,17 @@ function importAssets(ctx: Ctx, workspace: V2Workspace): void {
         });
         continue;
       }
-      const bytes = readAssetBytes(ctx, asset);
-      if (!bytes) {
+      const read = readAssetBytes(ctx.jsonFile, asset);
+      if (!read.ok) {
         ctx.report.skipped.push({
-          what: `附件「${asset.name}」`,
-          reason:
-            "文件里没有内联数据，attachments 目录里也找不到同名文件，没有导入。",
+          what: asset.name ? `附件「${asset.name}」` : "一个附件",
+          reason: read.reason,
         });
         continue;
       }
-      const sha = writeBlob(ctx, bytes, asset.mime);
+      const mime = asset.mime || "application/octet-stream";
+      const sha = writeBlob(ctx, read.bytes, mime);
+      ctx.assetsById.set(asset.id, { sha, mime });
       if (ctx.objectIds.has(asset.id)) {
         ctx.report.skipped.push({
           what: `附件「${asset.name}」`,
@@ -411,7 +409,7 @@ function importAssets(ctx: Ctx, workspace: V2Workspace): void {
         title: asset.name,
         data: {
           blob: sha,
-          mime: asset.mime,
+          mime,
           caption: asset.name,
           alt: asset.name,
         },
@@ -816,10 +814,15 @@ function importGroups(ctx: Ctx, workspace: V2Workspace): void {
   }
 }
 
-/** 分组的成员展示：优先按展示 id 找，找不到就按对象 id 找。 */
+/**
+ * 分组的成员展示。
+ * 有对得上的展示 id 就只用它们；一个都对不上（或根本没写展示 id）就按对象 id 找。
+ */
 function groupMembers(ctx: Ctx, group: V2Group): string[] {
-  if (group.instanceIds?.length)
-    return group.instanceIds.filter((id) => ctx.presentationObject.has(id));
+  const fromInstances = (group.instanceIds ?? []).filter((id) =>
+    ctx.presentationObject.has(id),
+  );
+  if (group.instanceIds?.length && fromInstances.length) return fromInstances;
   const objectIds = new Set(group.objectIds);
   return [...ctx.presentationObject.entries()]
     .filter(([, objectId]) => objectIds.has(objectId))
@@ -880,7 +883,7 @@ function importNotes(ctx: Ctx, workspace: V2Workspace): void {
   }
 }
 
-/** v2 的对象关系。id 保留，关系名按 §10 改名。 */
+/** v2 的对象关系。id 保留。§10.1 没有给出的 kind 原样保留。 */
 function importRelations(ctx: Ctx, workspace: V2Workspace): void {
   for (const relation of workspace.relations) {
     if (!ctx.objectIds.has(relation.source)) {
@@ -904,13 +907,7 @@ function importRelations(ctx: Ctx, workspace: V2Workspace): void {
       });
       continue;
     }
-    const kind = mapV2RelationKind(relation.kind);
-    if (kind.startsWith("legacy.")) {
-      ctx.report.warnings.push({
-        what: `关系「${relation.kind}」`,
-        reason: `新版本没有这个关系类型，按「${kind}」原样导入。`,
-      });
-    }
+    const kind = relation.kind;
     if (relation.status === "inferred" && !relation.basis) {
       ctx.report.warnings.push({
         what: `关系「${relation.kind}」`,
@@ -1311,28 +1308,147 @@ function writeBlob(ctx: Ctx, bytes: Buffer, mime: string): string {
   return sha;
 }
 
-/** 附件的字节：先看文件里的内联数据，没有就看 attachments 目录。 */
-function readAssetBytes(ctx: Ctx, asset: V2Asset): Buffer | undefined {
-  if (asset.dataUrl) {
-    const match = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(asset.dataUrl);
-    if (!match) return undefined;
-    const mime = match[1] || asset.mime;
-    const payload = match[3] ?? "";
-    if (match[2]) return Buffer.from(payload, "base64");
+/**
+ * 把引用了附件的 base.media 补上 blob 与 mime。
+ * v2 的 resource 只存 assetId，v3 的媒体对象靠 blob 显示。
+ * assetId 原样留下。
+ */
+function linkResourceBlobs(ctx: Ctx): void {
+  const rows = ctx.db
+    .prepare(
+      "SELECT id, type, title, data FROM objects WHERE deleted_rev IS NULL",
+    )
+    .all() as { id: string; type: string; title: string; data: string }[];
+  for (const row of rows) {
+    if (row.type !== "base.media") continue;
+    let data: Record<string, unknown>;
     try {
-      return Buffer.from(decodeURIComponent(payload), "utf8");
+      data = JSON.parse(row.data) as Record<string, unknown>;
     } catch {
-      return Buffer.from(payload, "utf8");
+      continue;
     }
+    const assetId = data.assetId;
+    if (typeof assetId !== "string" || !assetId) continue;
+    const asset = ctx.assetsById.get(assetId);
+    if (!asset) {
+      ctx.report.warnings.push({
+        what: `媒体「${row.title || row.id}」`,
+        reason: `它引用的附件「${assetId}」没有导入成功，数据里还留着 assetId，界面暂时显示不出图片、音频或视频。`,
+      });
+      continue;
+    }
+    let changed = false;
+    if (typeof data.blob !== "string" || !data.blob) {
+      data.blob = asset.sha;
+      changed = true;
+    }
+    if (typeof data.mime !== "string" || !data.mime) {
+      data.mime = asset.mime;
+      changed = true;
+    }
+    if (!changed) continue;
+    ctx.db
+      .prepare("UPDATE objects SET data = ? WHERE id = ?")
+      .run(JSON.stringify(data), row.id);
   }
-  if (!asset.name) return undefined;
-  const file = join(dirname(ctx.jsonFile), "attachments", asset.name);
-  if (!existsSync(file)) return undefined;
+}
+
+/** 附件的字节：先看文件里的内联数据，没有就只读 attachments 目录里的同名文件。 */
+function readAssetBytes(
+  jsonFile: string,
+  asset: V2Asset,
+): { ok: true; bytes: Buffer } | { ok: false; reason: string } {
+  if (asset.dataUrl) {
+    const bytes = decodeDataUrl(asset.dataUrl);
+    if (!bytes)
+      return {
+        ok: false,
+        reason: "内联数据不是合法的 data URL，没有导入。",
+      };
+    return { ok: true, bytes };
+  }
+  if (!asset.name)
+    return {
+      ok: false,
+      reason: "文件里没有内联数据，也没有文件名，没有导入。",
+    };
+  if (!isSafeAttachmentName(asset.name))
+    return {
+      ok: false,
+      reason:
+        "附件名含有路径分隔或 ..，不能读取工作空间 attachments 目录以外的文件。",
+    };
+  const located = locateAttachment(jsonFile, asset.name);
+  if (!located.ok) return located;
   try {
-    return readFileSync(file);
+    return { ok: true, bytes: readFileSync(located.file) };
   } catch {
-    return undefined;
+    return {
+      ok: false,
+      reason: "attachments 目录里的同名文件读不出来，没有导入。",
+    };
   }
+}
+
+function decodeDataUrl(dataUrl: string): Buffer | undefined {
+  const match = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(dataUrl);
+  if (!match) return undefined;
+  const payload = match[3] ?? "";
+  if (match[2]) return Buffer.from(payload, "base64");
+  try {
+    return Buffer.from(decodeURIComponent(payload), "utf8");
+  } catch {
+    return Buffer.from(payload, "utf8");
+  }
+}
+
+/** 附件名只能是 attachments 目录里的一个文件名，不能带路径。 */
+function isSafeAttachmentName(name: string): boolean {
+  if (!name || name === "." || name === "..") return false;
+  if (name.includes("/") || name.includes("\\") || name.includes("\0"))
+    return false;
+  return true;
+}
+
+/**
+ * 解析附件路径。符号链接也要落在 attachments 目录里面，否则不读。
+ */
+function locateAttachment(
+  jsonFile: string,
+  name: string,
+): { ok: true; file: string } | { ok: false; reason: string } {
+  const root = join(dirname(jsonFile), "attachments");
+  const file = resolve(root, name);
+  const inside = relative(resolve(root), file);
+  if (!inside || inside.startsWith("..") || isAbsolute(inside))
+    return {
+      ok: false,
+      reason: "附件路径解析后超出了工作空间的 attachments 目录，没有读取。",
+    };
+  if (!existsSync(file))
+    return {
+      ok: false,
+      reason:
+        "文件里没有内联数据，attachments 目录里也找不到同名文件，没有导入。",
+    };
+  let rootReal: string;
+  let fileReal: string;
+  try {
+    rootReal = realpathSync(root);
+    fileReal = realpathSync(file);
+  } catch {
+    return {
+      ok: false,
+      reason: "attachments 目录里的同名文件读不出来，没有导入。",
+    };
+  }
+  const resolved = relative(rootReal, fileReal);
+  if (!resolved || resolved.startsWith("..") || isAbsolute(resolved))
+    return {
+      ok: false,
+      reason: "附件路径解析后超出了工作空间的 attachments 目录，没有读取。",
+    };
+  return { ok: true, file: fileReal };
 }
 
 /** 提案里超过 1 MB 的文件内容写进附件区，原地留一个 sha256 引用。 */
