@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 2,
+  "id": "lossless-workspace",
+  "title": "无损迁移",
+  "createdAt": 1700001000000,
+  "updatedAt": 1700001009000,
+  "revision": 5,
+  "contentRevision": 2,
+  "boards": [
+    {
+      "id": "board-lossless",
+      "title": "主白板",
+      "revision": 3,
+      "contentRevision": 2,
+      "spaces": [{ "id": "overview", "title": "总览" }],
+      "presentations": [
+        {
+          "id": "p-zero",
+          "spaceId": "overview",
+          "type": "text",
+          "binding": { "kind": "object", "objectId": "obj-zero" },
+          "objectId": "obj-zero",
+          "title": "零值",
+          "data": {},
+          "rect": { "x": 0, "y": 0, "width": 280, "height": 180, "pinned": false },
+          "updatedAt": 1700001001000,
+          "author": "lin"
+        },
+        {
+          "id": "p-empty",
+          "spaceId": "overview",
+          "type": "text",
+          "binding": { "kind": "object", "objectId": "obj-empty" },
+          "objectId": "obj-empty",
+          "title": "空值",
+          "data": {},
+          "rect": { "x": 320, "y": 0, "width": 280, "height": 180, "pinned": false },
+          "updatedAt": 1700001002000,
+          "author": "lin"
+        },
+        {
+          "id": "p-same-1",
+          "spaceId": "overview",
+          "type": "character",
+          "binding": { "kind": "object", "objectId": "obj-same-1" },
+          "objectId": "obj-same-1",
+          "title": "同名",
+          "data": {},
+          "rect": { "x": 640, "y": 0, "width": 260, "height": 180, "pinned": false },
+          "updatedAt": 1700001003000,
+          "author": "lin"
+        },
+        {
+          "id": "p-same-2",
+          "spaceId": "overview",
+          "type": "character",
+          "binding": { "kind": "object", "objectId": "obj-same-2" },
+          "objectId": "obj-same-2",
+          "title": "同名",
+          "data": {},
+          "rect": { "x": 940, "y": 0, "width": 260, "height": 180, "pinned": false },
+          "updatedAt": 1700001004000,
+          "author": "lin"
+        },
+        {
+          "id": "p-unique",
+          "spaceId": "overview",
+          "type": "character",
+          "binding": { "kind": "object", "objectId": "obj-unique" },
+          "objectId": "obj-unique",
+          "title": "独此一人",
+          "data": {},
+          "rect": { "x": 1240, "y": 0, "width": 260, "height": 180, "pinned": false },
+          "updatedAt": 1700001005000,
+          "author": "lin"
+        },
+        {
+          "id": "p-event",
+          "spaceId": "overview",
+          "type": "event",
+          "binding": { "kind": "object", "objectId": "obj-event" },
+          "objectId": "obj-event",
+          "title": "重逢",
+          "data": {},
+          "rect": { "x": 0, "y": 240, "width": 280, "height": 180, "pinned": false },
+          "updatedAt": 1700001006000,
+          "author": "lin"
+        }
+      ],
+      "views": {},
+      "selection": [],
+      "placements": {},
+      "notes": {},
+      "groups": [],
+      "spaceLinks": [],
+      "assets": [],
+      "activities": [],
+      "guides": [],
+      "intents": [],
+      "proposals": [],
+      "validations": []
+    }
+  ],
+  "objects": [
+    {
+      "id": "obj-zero",
+      "kind": "native",
+      "type": "text",
+      "typeVersion": 1,
+      "title": "零值",
+      "data": {
+        "text": "",
+        "count": 0,
+        "ratio": 0,
+        "items": [],
+        "tags": [],
+        "nested": { "empty": "", "zero": 0, "list": [] },
+        "unknownField": "原样保留",
+        "unknownNumber": 0
+      },
+      "source": { "origin": "human", "author": "lin" },
+      "version": 1,
+      "createdAt": 1700001001000,
+      "updatedAt": 1700001001000,
+      "author": "lin"
+    },
+    {
+      "id": "obj-empty",
+      "kind": "native",
+      "type": "text",
+      "typeVersion": 1,
+      "title": "空值",
+      "data": { "text": "", "unknownField": "" },
+      "source": { "origin": "human", "author": "lin" },
+      "version": 1,
+      "createdAt": 1700001002000,
+      "updatedAt": 1700001002000,
+      "author": "lin"
+    },
+    {
+      "id": "obj-same-1",
+      "kind": "native",
+      "type": "character",
+      "typeVersion": 1,
+      "title": "同名",
+      "data": { "name": "同名", "role": "甲", "age": 0 },
+      "source": { "origin": "human", "author": "lin" },
+      "version": 1,
+      "createdAt": 1700001003000,
+      "updatedAt": 1700001003000,
+      "author": "lin"
+    },
+    {
+      "id": "obj-same-2",
+      "kind": "native",
+      "type": "character",
+      "typeVersion": 1,
+      "title": "同名",
+      "data": { "name": "同名", "role": "乙", "age": 0 },
+      "source": { "origin": "human", "author": "lin" },
+      "version": 1,
+      "createdAt": 1700001004000,
+      "updatedAt": 1700001004000,
+      "author": "lin"
+    },
+    {
+      "id": "obj-unique",
+      "kind": "native",
+      "type": "character",
+      "typeVersion": 1,
+      "title": "独此一人",
+      "data": { "name": "独此一人", "role": "丙", "age": 0 },
+      "source": { "origin": "human", "author": "lin" },
+      "version": 1,
+      "createdAt": 1700001005000,
+      "updatedAt": 1700001005000,
+      "author": "lin"
+    },
+    {
+      "id": "obj-event",
+      "kind": "native",
+      "type": "event",
+      "typeVersion": 1,
+      "title": "重逢",
+      "data": {
+        "summary": "又一次见面",
+        "participants": ["同名", "独此一人", "查无此人"]
+      },
+      "source": { "origin": "human", "author": "lin" },
+      "version": 1,
+      "createdAt": 1700001006000,
+      "updatedAt": 1700001006000,
+      "author": "lin"
+    }
+  ],
+  "relations": [
+    {
+      "id": "rel-stable-1",
+      "source": "obj-same-1",
+      "target": "obj-unique",
+      "kind": "先于",
+      "status": "confirmed",
+      "createdAt": 1700001007000,
+      "author": "lin"
+    },
+    {
+      "id": "rel-stable-2",
+      "source": "obj-same-2",
+      "target": "obj-event",
+      "kind": "导致",
+      "status": "inferred",
+      "createdAt": 1700001008000,
+      "author": "lin"
+    }
+  ],
+  "resources": [],
+  "activities": [],
+  "audit": []
+}

@@ -69,4 +69,8 @@ export { summarize } from "./text.ts";
 export { syncPacks, isPackEnabled } from "./packs-state.ts";
 export { createRegistry, PackSpecError } from "./registry.ts";
 export type { Registry } from "./registry.ts";
+export { openWorkspace } from "./workspace.ts";
+export type { OpenWorkspaceResult } from "./workspace.ts";
+export { importV2 } from "./legacy/import-v2.ts";
+export type { ImportReport, ImportSkipped } from "./legacy/import-v2.ts";
 export { toObjectRow, toPresentationRow, toRelationRow } from "./rows.ts";

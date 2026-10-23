@@ -1,0 +1,424 @@
+{
+  "schemaVersion": 2,
+  "id": "demo-workspace",
+  "title": "示例工作空间",
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000009000,
+  "revision": 42,
+  "contentRevision": 7,
+  "boards": [
+    {
+      "id": "board-1",
+      "title": "主白板",
+      "revision": 12,
+      "contentRevision": 7,
+      "spaces": [
+        { "id": "overview", "title": "总览" },
+        { "id": "space-child", "title": "第二章", "parentId": "overview" }
+      ],
+      "presentations": [
+        {
+          "id": "p-text",
+          "spaceId": "overview",
+          "type": "text",
+          "binding": { "kind": "object", "objectId": "obj-text-1" },
+          "objectId": "obj-text-1",
+          "title": "林澈",
+          "data": {},
+          "rect": { "x": 100, "y": 200, "width": 280, "height": 180, "pinned": false },
+          "updatedAt": 1700000001000,
+          "author": "lin"
+        },
+        {
+          "id": "p-char",
+          "spaceId": "overview",
+          "type": "character",
+          "binding": { "kind": "object", "objectId": "obj-char-1" },
+          "objectId": "obj-char-1",
+          "title": "林澈",
+          "data": {},
+          "rect": { "x": 420, "y": 260, "width": 260, "height": 180, "pinned": true },
+          "updatedAt": 1700000002000,
+          "author": "lin"
+        },
+        {
+          "id": "p-local",
+          "spaceId": "overview",
+          "type": "text",
+          "title": "本地便签",
+          "data": { "text": "这条内容只存在于展示里" },
+          "rect": { "x": 420, "y": 40, "width": 280, "height": 180, "pinned": false },
+          "updatedAt": 1700000003000,
+          "author": "lin"
+        },
+        {
+          "id": "p-board",
+          "spaceId": "overview",
+          "type": "board",
+          "title": "第二章",
+          "data": { "spaceId": "space-child" },
+          "rect": { "x": 740, "y": 40, "width": 280, "height": 160, "pinned": false },
+          "updatedAt": 1700000004000,
+          "author": "lin"
+        },
+        {
+          "id": "p-space-link",
+          "spaceId": "overview",
+          "type": "space-link",
+          "title": "跳到第二章",
+          "data": { "spaceId": "space-child" },
+          "rect": { "x": 740, "y": 240, "width": 252, "height": 120, "pinned": false },
+          "updatedAt": 1700000005000,
+          "author": "lin"
+        },
+        {
+          "id": "p-note-target",
+          "spaceId": "overview",
+          "type": "text",
+          "binding": { "kind": "object", "objectId": "obj-note-target" },
+          "objectId": "obj-note-target",
+          "title": "潮汐表",
+          "data": {},
+          "rect": { "x": 700, "y": 500, "width": 280, "height": 180, "pinned": false },
+          "updatedAt": 1700000006000,
+          "author": "lin"
+        },
+        {
+          "id": "p-child",
+          "spaceId": "space-child",
+          "type": "text",
+          "binding": { "kind": "object", "objectId": "obj-text-2" },
+          "objectId": "obj-text-2",
+          "title": "第二章的便签",
+          "data": {},
+          "rect": { "x": 40, "y": 40, "width": 280, "height": 180, "pinned": false },
+          "updatedAt": 1700000007000,
+          "author": "lin"
+        }
+      ],
+      "views": { "view-1": { "id": "view-1", "spaceId": "overview" } },
+      "focusedViewId": "view-1",
+      "selection": ["obj-text-1"],
+      "placements": { "obj-text-1": { "x": 100, "y": 200, "pinned": false } },
+      "notes": { "obj-note-target": "这条备注要跟着对象走" },
+      "groups": [
+        {
+          "id": "group-1",
+          "title": "第一幕",
+          "objectIds": ["obj-text-1", "obj-char-1"]
+        }
+      ],
+      "spaceLinks": [
+        {
+          "id": "link-related",
+          "source": "p-text",
+          "target": "p-char",
+          "kind": "related",
+          "description": "两个人物相关",
+          "author": "lin"
+        },
+        {
+          "id": "link-depends",
+          "source": "p-text",
+          "target": "p-local",
+          "kind": "depends-on",
+          "description": "依赖本地便签",
+          "author": "lin"
+        },
+        {
+          "id": "link-supports",
+          "source": "p-char",
+          "target": "p-text",
+          "kind": "supports",
+          "description": "人物支持这段正文",
+          "author": "lin"
+        },
+        {
+          "id": "link-compares",
+          "source": "p-local",
+          "target": "p-char",
+          "kind": "compares",
+          "description": "拿来比较",
+          "author": "lin"
+        },
+        {
+          "id": "link-belongs",
+          "source": "p-char",
+          "target": "p-local",
+          "kind": "belongs-to",
+          "description": "从属于",
+          "author": "lin"
+        }
+      ],
+      "assets": [
+        {
+          "id": "asset-1",
+          "name": "picture.png",
+          "mime": "image/png",
+          "dataUrl": "data:image/png;base64,iVBORw0KGgo=",
+          "bytes": 8
+        }
+      ],
+      "activities": [],
+      "guides": [
+        {
+          "id": "guide-1",
+          "title": "主线导览",
+          "purpose": "按顺序读一遍",
+          "inputs": "",
+          "outputs": "",
+          "agentId": "agent-1",
+          "steps": [
+            {
+              "title": "起点",
+              "explanation": "先看便签",
+              "objectIds": ["obj-text-1"],
+              "evidence": [],
+              "uncertainty": ""
+            },
+            {
+              "title": "转折",
+              "explanation": "再看事件",
+              "objectIds": ["obj-event-1"],
+              "evidence": [
+                {
+                  "workspaceId": "w-1",
+                  "path": "src/app.ts",
+                  "startLine": 1,
+                  "endLine": 5,
+                  "hash": "abc123"
+                }
+              ],
+              "uncertainty": "还不确定"
+            },
+            {
+              "title": "没有对象的一站",
+              "explanation": "只有文字",
+              "objectIds": [],
+              "evidence": [],
+              "uncertainty": ""
+            }
+          ],
+          "stale": false,
+          "status": "agent-inference",
+          "createdAt": 1700000008000
+        }
+      ],
+      "intents": [
+        {
+          "id": "intent-1",
+          "version": 1,
+          "request": "把林澈的设定改一下",
+          "objectIds": ["obj-text-1"],
+          "allowedFiles": [{ "workspaceId": "w-1", "path": "src/app.ts" }],
+          "arrangement": {
+            "placements": {},
+            "notes": {},
+            "groups": [],
+            "selectedInstances": []
+          },
+          "createdAt": 1700000010000
+        }
+      ],
+      "proposals": [
+        {
+          "id": "proposal-1",
+          "version": 1,
+          "digest": "digest-1",
+          "intentId": "intent-1",
+          "intentVersion": 1,
+          "agentId": "agent-1",
+          "title": "改一下设定",
+          "explanation": "把港口那段改短",
+          "testPlan": "跑一遍测试",
+          "files": [
+            {
+              "workspaceId": "w-1",
+              "path": "src/app.ts",
+              "beforeHash": null,
+              "afterHash": "hash-1",
+              "before": null,
+              "after": "print('hello')"
+            }
+          ],
+          "baseline": [],
+          "decision": "pending",
+          "createdAt": 1700000011000
+        }
+      ],
+      "validations": [
+        {
+          "id": "validation-1",
+          "proposalId": "proposal-1",
+          "version": 1,
+          "digest": "digest-1",
+          "agentId": "agent-1",
+          "workspaceId": "w-1",
+          "command": "npm test",
+          "environment": "node",
+          "outcome": "passed",
+          "output": "全部通过",
+          "reportedAt": 1700000012000,
+          "fingerprint": "fp-1",
+          "source": "agent-report"
+        }
+      ],
+      "theme": {
+        "base": "paper",
+        "background": "#ffffff",
+        "surface": "#f5f5f5",
+        "ink": "#111111",
+        "muted": "#888888",
+        "line": "#dddddd",
+        "accent": "#0066cc",
+        "font": "system",
+        "density": "comfortable",
+        "radius": 8,
+        "reduceMotion": false
+      },
+      "componentPacks": [
+        {
+          "id": "my-pack",
+          "name": "我的包",
+          "version": 1,
+          "description": "自用组件",
+          "author": "lin",
+          "homepage": "",
+          "source": "json",
+          "importedAt": 1700000013000,
+          "importedBy": "lin",
+          "components": [
+            {
+              "key": "note",
+              "type": "text",
+              "title": "便签",
+              "icon": "text",
+              "width": 200,
+              "height": 100,
+              "data": { "text": "占位" }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "id": "obj-text-1",
+      "kind": "native",
+      "type": "text",
+      "typeVersion": 1,
+      "title": "林澈",
+      "data": { "text": "在港口长大，怕水。" },
+      "source": { "origin": "human", "author": "lin" },
+      "version": 3,
+      "createdAt": 1699999000000,
+      "updatedAt": 1700000001000,
+      "author": "lin"
+    },
+    {
+      "id": "obj-text-2",
+      "kind": "native",
+      "type": "text",
+      "typeVersion": 1,
+      "title": "第二章的便签",
+      "data": { "text": "第二幕开始。" },
+      "source": { "origin": "human", "author": "lin" },
+      "version": 1,
+      "createdAt": 1699999001000,
+      "updatedAt": 1700000007000,
+      "author": "lin"
+    },
+    {
+      "id": "obj-char-1",
+      "kind": "native",
+      "type": "character",
+      "typeVersion": 1,
+      "title": "林澈",
+      "data": { "name": "林澈", "role": "主角", "age": 0, "traits": [], "goal": "", "arc": "" },
+      "source": { "origin": "human", "author": "lin" },
+      "version": 2,
+      "createdAt": 1699999002000,
+      "updatedAt": 1700000002000,
+      "author": "lin"
+    },
+    {
+      "id": "obj-event-1",
+      "kind": "native",
+      "type": "event",
+      "typeVersion": 1,
+      "title": "启航",
+      "data": {
+        "summary": "船离港",
+        "storyTime": "初春",
+        "narrativeOrder": 1,
+        "place": "港口",
+        "participants": ["林澈", "林澈", "无名"]
+      },
+      "source": { "origin": "ai-generated", "author": "agent-1", "basis": "从正文里抽出来的" },
+      "version": 1,
+      "createdAt": 1699999003000,
+      "updatedAt": 1700000008000,
+      "author": "agent-1"
+    },
+    {
+      "id": "obj-hyp-1",
+      "kind": "native",
+      "type": "hypothesis",
+      "typeVersion": 1,
+      "title": "潮水会退",
+      "data": { "statement": "潮水每天退两次", "scope": "近岸", "testable": true, "variables": [] },
+      "source": { "origin": "human", "author": "lin" },
+      "version": 1,
+      "createdAt": 1699999004000,
+      "updatedAt": 1700000009000,
+      "author": "lin"
+    },
+    {
+      "id": "obj-note-target",
+      "kind": "native",
+      "type": "text",
+      "typeVersion": 1,
+      "title": "潮汐表",
+      "data": { "text": "农历初三 大潮" },
+      "source": { "origin": "human", "author": "lin" },
+      "version": 1,
+      "createdAt": 1699999005000,
+      "updatedAt": 1700000006000,
+      "author": "lin"
+    }
+  ],
+  "relations": [
+    {
+      "id": "rel-1",
+      "source": "obj-char-1",
+      "target": "obj-event-1",
+      "kind": "参与",
+      "status": "confirmed",
+      "createdAt": 1700000008000,
+      "author": "agent-1"
+    },
+    {
+      "id": "rel-2",
+      "source": "obj-hyp-1",
+      "target": "obj-text-1",
+      "kind": "支持",
+      "status": "confirmed",
+      "basis": "正文里写到了",
+      "createdAt": 1700000009000,
+      "author": "lin"
+    }
+  ],
+  "resources": [],
+  "activities": [],
+  "audit": [
+    {
+      "id": "audit-1",
+      "at": 1700000009500,
+      "actor": "lin",
+      "actorKind": "human",
+      "action": "apply",
+      "target": { "kind": "object", "id": "obj-text-1" }
+    }
+  ]
+}
