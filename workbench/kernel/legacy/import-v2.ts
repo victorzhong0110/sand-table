@@ -23,6 +23,7 @@ import {
   type Db,
 } from "../db.ts";
 import { newId } from "../ids.ts";
+import { markFrameCoords } from "../frame-coords.ts";
 import { createRegistry, PackSpecError, type Registry } from "../registry.ts";
 import type { Appearance, ExternalLocator, ObjectSource } from "../types.ts";
 import {
@@ -1223,6 +1224,9 @@ function finalize(ctx: Ctx, workspace: V2Workspace): void {
     setMeta(ctx.db, "created_at", String(workspace.createdAt));
   setMeta(ctx.db, "revision", String(IMPORT_REV));
   setMeta(ctx.db, "imported_from", `workspace.json@${workspace.revision}`);
+  /* 记下坐标口径：框内展示写的是相对父框左上角的坐标。
+     以后要迁移或核对坐标，靠这个标记认得出是这一版导入器写的。 */
+  markFrameCoords(ctx.db);
   ctx.db
     .prepare(
       "INSERT INTO audit (at, actor, actor_kind, action, history_id, detail) VALUES (?, 'system', 'system', 'import', NULL, ?)",
