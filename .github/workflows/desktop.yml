@@ -38,7 +38,7 @@ jobs:
         shell: pwsh
         run: |
           $exe = Get-ChildItem desktop/dist/*-portable.exe | Select-Object -First 1
-          node desktop/scripts/smoke.mjs --executable $exe.FullName
+          node desktop/scripts/portable-smoke.mjs --executable $exe.FullName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         if: always()
@@ -47,4 +47,4 @@ jobs:
           path: |
             desktop/dist/*-setup.exe
             desktop/dist/*-portable.exe
-            desktop/dist/smoke/*.png
+            desktop/dist/smoke/**/*.png

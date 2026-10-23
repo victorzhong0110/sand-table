@@ -22,6 +22,7 @@ const workbenchRoot =
   workbenchArg === -1 ? undefined : resolve(process.argv[workbenchArg + 1]);
 
 mkdirSync(outputDir, { recursive: true });
+mkdirSync(join(outputDir, "user"), { recursive: true, mode: 0o700 });
 // 会话文件要求目录只有本人可读写。
 mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
 

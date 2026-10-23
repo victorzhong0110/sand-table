@@ -9,8 +9,11 @@ const { spawn } = require("node:child_process");
 const { existsSync, mkdirSync } = require("node:fs");
 const path = require("node:path");
 const { persistMcpRuntime } = require("./mcp-runtime.cjs");
-if (process.env.SAND_DESKTOP_USER_DATA)
-  app.setPath("userData", path.resolve(process.env.SAND_DESKTOP_USER_DATA));
+if (process.env.SAND_DESKTOP_USER_DATA) {
+  const userData = path.resolve(process.env.SAND_DESKTOP_USER_DATA);
+  mkdirSync(userData, { recursive: true, mode: 0o700 });
+  app.setPath("userData", userData);
+}
 
 const isPackaged = app.isPackaged;
 // 打包后工作台在 resources/workbench，开发时在仓库的 workbench/。

@@ -1,0 +1,125 @@
+import { chromium } from "playwright";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, existsSync } from "node:fs";
+import { once } from "node:events";
+import { createServer } from "node:net";
+import { resolve, join } from "node:path";
+import assert from "node:assert/strict";
+
+const index = process.argv.indexOf("--executable");
+if (index < 0) throw Error("需要 --executable 指定真实便携包。");
+const executable = resolve(process.argv[index + 1]);
+const output = resolve("desktop/dist/smoke/portable");
+mkdirSync(join(output, "user"), { recursive: true });
+const probe = createServer();
+probe.listen(0, "127.0.0.1");
+await once(probe, "listening");
+const port = probe.address().port;
+await new Promise((r) => probe.close(r));
+// NSIS 启动器不会转交 Playwright 的调试管道句柄，改用真实应用的本机 CDP 端口。
+const child = spawn(executable, [`--remote-debugging-port=${port}`], {
+  env: {
+    ...process.env,
+    SAND_DESKTOP_USER_DATA: join(output, "user"),
+    SAND_WORKSPACE_DIR: join(output, "workspaces"),
+  },
+  stdio: ["ignore", "pipe", "pipe"],
+  windowsHide: true,
+});
+let browser, entry;
+let startupError;
+child.on("error", (error) => {
+  startupError = error;
+});
+child.stdout.resume();
+child.stderr.resume();
+try {
+  const end = Date.now() + 90000;
+  let ws;
+  while (Date.now() < end) {
+    if (startupError) throw startupError;
+    try {
+      const r = await fetch(`http://127.0.0.1:${port}/json/version`);
+      if (r.ok) {
+        ws = (await r.json()).webSocketDebuggerUrl;
+        break;
+      }
+    } catch {}
+    if (child.exitCode !== null)
+      throw Error(`便携启动器提前退出：${child.exitCode}`);
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  assert.ok(ws, "便携窗口未开放调试端口，未能完成真实窗口验收。");
+  browser = await chromium.connectOverCDP(ws);
+  const context = browser.contexts()[0];
+  let page;
+  for (let i = 0; i < 120; i++) {
+    page = context
+      .pages()
+      .find((p) => /^http:\/\/127\.0\.0\.1:\d+/.test(p.url()));
+    if (page) break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  assert.ok(page, "便携窗口没有打开本地工作台");
+  const frame = page.frameLocator("iframe");
+  await frame.locator(".canvas").waitFor({ timeout: 30000 });
+  const bootstrap = await page.evaluate(async () => {
+    const session = await (
+      await fetch("/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      })
+    ).json();
+    return (
+      await fetch("/bootstrap", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Sand-Token": session.token,
+        },
+        body: "{}",
+      })
+    ).json();
+  });
+  entry = JSON.parse(bootstrap.config.json).mcpServers["sand-table"];
+  assert.equal(entry.env.ELECTRON_RUN_AS_NODE, "1");
+  assert.ok(
+    entry.command.includes("mcp-runtime"),
+    "便携配置必须指向持久运行时",
+  );
+  assert.ok(existsSync(entry.command) && existsSync(entry.args[1]));
+  await page.screenshot({ path: join(output, "portable-window.png") });
+  const session = await browser.newBrowserCDPSession();
+  await session.send("Browser.close").catch(() => {});
+  await Promise.race([
+    once(child, "exit"),
+    new Promise((r) => setTimeout(r, 10000)),
+  ]);
+  const runtime = spawnSync(entry.command, ["--version"], {
+    env: { ...process.env, ...entry.env },
+    encoding: "utf8",
+    timeout: 15000,
+    windowsHide: true,
+  });
+  assert.equal(
+    runtime.status,
+    0,
+    runtime.stderr || String(runtime.error || ""),
+  );
+  assert.match(runtime.stdout, /^v\d+/);
+  assert.ok(existsSync(entry.args[1]));
+  console.log(
+    "PORTABLE WINDOWS PASSED: actual launcher/window, persistent MCP command and bridge after exit.",
+  );
+} finally {
+  await browser?.close().catch(() => {});
+  if (child.exitCode === null) {
+    if (process.platform === "win32")
+      spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        windowsHide: true,
+        stdio: "ignore",
+      });
+    else child.kill();
+  }
+}
