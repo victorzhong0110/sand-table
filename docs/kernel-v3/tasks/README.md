@@ -27,6 +27,8 @@
 
 ## 阶段与任务
 
+所有者要求约 80% 的实现交给 minimax。T15 与 T24 仍由 grok 做。
+
 ### Phase 0：让现有版本能用（与 Phase 1 并行）
 
 | 卡 | 标题 | 执行 | 依赖 | issue |
@@ -48,7 +50,7 @@
 | [T14](T14-history-ops.md) | 撤销、重做、跳转与容量裁剪 | grok | T13 |
 | [T15](T15-read-api.md) | 读接口 | grok | T14 |
 | [T16](T16-architecture-tests.md) | 架构测试 | minimax | T10 |
-| [T17](T17-import-v2.md) | v2 工作空间导入器 | grok | T12、T13 |
+| [T17](T17-import-v2.md) | v2 工作空间导入器 | minimax | T12、T13 |
 
 T12 与 T13 可以并行；T16 可以在 T10 合并后随时做。
 
@@ -56,9 +58,9 @@ T12 与 T13 可以并行；T16 可以在 T10 合并后随时做。
 
 | 卡 | 标题 | 执行 | 依赖 |
 |---|---|---|---|
-| [T20](T20-tools-v3.md) | v3 工具面（8 个核心 + 界面专用） | grok | T15、T17 |
-| [T21](T21-ui-switch.md) | 界面数据层切到 v3 | grok | T20 |
-| [T22](T22-code-pack.md) | 代码包迁移 | grok | T20 |
+| [T20](T20-tools-v3.md) | v3 工具面（8 个核心 + 界面专用） | minimax | T15、T17 |
+| [T21](T21-ui-switch.md) | 界面数据层切到 v3 | minimax | T20 |
+| [T22](T22-code-pack.md) | 代码包迁移 | minimax | T20 |
 | [T23](T23-research-folder-dsh.md) | 科研包工具、文件夹连接器、DSH 插件迁移 | minimax | T20 |
 | [T24](T24-switch-default.md) | 默认切到 v3，删除 v2 内核 | grok | T21、T22、T23，以及你用 `SAND_KERNEL=v3` 实际使用后同意 |
 
