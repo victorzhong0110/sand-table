@@ -311,7 +311,7 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
 | `app_history` | 同 `sand_history` | 人的撤销、重做、跳转 |
 | `app_view` | `{ action: "get" \| "select" \| "camera" \| "navigate", viewId, ... }` | 视角、选区、进入或返回白板；不进历史 |
 | `app_asset` | `{ action: "upload", name, mime, base64 }` / `{ action: "read", sha256 }` | 上传返回 sha256；建 `base.media` 对象由界面再调 `app_edit` |
-| `app_workspace` | `{ action: "list" \| "create" \| "switch" \| "rename" \| "delete", ... }` | 管理工作空间 |
+| `app_workspace` | `{ action: "list" \| "create" \| "switch" \| "rename" \| "delete" \| "export" \| "import", ... }` | 管理工作空间。`export`、`import` 由 T25 实现，T20 只做前五个 |
 | `app_pack` | `{ action: "export", id }` | 导出数据包；导入走 `app_edit` 的 `pack.import` |
 | `code_decide` | `{ proposalId, decision: "approve" \| "reject", digest }` | 代码包注册；人批准或拒绝提案 |
 

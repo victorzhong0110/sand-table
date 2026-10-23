@@ -33,7 +33,7 @@ export type TypeSpec = {
     view?: string; // 自定义视图名，只有内置包能用；缺省用通用视图（§5）
   };
   relationSlots?: RelationSlot[]; // 见 §4
-  migrations?: { from: number; migrate: (data: Record<string, unknown>) => Record<string, unknown> }[]; // 只有内置包能用
+  migrations?: { from: number; migrate: (data: Record<string, unknown>) => Record<string, unknown> }[]; // 只有内置包能用；何时执行见 T26
 };
 
 export type RelationKindSpec = {
@@ -77,7 +77,7 @@ export type PackSpec = {
 
 1. 顶层是 `{"type": "object", "properties": {...}, "additionalProperties": false}`。
 2. **内容字段不写 `default`。** 没填就是字段不存在。只有配置类枚举可以有默认值（例如图表的 `kind`），写在 `x-sand-default` 里，由界面在新建时填入，校验器不使用它。
-3. **不在数据里存其他对象的 id。** 指向对象的语义一律用关系槽（§4）。
+3. **不在数据里存其他对象的 id。** 指向对象的语义一律用关系槽（§4）。唯一例外是 Markdown 正文里的对象链接 `sand://object/<id>`：它是正文的一部分，写入正文时由界面在同一批命令里同步维护 `base.mentions` 关系（正文 → 被链接对象），对象被删除后链接显示为失效（T43）。
 4. 能用 `required` 的地方慎用：创作草稿允许缺项。只把“没有它这个对象就没有意义”的字段设为必填（例如人物的 `name` 也**不**必填，标题已经承担名字的作用）。
 5. 数字字段写明 `type: "number"` 或 `"integer"`，需要时加 `minimum`；不要用字符串存数字。
 6. 长文本用 `{"type": "string", "x-sand-widget": "markdown"}`，存 Markdown。
@@ -293,3 +293,18 @@ subscribeBindings 提供可取消订阅，源对象/关系变化、删除、包�
 ### 派生身份策略
 
 PackSpec.derivedIdPrefix 只允许内置包声明，非空、以冒号结尾、不能与其他内置包前缀重叠；Registry.getPack 返回它。代码包声明 code:。内部 object.upsert_derived 命令携带 packId：注册表必须存在且为 builtin，对象类型属于同包，新建ID匹配该前缀。更新只允许同包原有derived对象；旧导入ID可不匹配新前缀，但必须核实稳定 external URI/fragment 与原对象一致，不覆盖其他来源或其他目标。T17必须为旧派生对象保留外部定位，T22刷新通过定位复用原ID。
+
+## 10. 锚点格式
+
+精确引用、批注、媒体定位共用 `ExternalLocator`（`01-data-model.md` §5），片段写在 `fragment` 里，格式固定如下。多个键用 `;` 分隔，值里的 `;` 和 `=` 用百分号编码。
+
+| 资源 | `fragment` 格式 | 说明 |
+|---|---|---|
+| 文字（Markdown 正文、代码、纯文本） | `quote=<原文>;prefix=<前 32 字>;suffix=<后 32 字>` | 按原文和上下文重新定位，不依赖字符偏移 |
+| PDF | `page=<页码>` 或 `page=<页码>;rect=<x>,<y>,<w>,<h>` | `rect` 是相对页面宽高的 0–1 小数 |
+| 图片 | `rect=<x>,<y>,<w>,<h>` | 相对图片宽高的 0–1 小数 |
+| 音频、视频 | `t=<开始秒>` 或 `t=<开始秒>,<结束秒>` | 与 Media Fragments 的写法一致 |
+| 表格 | `rows=<行 key 列表>;cols=<列 key 列表>` | 用行、列的 key，不用下标 |
+| 代码文件 | `lines=<起始行>-<结束行>` | 配合 `version`（提交号）和 `fingerprint` |
+
+`fingerprint` 记录建锚时源内容的指纹。源内容变了，先按 `quote`、`prefix`、`suffix` 重新定位；找不到就把引用标为失效并给出原因，不悄悄挂到别处（T53）。

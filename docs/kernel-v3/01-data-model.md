@@ -107,7 +107,7 @@ CREATE TABLE presentations (
   id          TEXT PRIMARY KEY,
   board_id    TEXT NOT NULL REFERENCES objects(id),
   object_id   TEXT NOT NULL REFERENCES objects(id),
-  parent_id   TEXT REFERENCES presentations(id),   -- 所在框（base.frame 的展示）；NULL 表示直接在白板上
+  parent_id   TEXT REFERENCES presentations(id),   -- 所在框（base.frame 的展示）；NULL 表示直接在白板上。非 NULL 时 x、y 是相对父框左上角的坐标
   x           REAL NOT NULL,
   y           REAL NOT NULL,
   width       REAL NOT NULL CHECK (width  > 0),
@@ -408,7 +408,7 @@ type Change = {
 | `presentations[]` 代码投影（`objectId` 指向代码条目） | 建 `code.file` 或 `code.symbol` 占位对象，id 保持原代码条目 id，`source.origin = "derived"`；代码包下次刷新时按同一 id 更新 |
 | `spaceLinks[]` | `relations`，两端是展示所绑定的对象；`related`→`base.related`，`depends-on`→`base.depends_on`，`supports`→`base.supports`，`compares`→`base.compares`，`belongs-to`→`base.belongs_to`；`description` 存进 `basis` |
 | `relations[]`（v2 对象关系） | `relations`，`kind` 按 §10.1 改名 |
-| `groups[]` | 每个组一个 `base.frame` 对象 + 一个包住组内展示的框展示，组内展示的 `parent_id` 指向它 |
+| `groups[]` | 每个组一个 `base.frame` 对象 + 一个包住组内展示的框展示，组内展示的 `parent_id` 指向它，`x`、`y` 换算成相对框左上角的坐标 |
 | `notes{}` | 每条备注一个 `base.note` 对象，放在目标旁边，并建 `base.about` 关系 |
 | `assets[]` | 字节写入 `blobs/`，每个附件一个 `base.media` 对象 |
 | `intents` / `proposals` / `validations` | `code.intent` / `code.proposal` / `code.validation` 对象，原数据放进 `data`；超过 1 MB 的基线文件内容写入 `blobs/` 并以 sha256 引用 |
