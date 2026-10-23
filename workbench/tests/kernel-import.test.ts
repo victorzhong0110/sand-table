@@ -1257,6 +1257,75 @@ test("库里已经有不合格的组件包：跳过它并给出提示，工作�
   }
 });
 
+test("软删除坏包用新修订号：墓碑和 meta.revision 一起推进，没有坏包时修订号不动", () => {
+  const s = scene("full.json");
+  const saved = process.env.SAND_KERNEL;
+  // 这条修复不在 SAND_KERNEL=v3 开关后面：不设它行为也一样。
+  delete process.env.SAND_KERNEL;
+  try {
+    const first = openWorkspace(s.root, "demo", s.registry);
+    assert.ok(first.imported, "第一次是导入");
+    const before = Number(getMeta(first.db, "revision"));
+    assert.equal(before, 2, "导入算一次修订，内置包同步再算一次");
+    first.db.prepare("UPDATE packs SET manifest = ? WHERE id = ?").run(
+      JSON.stringify({
+        format: "sand-table-pack",
+        formatVersion: 2,
+        id: "my-pack",
+        version: 1,
+      }),
+      "my-pack",
+    );
+    first.db.close();
+
+    // 换一个干净的注册表，模拟重新打开这个工作空间。
+    const registry = createRegistry();
+    for (const pack of builtinPacks) registry.registerPack(pack, "builtin");
+    const second = openWorkspace(s.root, "demo", registry);
+    assert.equal(second.imported, null, "库在就不再导入");
+    assert.equal(second.skippedPacks.length, 1, "坏包被跳过了");
+
+    // (a) 墓碑的修订号 = 打开前的修订号 + 1
+    const row = second.db
+      .prepare("SELECT deleted_rev, rev FROM packs WHERE id = ?")
+      .get("my-pack") as
+      { deleted_rev: number | null; rev: number } | undefined;
+    assert.ok(row, "坏包这一行还留在库里");
+    assert.equal(
+      row!.deleted_rev,
+      before + 1,
+      "墓碑用的是新修订号，停在旧修订号的客户端才看得到这次删除",
+    );
+    assert.equal(row!.rev, before + 1, "这一行的修订号也是新修订号");
+    const live = second.db
+      .prepare("SELECT id FROM packs WHERE id = ? AND deleted_rev IS NULL")
+      .get("my-pack");
+    assert.equal(live, undefined, "坏包已经软删除，syncPacks 不会装入它");
+
+    // (b) meta.revision 同步推进到同一个值
+    assert.equal(
+      Number(getMeta(second.db, "revision")),
+      before + 1,
+      "修订号和墓碑一起推进",
+    );
+
+    // 没有坏包时不该涨修订号：再打开一次，修订号不动。
+    second.db.close();
+    const third = openWorkspace(s.root, "demo", registry);
+    assert.equal(third.skippedPacks.length, 0, "没有坏包了");
+    assert.equal(
+      Number(getMeta(third.db, "revision")),
+      before + 1,
+      "打开工作空间不会每次都涨修订号",
+    );
+    third.db.close();
+  } finally {
+    if (saved === undefined) delete process.env.SAND_KERNEL;
+    else process.env.SAND_KERNEL = saved;
+    s.close();
+  }
+});
+
 test("内容对象的 id 和分区 id 撞车：对象照常导入，报告写清冲突，展示不被改绑", () => {
   const s = sceneFrom({
     schemaVersion: 2,
@@ -1328,6 +1397,156 @@ test("内容对象的 id 和分区 id 撞车：对象照常导入，报告写清
           item.reason.includes("重名"),
       ),
       "报告里写清了 id 冲突",
+    );
+    db.close();
+  } finally {
+    s.close();
+  }
+});
+
+test("内容对象的 id 同时占了分区 id 和它的备用名：分区另起 id，首页和分区入口都指着分区自己", () => {
+  const s = sceneFrom({
+    schemaVersion: 2,
+    id: "collide-twice",
+    title: "撞两次",
+    revision: 1,
+    boards: [
+      {
+        id: "board-1",
+        title: "板",
+        spaces: [
+          { id: "overview", title: "总览" },
+          { id: "child", title: "子分区", parentId: "overview" },
+        ],
+        presentations: [
+          {
+            id: "p-to-overview",
+            spaceId: "child",
+            type: "board",
+            title: "回总览",
+            data: { spaceId: "overview" },
+            rect: { x: 10, y: 10, width: 200, height: 120, pinned: false },
+            updatedAt: 1,
+            author: "lin",
+          },
+          {
+            id: "p-text",
+            spaceId: "child",
+            type: "text",
+            binding: { kind: "object", objectId: "overview" },
+            objectId: "overview",
+            title: "正文",
+            data: {},
+            rect: { x: 300, y: 10, width: 200, height: 120, pinned: false },
+            updatedAt: 1,
+            author: "lin",
+          },
+        ],
+        groups: [],
+        spaceLinks: [],
+        assets: [],
+        guides: [],
+        intents: [],
+        proposals: [],
+        validations: [],
+      },
+    ],
+    objects: [
+      {
+        id: "overview",
+        kind: "native",
+        type: "text",
+        title: "正文",
+        data: { text: "这是正文，不是分区" },
+        version: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        author: "lin",
+      },
+      {
+        id: "board-1:overview",
+        kind: "native",
+        type: "text",
+        title: "占备用名的正文",
+        data: { text: "这个正文占了分区改名的备用名" },
+        version: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        author: "lin",
+      },
+    ],
+    relations: [],
+  });
+  try {
+    const { db, imported } = openWorkspace(s.root, "mini", s.registry);
+
+    // —— 分区对象：两个 id 都被占了，只能另起一个 ——
+    const boards = objectsOf(db, "base.board");
+    assert.equal(boards.length, 2, "两个分区都导进来了");
+    const root = boards.find((b) => b.title === "总览");
+    assert.ok(root, "总览分区导进来了");
+    assert.notEqual(root!.id, "overview", "分区没有占着内容对象的 id");
+    assert.notEqual(
+      root!.id,
+      "board-1:overview",
+      "备用名也被内容对象占了，分区不能用它",
+    );
+    assert.match(
+      root!.id,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      "分区用的是新生成的 id",
+    );
+
+    // —— 首页指着分区自己，不是内容对象 ——
+    assert.equal(
+      getMeta(db, "home_board_id"),
+      root!.id,
+      "首页是分区对象，不是占着 id 的内容对象",
+    );
+    assert.notEqual(getMeta(db, "home_board_id"), "overview");
+    assert.notEqual(getMeta(db, "home_board_id"), "board-1:overview");
+
+    // —— 内容对象照常导入，没有被丢弃 ——
+    const text = objectsOf(db).find((o) => o.id === "overview");
+    assert.ok(text, "占着分区 id 的内容对象没有被丢弃");
+    assert.equal(text!.type, "base.note");
+    assert.equal(text!.data.body, "这是正文，不是分区");
+    const holder = objectsOf(db).find((o) => o.id === "board-1:overview");
+    assert.ok(holder, "占着备用名的内容对象也没有被丢弃");
+    assert.equal(holder!.data.body, "这个正文占了分区改名的备用名");
+
+    // —— 分区自己的展示绑在分区对象上 ——
+    const link = presentationsOf(db).find((p) => p.id === "p-to-overview");
+    assert.ok(link, "分区入口的展示导进来了");
+    assert.equal(link!.objectId, root!.id, "展示绑在分区对象上");
+    assert.notEqual(link!.objectId, "overview", "没有绑到占着 id 的内容对象上");
+    assert.notEqual(link!.objectId, "board-1:overview");
+    assert.equal(link!.boardId, "child", "展示仍挂在它原来所在的分区上");
+
+    // —— 绑在内容对象上的展示没有被改绑 ——
+    const bound = presentationsOf(db).find((p) => p.id === "p-text");
+    assert.ok(bound, "绑内容对象的展示也导进来了");
+    assert.equal(
+      bound!.objectId,
+      "overview",
+      "绑内容对象的展示没有被改绑到分区上",
+    );
+
+    // —— 报告里看得见这次冲突与改名 ——
+    const warnings = imported!.warnings.map((w) => `${w.what} ${w.reason}`);
+    assert.ok(
+      warnings.some(
+        (line) =>
+          line.includes("分区") &&
+          line.includes("overview") &&
+          line.includes("重名") &&
+          line.includes(root!.id),
+      ),
+      "报告里写清分区改用了哪个 id",
+    );
+    assert.ok(
+      warnings.some((line) => line.includes("重复") && line.includes(root!.id)),
+      "报告里写清备用名被占了这件事",
     );
     db.close();
   } finally {

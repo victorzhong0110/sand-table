@@ -342,7 +342,13 @@ function writeAll(ctx: Ctx, workspace: V2Workspace): void {
   });
 }
 
-/** v2 的每个分区变成一个 base.board 对象，id 不变。 */
+/**
+ * v2 的每个分区变成一个 base.board 对象，id 不变。
+ *
+ * 分区的 id 撞上别的对象时分区改名；改出来的名字再撞上，就由 insertObject
+ * 另起一个 id。所以最后用的是 insertObject 返回的那个 id，索引里也记它：
+ * 首页和分区入口的展示都得指着分区自己，不能指到占名字的内容对象上。
+ */
 function importSpaces(ctx: Ctx, workspace: V2Workspace): void {
   workspace.boards.forEach((board, index) => {
     for (const space of board.spaces) {
@@ -355,20 +361,13 @@ function importSpaces(ctx: Ctx, workspace: V2Workspace): void {
       }
       const key = spaceKey(index, space.id);
       if (ctx.spaceMap.has(key)) continue;
-      let id = space.id;
-      if (ctx.objectIds.has(id)) {
-        // 分区 id 已经被别的对象占了：分区改名，占着 id 的那个对象保留原 id。
-        id = `${board.id}:${space.id}`;
-        const holder = ctx.spaceObjectIds.has(space.id)
-          ? `另一块白板的分区「${space.id}」`
-          : `内容对象「${ctx.objectTitle.get(space.id) ?? space.id}」`;
-        ctx.report.warnings.push({
-          what: `分区「${space.title}」`,
-          reason: `它的 id「${space.id}」和${holder}重名，分区改用「${id}」；占着原 id 的对象保留原 id，指向它的展示不会被改绑到别的对象上。`,
-        });
-      }
-      insertObject(ctx, {
-        id,
+      const wanted = space.id;
+      // 分区 id 已经被别的对象占了：分区改名，占着 id 的那个对象保留原 id。
+      const planned = ctx.objectIds.has(wanted)
+        ? `${board.id}:${wanted}`
+        : wanted;
+      const id = insertObject(ctx, {
+        id: planned,
         type: "base.board",
         title: space.title,
         data: {},
@@ -376,6 +375,15 @@ function importSpaces(ctx: Ctx, workspace: V2Workspace): void {
         updatedAt: workspace.updatedAt,
         author: "v2",
       });
+      if (id !== wanted) {
+        const holder = ctx.spaceObjectIds.has(wanted)
+          ? `另一块白板的分区「${wanted}」`
+          : `内容对象「${ctx.objectTitle.get(wanted) ?? wanted}」`;
+        ctx.report.warnings.push({
+          what: `分区「${space.title}」`,
+          reason: `它的 id「${wanted}」和${holder}重名，分区改用「${id}」；占着原 id 的对象保留原 id，指向它的展示不会被改绑到别的对象上。`,
+        });
+      }
       ctx.spaceObjectIds.add(id);
       ctx.spaceMap.set(key, id);
     }

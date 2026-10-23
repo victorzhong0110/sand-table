@@ -6,7 +6,13 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { getMeta, openWorkspaceDb, type Db } from "./db.ts";
+import {
+  getMeta,
+  openWorkspaceDb,
+  setMeta,
+  transaction,
+  type Db,
+} from "./db.ts";
 import { importV2, type ImportReport } from "./legacy/import-v2.ts";
 import { syncPacks } from "./packs-state.ts";
 import { createRegistry, PackSpecError, type Registry } from "./registry.ts";
@@ -78,6 +84,9 @@ export function openWorkspace(
  * syncPacks 装入每个数据包时都要过一遍清单校验，不合格就抛错，于是这个
  * 工作空间以后每次打开都会失败。这里先把不合格的包跳过（软删除这一行，
  * 清单原文还留在库里），再让 syncPacks 装入其余的包。
+ *
+ * 软删除是一次写入，要占一个新修订号：停在旧修订号的客户端只有看到
+ * 修订号往前走才会来拉这次删除。修订号和墓碑在同一个事务里推进。
  */
 function skipInvalidPacks(
   db: Db,
@@ -93,25 +102,33 @@ function skipInvalidPacks(
   const staged = createRegistry();
   for (const pack of registry.listPacks())
     staged.registerPack(pack.spec, pack.kind);
-  const rev = Number(getMeta(db, "revision") ?? "0") || 0;
-  const skipped: SkippedPack[] = [];
+  const broken: { id: string; problem: string }[] = [];
   for (const row of rows) {
     const problem = manifestProblem(row.manifest);
     if (problem) {
-      skipped.push(skipPack(db, row.id, rev, problem));
+      broken.push({ id: row.id, problem });
       continue;
     }
     try {
       staged.registerPack(JSON.parse(row.manifest!), "data");
     } catch (error) {
-      skipped.push(skipPack(db, row.id, rev, problemOf(error)));
+      broken.push({ id: row.id, problem: problemOf(error) });
     }
   }
-  if (skipped.length)
+  // 没有坏包就不动修订号：打开工作空间不该每次都涨修订号。
+  if (!broken.length) return [];
+  const rev = Number(getMeta(db, "revision") ?? "0") || 0;
+  const nextRev = rev + 1;
+  return transaction(db, () => {
+    const skipped = broken.map((item) =>
+      skipPack(db, item.id, nextRev, item.problem),
+    );
+    setMeta(db, "revision", String(nextRev));
     db.prepare(
       "INSERT INTO audit (at, actor, actor_kind, action, history_id, detail) VALUES (?, 'import', 'human', 'pack', NULL, ?)",
     ).run(now(), JSON.stringify({ skipped }));
-  return skipped;
+    return skipped;
+  });
 }
 
 /** 清单本身的问题：不是合法 JSON，或没有清单。 */
@@ -131,7 +148,12 @@ function problemOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** 跳过这个包：软删除这一行，syncPacks 就不会再装入它。 */
+/**
+ * 跳过这个包：软删除这一行，syncPacks 就不会再装入它。
+ *
+ * rev 是这次删除占的修订号，墓碑和这一行的修订号都记它，
+ * 客户端按 rev > N 拉的时候才看得到这次删除。
+ */
 function skipPack(
   db: Db,
   id: string,
