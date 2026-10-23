@@ -55,15 +55,13 @@ export function openWorkspace(
   const jsonFile = join(dir, "workspace.json");
   if (existsSync(dbFile)) {
     const db = openWorkspaceDb(dbFile, { create: false });
-    const skippedPacks = skipInvalidPacks(db, registry, now);
-    syncPacks(db, registry, IMPORT_ACTOR);
+    const skippedPacks = prepareOpen(db, registry, now);
     return { db, imported: null, skippedPacks };
   }
   if (existsSync(jsonFile)) {
     const report = importV2(jsonFile, dbFile, registry, now);
     const db = openWorkspaceDb(dbFile, { create: false });
-    const skippedPacks = skipInvalidPacks(db, registry, now);
-    syncPacks(db, registry, IMPORT_ACTOR);
+    const skippedPacks = prepareOpen(db, registry, now);
     return { db, imported: report, skippedPacks };
   }
   mkdirSync(dir, { recursive: true });
@@ -73,9 +71,31 @@ export function openWorkspace(
     ...(options?.title ? { title: options.title } : {}),
     now,
   });
-  const skippedPacks = skipInvalidPacks(db, registry, now);
-  syncPacks(db, registry, IMPORT_ACTOR);
+  const skippedPacks = prepareOpen(db, registry, now);
   return { db, imported: null, skippedPacks };
+}
+
+/**
+ * 跳过不合格的包，再同步内置包。
+ * 中途失败要把连接关掉，否则这次打开占着文件，调用方重试也进不去。
+ */
+function prepareOpen(
+  db: Db,
+  registry: Registry,
+  now: () => number,
+): SkippedPack[] {
+  try {
+    const skippedPacks = skipInvalidPacks(db, registry, now);
+    syncPacks(db, registry, IMPORT_ACTOR);
+    return skippedPacks;
+  } catch (error) {
+    try {
+      db.close();
+    } catch {
+      /* 仍抛出原来的错误 */
+    }
+    throw error;
+  }
 }
 
 /**
@@ -117,9 +137,16 @@ function skipInvalidPacks(
   }
   // 没有坏包就不动修订号：打开工作空间不该每次都涨修订号。
   if (!broken.length) return [];
-  const rev = Number(getMeta(db, "revision") ?? "0") || 0;
-  const nextRev = rev + 1;
   return transaction(db, () => {
+    // 修订号在事务里读。事务外读到的值可能已经被别的写入推进；
+    // 非整数也不能当成 0，否则会把修订号写小，客户端漏掉中间的变更。
+    const raw = getMeta(db, "revision") ?? "0";
+    const rev = Number(raw);
+    if (!Number.isInteger(rev) || rev < 0)
+      throw new Error(
+        `这个工作空间的修订号「${raw}」无法识别，已停止打开。请保留 workspace.db，不要删掉它后重新导入。`,
+      );
+    const nextRev = rev + 1;
     const skipped = broken.map((item) =>
       skipPack(db, item.id, nextRev, item.problem),
     );

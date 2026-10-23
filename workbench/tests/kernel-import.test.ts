@@ -1326,6 +1326,49 @@ test("软删除坏包用新修订号：墓碑和 meta.revision 一起推进，�
   }
 });
 
+test("修订号损坏时不软删坏包，也不把修订号改小", () => {
+  const s = scene("full.json");
+  try {
+    const first = openWorkspace(s.root, "demo", s.registry);
+    assert.ok(first.imported, "第一次是导入");
+    first.db.prepare("UPDATE packs SET manifest = ? WHERE id = ?").run(
+      JSON.stringify({
+        format: "sand-table-pack",
+        formatVersion: 2,
+        id: "my-pack",
+        version: 1,
+      }),
+      "my-pack",
+    );
+    first.db
+      .prepare("UPDATE meta SET value = ? WHERE key = 'revision'")
+      .run("不是数字");
+    first.db.close();
+
+    const registry = createRegistry();
+    for (const pack of builtinPacks) registry.registerPack(pack, "builtin");
+    assert.throws(
+      () => openWorkspace(s.root, "demo", registry),
+      (error: Error) => {
+        assert.match(error.message, /修订号/);
+        assert.match(error.message, /无法识别/);
+        assert.match(error.message, /请保留 workspace\.db/);
+        return true;
+      },
+    );
+
+    const db = openWorkspaceDb(join(s.dir, "workspace.db"), { create: false });
+    const row = db
+      .prepare("SELECT deleted_rev FROM packs WHERE id = ?")
+      .get("my-pack") as { deleted_rev: number | null };
+    assert.equal(row.deleted_rev, null, "坏包没有被软删除");
+    assert.equal(getMeta(db, "revision"), "不是数字", "修订号没有被改写");
+    db.close();
+  } finally {
+    s.close();
+  }
+});
+
 test("内容对象的 id 和分区 id 撞车：对象照常导入，报告写清冲突，展示不被改绑", () => {
   const s = sceneFrom({
     schemaVersion: 2,
