@@ -39,6 +39,33 @@ export {
   parsePublicCommands,
 } from "./commands.ts";
 export { historyList, jump, pruneHistory, redo, undo } from "./history.ts";
+export {
+  boardContents,
+  changesSince,
+  context,
+  listTypes,
+  query,
+  readObjects,
+  setActivity,
+  setView,
+  status,
+} from "./read.ts";
+export type {
+  ActivityInput,
+  BoardContents,
+  ChangesResult,
+  ChangesSinceResult,
+  ContextResult,
+  QueryFilter,
+  QueryRow,
+  ReadOptions,
+  ReadResult,
+  ResetResult,
+  StatusResult,
+  TypesResult,
+  ViewInput,
+} from "./read.ts";
+export { summarize } from "./text.ts";
 export { syncPacks, isPackEnabled } from "./packs-state.ts";
 export { createRegistry, PackSpecError } from "./registry.ts";
 export type { Registry } from "./registry.ts";
