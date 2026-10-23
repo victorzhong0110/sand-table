@@ -42,8 +42,12 @@ const note = (patch: Partial<TypeSpec> = {}): TypeSpec => ({
   ...patch,
 });
 
-function pack(patch: Partial<PackSpec> = {}): PackSpec {
+function pack(
+  patch: Partial<PackSpec> = {},
+): PackSpec & { format: "sand-table-pack"; formatVersion: 2 } {
   return {
+    format: "sand-table-pack",
+    formatVersion: 2,
     id: "demo",
     title: "示例",
     version: 1,
@@ -348,4 +352,45 @@ test("注册后外部修改不能改变声明和校验", () => {
   assert.throws(() => {
     r.getType("demo.note")!.title = "绕过";
   }, TypeError);
+});
+
+test("数据包必须有协议标记，模板命令必须完整且仅含公共操作", () => {
+  const r = createRegistry();
+  const manifest: Record<string, unknown> = { ...pack() };
+  delete manifest.format;
+  delete manifest.formatVersion;
+  assert.throws(() => r.registerPack(manifest, "data"), PackSpecError);
+  for (const command of [
+    { op: "unknown" },
+    { op: "object.create" },
+    { op: "presentation.create", boardId: "$board" },
+    { op: "object.upsert_derived", id: "demo:x" },
+  ])
+    assert.throws(
+      () =>
+        r.registerPack(
+          pack({
+            templates: [
+              { id: "demo.bad", title: "错误模板", commands: [command as any] },
+            ],
+          }),
+          "data",
+        ),
+      PackSpecError,
+    );
+  r.registerPack(
+    pack({
+      templates: [
+        {
+          id: "demo.good",
+          title: "新建便签",
+          commands: [
+            { op: "object.create", type: "demo.note", ref: "x" },
+            { op: "presentation.create", boardId: "$board", objectId: "@x" },
+          ],
+        },
+      ],
+    }),
+    "data",
+  );
 });

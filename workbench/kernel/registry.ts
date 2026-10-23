@@ -77,6 +77,13 @@ export function createRegistry(): Registry {
     PACK_SCHEMA,
   );
 
+  const validateDataManifest = new Ajv2020({
+    strict: true,
+    allErrors: true,
+  }).compile({
+    ...PACK_SCHEMA,
+    required: ["id", "title", "version", "format", "formatVersion"],
+  });
   function typesOf(spec: PackSpec) {
     return spec.types ?? [];
   }
@@ -118,10 +125,36 @@ export function createRegistry(): Registry {
       throw new PackSpecError([
         { path: "/kind", message: "包种类必须是 builtin 或 data。" },
       ]);
+    if (kind === "data" && !validateDataManifest(input))
+      throw new PackSpecError(
+        ajvErrorsToFieldErrors(validateDataManifest.errors, PACK_SCHEMA),
+      );
     const spec = copySpec(input as PackSpec);
     const problems = checkPack(spec, kind, taken(spec.id));
     const ajv = new Ajv2020({ strict: true, allErrors: true });
     for (const keyword of SCHEMA_KEYWORDS) ajv.addKeyword(keyword);
+    const prefix = (spec as PackSpec & { derivedIdPrefix?: string })
+      .derivedIdPrefix;
+    if (prefix !== undefined) {
+      if (kind !== "builtin" || !/^[a-z][a-z0-9_-]{0,40}:$/.test(prefix))
+        problems.push({
+          path: "/derivedIdPrefix",
+          message: "仅内置包可声明有效派生ID前缀。",
+        });
+      for (const pack of packs.values()) {
+        const other = (pack.spec as PackSpec & { derivedIdPrefix?: string })
+          .derivedIdPrefix;
+        if (
+          pack.spec.id !== spec.id &&
+          other &&
+          (prefix.startsWith(other) || other.startsWith(prefix))
+        )
+          problems.push({
+            path: "/derivedIdPrefix",
+            message: "派生ID前缀与已有包重叠。",
+          });
+      }
+    }
     const compiled = new Map<string, ValidateFunction>();
     for (const [index, type] of typesOf(spec).entries()) {
       if (!isSchemaRecord(type.schema)) continue;
