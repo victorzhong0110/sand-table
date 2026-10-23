@@ -266,7 +266,11 @@ function checkKernelImports(files: SourceFile[]): Violation[] {
 function checkPackImports(files: SourceFile[]): Violation[] {
   const violations: Violation[] = [];
   for (const file of files.filter(isPack)) {
-    const pack = file.path.split("/")[1] ?? "";
+    const segments = file.path.split("/");
+    const pack = segments[1] ?? "";
+    /* packs/index.ts 是内置包清单：它要把各个包收在一起，所以允许它导入
+       同级的包目录。包与包之间仍然不能互相导入。 */
+    const isList = segments.length === 2;
     for (const { spec, line } of importSpecifiers(file)) {
       if (!spec.startsWith(".")) {
         if (!spec.startsWith("node:"))
@@ -280,6 +284,7 @@ function checkPackImports(files: SourceFile[]): Violation[] {
       const resolved = resolveRelative(file.path, spec);
       if (resolved === "kernel/index.ts") continue;
       if (resolved.startsWith(`packs/${pack}/`)) continue;
+      if (isList && resolved.startsWith("packs/")) continue;
       violations.push({
         file: file.path,
         line,
@@ -451,6 +456,28 @@ test("自检：包不能依赖别的包或 v2 目录", () => {
       sample("packs/novel/y.ts", 'import { z } from "../../kernel/index.ts";'),
     ]),
     [],
+  );
+});
+
+test("自检：内置包清单能收各个包，包之间仍然不能互相导入", () => {
+  assert.deepEqual(
+    checkPackImports([
+      sample("packs/index.ts", 'import { a } from "./base/index.ts";'),
+      sample("packs/index.ts", 'import { b } from "../kernel/index.ts";'),
+    ]),
+    [],
+  );
+  assert.equal(
+    checkPackImports([
+      sample("packs/index.ts", 'import { c } from "../core/store.ts";'),
+    ]).length,
+    1,
+  );
+  assert.equal(
+    checkPackImports([
+      sample("packs/novel/index.ts", 'import { d } from "../base/index.ts";'),
+    ]).length,
+    1,
   );
 });
 
