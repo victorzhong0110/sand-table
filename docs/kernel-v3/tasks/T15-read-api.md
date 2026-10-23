@@ -36,7 +36,7 @@ export function status(db: Db, registry: Registry): StatusResult;              /
 export function listTypes(db: Db, registry: Registry, filter?: { types?: string[]; pack?: string }): TypesResult;
 export function query(db: Db, registry: Registry, filter: QueryFilter): { rows: QueryRow[]; nextCursor: string | null; total: number };
 export function readObjects(db: Db, registry: Registry, ids: string[], options: ReadOptions): ReadResult;
-export function boardContents(db: Db, boardId: string): { revision: number; board: ObjectRow; presentations: PresentationRow[]; objects: ObjectRow[]; relations: RelationRow[] };
+export function boardContents(db: Db, boardId: string): { revision: number; board: ObjectRow; presentations: PresentationRow[]; objects: ObjectRow[]; relations: RelationRow[]; settings: { key: string; value: unknown }[]; packs: { id: string; kind: string; version: number; enabled: boolean }[] };
 export function changesSince(db: Db, rev: number): ChangesResult | { reset: true; revision: number };
 export function context(db: Db, actor: Actor, viewId?: string): ContextResult;
 export function setActivity(db: Db, actor: Actor, input: ActivityInput, now: number): void;
@@ -73,3 +73,7 @@ export function setView(db: Db, input: { viewId: string; boardId?: string; camer
 7. 停用某个包后，它类型的对象 `typeAvailable` 为假，但仍能查到和读到。
 
 命令：`npm run format:check`、`npm run typecheck`、`npm test` 全部通过。
+
+
+## T07 补充验收
+首次加载/reset 包含此前持久化的 settings/packs；revision 和所有行来自同一只读事务快照。已有客户端能通过墓碑获知包/设置移除与撤销创建；不得先读新 revision 再读取更旧/更新的不一致内容。

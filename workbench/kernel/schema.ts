@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const MIGRATIONS: string[] = [
   `
@@ -143,4 +143,6 @@ CREATE TABLE blobs (
   created_at INTEGER NOT NULL
 );
 `,
+  `ALTER TABLE settings ADD COLUMN deleted_rev INTEGER;
+ALTER TABLE packs ADD COLUMN deleted_rev INTEGER;`,
 ];

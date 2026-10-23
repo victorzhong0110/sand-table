@@ -98,6 +98,7 @@ export class CommandError extends Error {
 | 展示所在白板的类型没有 `container` 能力 | 拒绝 | `NOT_CONTAINER` |
 | 展示会让白板出现在自己内部（含间接） | 拒绝 | `CYCLE` |
 | 修改 `locked` 为真的展示的位置或尺寸，且同一批次里没有先解锁 | 拒绝 | `LOCKED` |
+| 关系类型 allowsInferred 为 false，创建或更新后的状态为 inferred | 拒绝 | `INVALID_DATA` |
 | 关系的 `status = inferred` 但没有 `basis` | 拒绝 | `INVALID_DATA` |
 | 关系类型声明了 `requiresBasis` 但没有 `basis` | 拒绝 | `INVALID_DATA` |
 | 关系类型声明了 `sourceTypes` / `targetTypes`，两端类型不符 | 拒绝 | `INVALID_DATA` |
@@ -126,6 +127,16 @@ export class CommandError extends Error {
 | `pack.*` | 启用 / 停用 / 导入 / 移除组件包「包名」 |
 | 其他组合 | 编辑 N 处 |
 
+### 1.5 受信任内核命令
+
+公共 Command 不接受任意 ID 或内置包初始化。T13 另实现 `applySystemCommands(db, registry, batch)`，与 applyCommands 复用同一个私有事务/校验/修订/审计实现：
+
+- `pack.sync_builtin { id, version, enabledByDefault }`：核实注册表同 ID/version 的 builtin；不存在才插入，已有行保留 enabled；拒绝覆盖同 ID 数据包。
+- `object.upsert_derived { packId, id, type, title, data, source }`：只允许 derived 来源和内置包的 ID 命名空间策略；已存在必须为同包 derived，不覆盖人工内容；创建/刷新保留稳定 ID，仍校验 Schema。
+- 两者不进撤销历史，但更新修订号与审计。命名空间策略为 PackSpec.derivedIdPrefix，由 Registry.getPack(packId) 读取，校验规则见03的派生身份策略。内核不硬编码领域前缀。
+- MCP、UI、模板和数据包解析器只接受公共 Command，拒绝这两个内部 op；不能由调用者伪造 actor 获得权限。
+- `@ref` / `$board` 只在实体引用槽 id/boardId/objectId/parentId/sourceId/targetId 解析；正文、URL、代码和其他用户数据不扫描替换，`@alice` 保持原文。
+
 ## 2. 读接口
 
 位置：`workbench/kernel/read.ts`。都是纯查询，不写库（`context` 例外，它会更新 `agent_reads`）。
@@ -136,10 +147,12 @@ export class CommandError extends Error {
 | `listTypes(db, filter?)` | 已启用包的类型、关系类型、模板；带过滤时返回完整声明 |
 | `query(db, filter)` | 按白板、类型、文字、关系查对象，分页，返回精简行 |
 | `readObjects(db, ids, options)` | 读完整对象，附带展示位置和关系 |
-| `boardContents(db, boardId)` | 一块白板上的全部展示、它们指向的对象、这些对象之间的关系（给界面渲染用） |
+| `boardContents(db, boardId)` | 同一只读事务快照中的白板、展示、对象、关系、有效 settings/packs 及 revision |
 | `changesSince(db, rev)` | 修订号大于 rev 的所有行（含墓碑），或 `{ reset: true }` |
 | `historyList(db, limit)` | 历史记录列表，标出当前位置、当前路径、旧分支 |
 | `context(db, actor, viewId?)` | 人当前在看什么、选中了什么、该 Agent 上次读取之后人做了哪些修改 |
+
+boardContents 和 changesSince 的 revision 必须与返回内容来自同一只读事务，避免多进程写入期间跳过更新。删除/撤销创建 settings/packs 必须返回墓碑；普通全量读取只返回有效行。
 
 ## 3. MCP 工具
 

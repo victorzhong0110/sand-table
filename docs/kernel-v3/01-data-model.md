@@ -65,7 +65,7 @@ PRAGMA synchronous = NORMAL;
 
 `workbench/package.json` 里调用 `node` 的脚本加 `--disable-warning=ExperimentalWarning`，避免 `node:sqlite` 的实验性警告混进测试输出。其他启动点出现的这条警告只写到 stderr，不影响功能，不需要改。
 
-## 4. 表结构（schema 版本 1）
+## 4. 表结构（当前 schema 版本 2）
 
 `meta` 表的 `schema_version` 记录当前版本。以后改表结构，在 `kernel/schema.ts` 里追加一段迁移，版本号加 1，不修改已发布的建表语句。
 
@@ -75,7 +75,7 @@ CREATE TABLE meta (
   value TEXT NOT NULL
 );
 -- 必有的键：
---   schema_version   '1'
+--   schema_version   '2'
 --   workspace_id     工作空间 id
 --   title            工作空间标题
 --   created_at       毫秒时间戳（文本形式）
@@ -151,7 +151,8 @@ CREATE INDEX relations_rev    ON relations(rev);
 CREATE TABLE settings (
   key   TEXT PRIMARY KEY,                    -- 例如 'theme'
   value TEXT NOT NULL CHECK (json_valid(value)),
-  rev   INTEGER NOT NULL
+  rev   INTEGER NOT NULL,
+  deleted_rev INTEGER
 );
 
 CREATE TABLE packs (
@@ -160,7 +161,8 @@ CREATE TABLE packs (
   version  INTEGER NOT NULL,
   enabled  INTEGER NOT NULL CHECK (enabled IN (0, 1)),
   manifest TEXT CHECK (manifest IS NULL OR json_valid(manifest)),  -- 数据包存完整清单；内置包为 NULL
-  rev      INTEGER NOT NULL
+  rev      INTEGER NOT NULL,
+  deleted_rev INTEGER
 );
 
 CREATE TABLE history (
@@ -221,6 +223,8 @@ CREATE TABLE blobs (
   created_at INTEGER NOT NULL
 );
 ```
+
+版本1迁移保持不变；版本2追加 ALTER TABLE。设置与包的删除、撤销创建同样更新 rev/deleted_rev；普通读取过滤墓碑，增量返回 deleted: true，恢复清除墓碑。新库执行全部迁移。
 
 ## 5. 行类型（TypeScript）
 
@@ -427,10 +431,10 @@ type Change = {
 | `hypothesis` / `evidence` / `conclusion` | `research.<同名>` |
 | 其他未知类型 | 原样加前缀 `legacy.`，数据保留，界面用通用降级视图显示 |
 
-导入时**不**按新 Schema 校验旧数据，原样保存，只做下面这些清理：
+导入时不按新 Schema 拒绝旧数据，原值保存。字段改名必须保留原意，旧值未知不能静默删除：
 
-- 删除值为空字符串 `""` 或空数组 `[]` 的字段。
-- 删除下列 v2 占位数字（只有值恰好是 `0` 时才删）：`character.age`、`event.narrativeOrder`、`chapter.narrativeOrder`、`chapter.wordCount`。
-- `event.participants`（文本列表）不再是字段：对每个名字，若存在 `name` 相同的 `novel.character` 对象，就建一条 `novel.participates` 关系（事件 → 人物，`status = 'confirmed'`）；找不到的名字保留在 `data.legacyParticipants` 里，界面在“其他字段”中显示。
+- 0、空字符串、空数组和未知字段全部保留；无法证明某个 0 是旧占位时，只报告供用户检查。
+- 文本 participants 名单保留原文（可附 legacyParticipants），名字匹配只产生迁移建议。重复同名/未匹配分别报告，不自动创建 confirmed 关系。原始稳定 ID 关系可以保留；人工确认后再将名单转为关系。
+- 不迁移旧撤销历史的决定不变，但原 workspace.json 保留。不能将升级成功当作允许丢正文、值、关联或附件。
 
-之后编辑时的校验规则见 `02-commands-and-tools.md` §1.3：只对本次改动的字段严格校验，旧数据里其余字段的问题只作为警告返回，不阻止保存。
+之后仅对本次编辑字段严格校验，其他遗留问题作为警告，不阻止保存。

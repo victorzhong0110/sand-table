@@ -34,8 +34,8 @@
 
 ## 做法
 
-1. **判断版本**：界面启动时调用 `sand_status`，结果里有 `workspace.revision` 字段就是 v3。
-2. **`board/v3/store.ts`**：保存 `revision` 和按 id 索引的对象、展示、关系、设置。`load(boardId)` 调 `app_board`；`sync()` 调 `app_changes { since: revision }`，合并行、删除墓碑；收到 `reset` 就重新 `load`。每秒 `sync` 一次（页面不可见时暂停）；自己写入成功后立即 `sync` 一次。
+1. **判断版本**：优先由 bootstrap 明确提供 kernelVersion；否则尝试 sand_status，仅明确的未知工具/方法不存在错误才回退 v2 既有 sand_workspace_status/启动路径。鉴权、断线、内部错误应正常报错，不能误判 v2。覆盖两条启动路径。
+2. **`board/v3/store.ts`**：保存 `revision` 和按 id 索引的对象、展示、关系、设置。`load(boardId)` 调 `app_board`；`sync()` 调 `app_changes { since: revision }`，合并行、删除墓碑；收到 `reset` 清空缓存并重新 `load`（含 settings/packs），拒绝低于当前 revision 的过期响应。每秒 `sync` 一次（页面不可见时暂停）；自己写入成功后立即 `sync` 一次。
 3. **`board/v3/adapter.ts`**：把 v3 数据转成现有组件期待的结构，让现有组件少改。关键映射：
    - v3 对象类型 → 现有渲染分支：按 `01` §10.1 反查（`base.note` → `text`，并把 `body` 映射为 `text`，等等）；`novel.*`、`research.*` 走现有领域兜底分支；未知类型走现有“未知组件”占位。
    - 展示 → 现有“实例”结构：`spaceId` 用 `boardId`，`data` 用对象的数据，`binding = { kind: "object", objectId }`。

@@ -254,6 +254,8 @@ export type TemplateSpec = {
 };
 
 export type PackSpec = {
+  /** 仅内置包：新建派生对象 ID 的非重叠前缀。 */
+  derivedIdPrefix?: string;
   id: string;
   title: string;
   version: number;

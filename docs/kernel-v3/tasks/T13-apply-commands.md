@@ -22,6 +22,7 @@
 
 - 新建 `workbench/kernel/commands.ts`、`workbench/kernel/history-record.ts`、`workbench/kernel/packs-state.ts`、`workbench/kernel/labels.ts`
 - `workbench/kernel/index.ts`（加导出）
+- `workbench/kernel/types.ts`（声明 SystemCommand/SystemCommandBatch，与02 §1.5一致）
 - 新建 `workbench/tests/kernel-commands.test.ts`
 
 ## 不要做
@@ -36,7 +37,7 @@
 
 ```ts
 // 打开工作空间后调用：把注册表里的内置包同步进 packs 表（不存在就插入：base、novel、research 为 enabled = 1，code 为 0；已存在则保留原 enabled），
-// 再把 packs 表里 kind = 'data' 的清单注册进注册表。用 applyCommands 的 record: false 写入。
+// 再把 packs 表里 kind = 'data' 的清单注册进注册表。用 02 §1.5 的 applySystemCommands/pack.sync_builtin 写入。
 export function syncPacks(db: Db, registry: Registry, actor: Actor): void;
 export function isPackEnabled(db: Db, packId: string): boolean;
 ```
@@ -47,7 +48,7 @@ export function isPackEnabled(db: Db, packId: string): boolean;
 
 按 `02-commands-and-tools.md` §1.2 的顺序。要点：
 
-- **引用解析**：命令里任意字段值是 `"@名字"` 的字符串时，替换成本批次前面 `ref: "名字"` 创建出的 id；找不到就抛 `NOT_FOUND`。`template.apply` 展开时还要把 `"$board"` 换成目标白板 id，并把坐标整体平移到 `x`、`y`。
+- **引用解析**：仅实体引用槽的字段值是 `"@名字"` 的字符串时，替换成本批次前面 `ref: "名字"` 创建出的 id；找不到就抛 `NOT_FOUND`。`template.apply` 展开时还要把 `"$board"` 换成目标白板 id，并把坐标整体平移到 `x`、`y`。
 - **版本**：每次修改一行，`version + 1`；新建时为 1。
 - **修订号**：整批共用一个新修订号 R + 1，写进每个改动行的 `rev` 和 `meta.revision`。
 - **`presentation.create` 缺省位置**：`x` = 该白板上现有未删除展示的最大 `x + width` 再加 40（没有展示时为 0），`y` = 现有展示的最小 `y`（没有时为 0）。缺省尺寸取类型的 `display.defaultSize`。
@@ -96,3 +97,9 @@ export function recordHistory(db: Db, batch: CommandBatch, changes: Change[], la
 11. `pack.import` 一个 v1 格式清单，被转换后成功写入；导入一个不合格清单，抛错且注册表里没有残留。
 
 命令：`npm run format:check`、`npm run typecheck`、`npm test` 全部通过。
+
+
+## T07 补充验收
+实现 02 §1.5 内部命令并复用统一事务。公共解析器拒绝内部 op；内置包首次初始化成功、重新打开保留启停；固定 derived ID 可更新但不得覆盖人工对象；正文 @alice 不被替换。allowsInferred=false 在创建/更新时都拦截。设置/包移除及撤销创建生成墓碑。注册表只在事务成功后切换，回滚不残留。
+
+内部upsert的packId、derivedIdPrefix和旧ID定位校验按03派生身份策略；不要猜测未声明的namespace API。
