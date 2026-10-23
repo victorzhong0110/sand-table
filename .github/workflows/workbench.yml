@@ -65,6 +65,10 @@ jobs:
         env:
           SAND_EXTERNAL_REPO: /tmp/sand-clsx
 
+      - run: SAND_KERNEL=v3 npm run test:blank
+        env:
+          SAND_EXTERNAL_REPO: /tmp/sand-clsx
+
       - run: npm run test:local
         env:
           SAND_EXTERNAL_REPO: /tmp/sand-clsx

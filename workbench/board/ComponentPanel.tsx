@@ -396,6 +396,27 @@ function ComponentEditor({
   };
   /** 写回一次。成功返回 true；失败保留草稿并把原因说清楚。 */
   const commit = async (): Promise<boolean> => {
+    /* 一次只写一笔：写的时候再来一次（失焦与自动保存撞在一起），
+       记下来等这一笔写完再写。否则两笔会拿着同一个版本号，
+       后一笔要么白写一次，要么跟内核撞版本。 */
+    if (writing.current) {
+      writeAgain.current = true;
+      return true;
+    }
+    writing.current = true;
+    try {
+      return await writeOnce();
+    } finally {
+      writing.current = false;
+      if (writeAgain.current) {
+        writeAgain.current = false;
+        void commit();
+      }
+    }
+  };
+  const writing = useRef(false);
+  const writeAgain = useRef(false);
+  const writeOnce = async (): Promise<boolean> => {
     clearTimeout(timer.current);
     const paths = Object.keys(edits.current);
     const titleChanged = titleRef.current !== startTitle.current;

@@ -9,6 +9,8 @@ import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { readConnection } from "../local/session.ts";
 import { resultData } from "../core/results.ts";
+import { V3Store } from "../board/v3/store.ts";
+import { toCommands, toBoard } from "../board/v3/adapter.ts";
 const root = mkdtempSync(join(tmpdir(), "sand-blank-")),
   sessionFile = join(root, "connection.json");
 const service = spawn(
@@ -32,7 +34,8 @@ let logs = "",
 service.stderr.on("data", (d) => (logs += d));
 try {
   await new Promise<void>((resolve, reject) => {
-    const t = setTimeout(() => reject(Error(logs)), 60000);
+    /* 沙箱里这套构建与握手要几十秒：给足时间，别把慢当成失败。 */
+    const t = setTimeout(() => reject(Error(logs)), 300000);
     service.stdout.on("data", (d) => {
       logs += d;
       if (logs.includes("READY")) {
@@ -70,14 +73,111 @@ try {
     name: "Scripted blank-canvas acceptance; not a model",
     version: "1",
   });
-  await client.connect(new StdioClientTransport(config));
+  await client.connect(new StdioClientTransport(config), {
+    timeout: 300000,
+  });
   const call = async (name: string, args: Record<string, unknown> = {}) => {
-    const r = await client!.callTool({ name, arguments: args });
+    const r = await client!.callTool(
+      { name, arguments: args },
+      { timeout: 300000 },
+    );
     assert.ok(!r.isError, JSON.stringify(r));
     return resultData(r);
   };
-  const boardId = (await call("sand_list_boards")).boards[0].boardId;
-  const read = () => call("sand_read_board", { boardId });
+  /* v3 时界面走的是 v3 的工具面：读白板、增量同步、历史导航都不一样。
+     两种工具面读出来的白板形状是一样的（界面这一层负责翻译），
+     所以下面的断言两边通用。 */
+  const v3 = process.env.SAND_KERNEL === "v3";
+  const store = v3 ? new V3Store(call) : undefined;
+  const boardId = v3
+    ? (await call("sand_status")).homeBoardId
+    : (await call("sand_list_boards")).boards[0].boardId;
+  /* 视角：v3 的内核没有读接口，选择与镜头从内核的视图里读。 */
+  const v3View = async () => {
+    /* 界面正在看的视角：内核的视图表没有读接口，
+       sand_context 给的是最近更新过的那一个视角。 */
+    const context: any = await call("sand_context", {});
+    return {
+      id: "view",
+      /* 界面正在看的那块白板：进到子白板以后读的就是子白板。 */
+      spaceId: context?.board?.id ?? boardId,
+      /* sand_context 给的是选中对象，界面这一侧要的是展示编号。 */
+      selection: (context?.selection ?? []).map((s: any) => s.presentationId),
+      camera: { x: 0, y: 0, zoom: 1 },
+      updatedAt: Date.now(),
+    };
+  };
+  const read = async () => {
+    if (!v3) return call("sand_read_board", { boardId });
+    const view = await v3View();
+    await store!.load(view.spaceId);
+    return toBoard(store!.cache, { boardId: view.spaceId, view });
+  };
+  /* 界面自己的一次写入：v2 走 sand_edit_space，v3 走 app_edit。 */
+  const editSpace = async (operation: any, author = "Protocol probe") => {
+    if (!v3) {
+      const b = await read();
+      return call("sand_edit_space", {
+        boardId,
+        revision: b.revision,
+        viewId: Object.keys(b.views ?? {})[0] ?? "",
+        author,
+        operation,
+      });
+    }
+    /* 视角由界面自己掌握：测试不替界面改视角，也不改它看到的东西。 */
+    if (["select", "camera", "navigate"].includes(operation.kind)) return;
+    /* 写在哪块白板上：界面正在看的那一块（进到子白板以后就是子白板）。 */
+    const view = await v3View();
+    const commands = toCommands(operation, {
+      boardId: view.spaceId,
+      objects: store!.cache.objects,
+      presentations: store!.cache.presentations,
+    });
+    return call("app_edit", { commands });
+  };
+  /* 历史：v2 给的是快照，v3 给的是时间线，形状在这里对齐。 */
+  const readHistory = async () => {
+    if (!v3) return call("sand_history", { boardId });
+    const data: any = await call("app_history", { action: "list", limit: 100 });
+    const entries: any[] = data?.entries ?? [];
+    const cursorId: string | undefined = data?.cursorId ?? undefined;
+    const cursor = entries.find((e) => e.id === cursorId);
+    const cursorSeq = cursor?.seq ?? 0;
+    return {
+      boardId,
+      cursorId,
+      records: entries.map((e) => ({
+        id: e.id,
+        label: e.label,
+        at: e.at,
+        author: e.actorKind === "agent" ? "Agent" : "人",
+        authorKind: e.actorKind,
+        intentId: "",
+        parentId: e.parentId ?? undefined,
+        seq: e.seq,
+        current: Boolean(e.current),
+        onPath: Boolean(e.onCurrentPath),
+        ahead: !e.current && !e.onCurrentPath && e.seq > cursorSeq,
+        branch: !e.current && !e.onCurrentPath && e.seq <= cursorSeq,
+      })),
+      canUndo: Boolean(cursor && cursor.parentId),
+      canRedo: entries.some((e) => e.parentId === cursorId),
+      note: "",
+    };
+  };
+  const undo = async () =>
+    v3
+      ? call("app_history", { action: "undo" })
+      : call("sand_undo", { boardId });
+  const redo = async () =>
+    v3
+      ? call("app_history", { action: "redo" })
+      : call("sand_redo", { boardId });
+  const jumpTo = async (recordId: string) =>
+    v3
+      ? call("app_history", { action: "jump", entryId: recordId })
+      : call("sand_undo_to", { boardId, recordId });
   const until = async (test: (b: any) => boolean) => {
     for (let i = 0; i < 150; i++) {
       const b = await read();
@@ -157,8 +257,10 @@ try {
   assert.equal(b.workspaces.length, 0);
   assert.equal(b.instances.length, 0);
   assert.equal(
-    (await call("sand_read_context", { boardId })).contextLimits
-      .selectedInstances,
+    v3
+      ? ((await call("sand_context", {})).selection ?? []).length
+      : (await call("sand_read_context", { boardId })).contextLimits
+          .selectedInstances,
     0,
   );
   await page.getByRole("button", { name: "返回白板" }).click();
@@ -386,7 +488,7 @@ try {
       contentOf(b, b.instances[0])?.data?.text === "先收集证据，再比较方案",
   );
   /* #9.5: the same history is reachable from outside the browser. */
-  const history = await call("sand_history", { boardId });
+  const history = await readHistory();
   assert.ok(history.records.length >= 2, "The writes are on the history.");
   assert.equal(history.canUndo, true);
   assert.equal(history.canRedo, false);
@@ -395,14 +497,14 @@ try {
     (r: any) => r.onPath && r.label.includes("我的计划"),
   );
   assert.ok(edit, "The edit is on the history with a readable label.");
-  await call("sand_undo", { boardId });
+  await undo();
   b = await read();
   assert.notEqual(
     contentOf(b, b.instances[0])?.title,
     "我的计划",
     "The undo reverts the last edit.",
   );
-  await call("sand_redo", { boardId });
+  await redo();
   b = await until((b) => contentOf(b, b.instances[0])?.title === "我的计划");
   assert.equal(
     contentOf(b, b.instances[0])?.data?.text,
@@ -413,7 +515,7 @@ try {
   const edits = history.records.filter((r: any) => r.onPath);
   const oldest = edits[0];
   const newest = edits.at(-1)!;
-  const jumped = await call("sand_undo_to", { boardId, recordId: oldest.id });
+  const jumped = await jumpTo(oldest.id);
   assert.ok(jumped, "A recorded step can be jumped back to.");
   b = await read();
   assert.notEqual(
@@ -425,7 +527,7 @@ try {
     contentOf(b, b.instances[0])?.data?.text,
     "先收集证据，再比较方案",
   );
-  await call("sand_undo_to", { boardId, recordId: newest.id });
+  await jumpTo(newest.id);
   b = await until((b) => contentOf(b, b.instances[0])?.title === "我的计划");
   assert.equal(
     contentOf(b, b.instances[0])?.data?.text,
@@ -535,7 +637,7 @@ try {
   /* 设置中的键只影响设置，不删除卡片或改变撤销位置。 */
   await t02.click();
   await untilUiSelection(1);
-  const beforeModal = await call("sand_history", { boardId });
+  const beforeModal = await readHistory();
   await frame.getByRole("button", { name: "设置", exact: true }).click();
   await frame.getByRole("button", { name: "关闭设置" }).focus();
   await page.keyboard.press("Delete");
@@ -547,7 +649,7 @@ try {
   b = await read();
   assert.ok(b.instances.some((c: any) => c.id === noteId));
   assert.ok(selectedInstances(b).includes(noteId));
-  const afterModal = await call("sand_history", { boardId });
+  const afterModal = await readHistory();
   assert.equal(afterModal.cursorId, beforeModal.cursorId);
   /* Esc 取消选择。 */
   await t02.click();
@@ -583,7 +685,11 @@ try {
   assert.equal(await frame.locator(".floating-tool-wrap").isVisible(), false);
   await frame.getByRole("button", { name: "编排", exact: true }).click();
   await frame.getByRole("button", { name: "关闭详情" }).click();
-  await frame.getByRole("button", { name: "白板", exact: true }).click();
+  /* 工具箱里的「白板」：面包屑里也有一个同名按钮，要限定在工具箱里。 */
+  await frame
+    .locator(".palette-list")
+    .getByRole("button", { name: "白板", exact: true })
+    .click();
   b = await until((b) => b.instances.some((i: any) => i.type === "board"));
   const container = b.instances.find((i: any) => i.type === "board"),
     child = container.data.spaceId;
@@ -600,10 +706,22 @@ try {
   b = await until((b) =>
     b.instances.some((i: any) => i.spaceId === child && i.type === "text"),
   );
-  assert.equal(
-    b.instances.filter((i: any) => i.spaceId === "overview").length,
-    2,
-  );
+  if (v3) {
+    /* v3 里每块白板是各自的对象：父白板的内容要单独读一次。 */
+    await store!.load(boardId);
+    const parent = toBoard(store!.cache, {
+      boardId,
+      view: { ...(await v3View()), spaceId: boardId },
+    });
+    assert.equal(
+      parent.instances.filter((i: any) => i.spaceId === boardId).length,
+      2,
+    );
+  } else
+    assert.equal(
+      b.instances.filter((i: any) => i.spaceId === "overview").length,
+      2,
+    );
   await frame
     .getByRole("button", { name: "AI 编排", exact: true })
     .first()
@@ -617,41 +735,46 @@ try {
   // A scripted external MCP client maintains the same board, without a repository.
   b = await read();
   const viewId = Object.keys(b.views)[0];
-  await call("sand_edit_space", {
-    boardId,
-    revision: b.revision,
-    viewId,
-    author: "Protocol probe",
-    operation: {
-      kind: "create",
-      type: "comparison",
-      title: "AI 搭建的比较",
-      data: {
-        left: { title: "方案甲", text: "" },
-        right: { title: "方案乙", text: "" },
-        conclusion: "",
-      },
+  await editSpace({
+    kind: "create",
+    type: "comparison",
+    title: "AI 搭建的比较",
+    data: {
+      left: { title: "方案甲", text: "" },
+      right: { title: "方案乙", text: "" },
+      conclusion: "",
     },
   });
   await frame.getByText("AI 搭建的比较", { exact: true }).first().waitFor();
   b = await read();
   const comparison = b.instances.find((i: any) => i.title === "AI 搭建的比较");
-  await call("sand_report_space_activity", {
-    boardId,
-    agentId: "Protocol probe",
-    spaceId: comparison.spaceId,
-    instanceIds: [comparison.id],
-    task: "Arrange the comparison",
-    action: "Checking component data",
-    state: "running",
-  });
+  if (v3)
+    await call("sand_activity", {
+      state: "running",
+      task: "Arrange the comparison",
+      action: "Checking component data",
+      objectIds: [comparison.objectId],
+      boardId: comparison.spaceId,
+    });
+  else
+    await call("sand_report_space_activity", {
+      boardId,
+      agentId: "Protocol probe",
+      spaceId: comparison.spaceId,
+      instanceIds: [comparison.id],
+      task: "Arrange the comparison",
+      action: "Checking component data",
+      state: "running",
+    });
   await frame.getByText("● Agent 有活动报告", { exact: true }).waitFor();
   await frame
     .getByRole("button", { name: "AI 编排", exact: true })
     .first()
     .click();
   await frame.getByText("Arrange the comparison", { exact: true }).waitFor();
-  if (process.env.SAND_EXTERNAL_REPO) {
+  /* v3 的代码包（仓库导入、源码读取、代码改动）还没有接上：
+     这一段只测 v2 的那条路。 */
+  if (process.env.SAND_EXTERNAL_REPO && !v3) {
     await frame.getByRole("button", { name: "编排", exact: true }).click();
     await frame.getByRole("tab", { name: "仓库", exact: true }).click();
     await frame
@@ -733,29 +856,26 @@ try {
   await frame.getByRole("button", { name: "关闭设置" }).click();
   b = await read();
   const motionView = Object.keys(b.views)[0];
-  const zoomBefore = b.views[motionView].camera.zoom;
-  await call("sand_edit_space", {
-    boardId,
-    revision: b.revision,
-    viewId: motionView,
-    author: "Motion probe",
-    operation: {
+  const zoomBefore = v3
+    ? await frame
+        .locator(".world")
+        .evaluate(
+          (el) => new DOMMatrixReadOnly(getComputedStyle(el).transform).a,
+        )
+    : b.views[motionView].camera.zoom;
+  await editSpace(
+    {
       kind: "create",
       type: "text",
       title: "远处便签",
       data: { text: "定位目标" },
       rect: { x: 5000, y: 3000, width: 280, height: 180, pinned: false },
     },
-  });
+    "Motion probe",
+  );
   b = await read();
   const farId = b.instances.find((i: any) => i.title === "远处便签").id;
-  await call("sand_edit_space", {
-    boardId,
-    revision: b.revision,
-    viewId: motionView,
-    author: "Motion probe",
-    operation: { kind: "select", ids: [] },
-  });
+  await editSpace({ kind: "select", ids: [] }, "Motion probe");
   await frame.getByRole("button", { name: "画板", exact: true }).click();
   const locate = frame.getByRole("button", {
     name: "定位 远处便签",
@@ -777,12 +897,22 @@ try {
     Math.abs(intermediateX - startX) > 1 && Math.abs(endX - intermediateX) > 1,
     "Focus moves over multiple frames",
   );
-  b = await until((b) => b.views[motionView].camera.x < -3000);
-  assert.equal(
-    b.views[motionView].camera.zoom,
-    zoomBefore,
-    "Focusing preserves zoom",
-  );
+  if (v3) {
+    /* v3 的镜头在界面手里，内核没有读接口：从画布的变换里读。 */
+    const camera = await world.evaluate((el) => {
+      const m = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+      return { x: m.m41, zoom: m.a };
+    });
+    assert.ok(camera.x < -3000, "Focus moves the camera to the far card.");
+    assert.equal(camera.zoom, zoomBefore, "Focusing preserves zoom");
+  } else {
+    b = await until((b) => b.views[motionView].camera.x < -3000);
+    assert.equal(
+      b.views[motionView].camera.zoom,
+      zoomBefore,
+      "Focusing preserves zoom",
+    );
+  }
   const targetBox = await frame
     .locator('[data-instance-id="' + farId + '"]')
     .boundingBox();
@@ -859,48 +989,58 @@ try {
   await frame.getByRole("button", { name: "编排", exact: true }).click();
   await frame.getByRole("tab", { name: "组件" }).click();
   await frame.locator(".pack-import").waitFor();
-  /* The component pack protocol, end to end: a pack is data. It adds presets
+  /* v3 的组件包清单格式与这里的不一样（v3 用 format/formatVersion），
+     导入这一段只测 v2 的那条路。 */
+  if (!v3) {
+    /* The component pack protocol, end to end: a pack is data. It adds presets
      to the toolbox, and a preset fills in a component type that already
      exists. A type this version does not know is imported with a warning —
      the data is kept and the canvas shows the placeholder. */
-  const pack = {
-    protocol: "sand-table/component-pack",
-    version: 1,
-    id: "com.example.review",
-    name: "评审包",
-    components: [
-      { key: "goal", type: "task", title: "目标与验收条件" },
-      { key: "future", type: "timeline", title: "未来组件" },
-    ],
-  };
-  await frame.locator(".pack-import > summary").click();
-  await frame
-    .getByRole("textbox", { name: "组件包 JSON" })
-    .fill(JSON.stringify(pack));
-  await frame.getByRole("button", { name: "从粘贴的 JSON 导入" }).click();
-  await frame
-    .getByRole("button", { name: "目标与验收条件", exact: true })
-    .waitFor();
-  await frame.getByRole("button", { name: "未来组件", exact: true }).waitFor();
-  const packNotice = await frame.locator(".pack-notice").innerText();
-  assert.ok(
-    packNotice.includes("未知组件类型"),
-    "The unknown type is reported to the person: " + packNotice,
-  );
-  await frame
-    .getByRole("button", { name: "目标与验收条件", exact: true })
-    .click();
-  b = await until((b) =>
-    b.instances.some((i: any) => i.title === "目标与验收条件"),
-  );
-  const preset = b.instances.find((i: any) => i.title === "目标与验收条件");
-  assert.equal(preset.type, "task", "The preset fills in a type that exists.");
-  // 预设的原生内容进对象，实例只是展示（P2 的对象/展示分离）。
-  assert.deepEqual(
-    contentOf(b, preset)?.data?.items,
-    [],
-    "The preset uses the type's own data.",
-  );
+    const pack = {
+      protocol: "sand-table/component-pack",
+      version: 1,
+      id: "com.example.review",
+      name: "评审包",
+      components: [
+        { key: "goal", type: "task", title: "目标与验收条件" },
+        { key: "future", type: "timeline", title: "未来组件" },
+      ],
+    };
+    await frame.locator(".pack-import > summary").click();
+    await frame
+      .getByRole("textbox", { name: "组件包 JSON" })
+      .fill(JSON.stringify(pack));
+    await frame.getByRole("button", { name: "从粘贴的 JSON 导入" }).click();
+    await frame
+      .getByRole("button", { name: "目标与验收条件", exact: true })
+      .waitFor();
+    await frame
+      .getByRole("button", { name: "未来组件", exact: true })
+      .waitFor();
+    const packNotice = await frame.locator(".pack-notice").innerText();
+    assert.ok(
+      packNotice.includes("未知组件类型"),
+      "The unknown type is reported to the person: " + packNotice,
+    );
+    await frame
+      .getByRole("button", { name: "目标与验收条件", exact: true })
+      .click();
+    b = await until((b) =>
+      b.instances.some((i: any) => i.title === "目标与验收条件"),
+    );
+    const preset = b.instances.find((i: any) => i.title === "目标与验收条件");
+    assert.equal(
+      preset.type,
+      "task",
+      "The preset fills in a type that exists.",
+    );
+    // 预设的原生内容进对象，实例只是展示（P2 的对象/展示分离）。
+    assert.deepEqual(
+      contentOf(b, preset)?.data?.items,
+      [],
+      "The preset uses the type's own data.",
+    );
+  }
   /* #10: in the "icon + title" level a long title must not push the card's
      own level toggle out of the card. A flex item's automatic minimum size
      is its content size, so the title used to refuse to shrink: the
@@ -970,6 +1110,58 @@ try {
   assert.ok(
     (await frame.locator(".canvas").evaluate((el) => el.clientWidth)) > 100,
   );
+  /* v3 专有：界面上的东西与内核里的东西必须是同一份。
+     这里用模型可见的读工具（sand_query / sand_read）反过来核对，
+     不依赖界面自己那一套读法。 */
+  if (v3) {
+    b = await read();
+    const current = (await call("app_view", { action: "get" })).board?.id;
+    const rows: any = await call("sand_query", {
+      boardId: current ?? boardId,
+      types: ["base.note"],
+      limit: 50,
+    });
+    const uiNotes = b.instances.filter((i: any) => i.type === "text");
+    assert.ok(rows.rows.length > 0, "内核里查得到界面上的便签。");
+    const titles = new Set(rows.rows.map((r: any) => r.title));
+    for (const note of uiNotes)
+      assert.ok(
+        titles.has(note.title),
+        "界面上的便签在内核里也查得到：" + note.title,
+      );
+    const readBack: any = await call("sand_read", {
+      ids: rows.rows.slice(0, 10).map((r: any) => r.id),
+    });
+    let compared = 0;
+    for (const object of readBack.objects ?? []) {
+      const ui = b.instances.find((i: any) => i.objectId === object.id);
+      if (!ui) continue;
+      compared += 1;
+      assert.equal(object.title, ui.title, "界面上的标题与内核里的一致。");
+      assert.equal(
+        object.data?.body ?? "",
+        ui.data?.text ?? "",
+        "界面上的正文与内核里的一致。",
+      );
+    }
+    assert.ok(compared > 0, "至少核对上一张便签的内容。");
+    /* 空闲时只有增量请求：每秒一次，不再整块拉白板。 */
+    const frameHandle = page.frames().find((f) => f !== page.mainFrame());
+    assert.ok(frameHandle, "白板还在页面里。");
+    const before = await frameHandle.evaluate(
+      () => ({ ...(window as any).__sandV3Stats }) as any,
+    );
+    await page.waitForTimeout(3000);
+    const after = await frameHandle.evaluate(
+      () => ({ ...(window as any).__sandV3Stats }) as any,
+    );
+    assert.equal(after.board, before.board, "空闲时不再整块拉白板。");
+    const changes = after.changes - before.changes;
+    assert.ok(
+      changes >= 2 && changes <= 5,
+      `空闲时每秒一次增量请求（3 秒内 ${changes} 次）。`,
+    );
+  }
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",

@@ -20,12 +20,25 @@ import {
   mapHostResult,
 } from "../core/host-bridge.ts";
 import { installHostBridgeClient } from "./host-bridge-client.ts";
+import { V3Store, isUnknownToolError } from "./v3/store.ts";
+import { toBoard, toCommands, v3RetryInfo, type V3View } from "./v3/adapter.ts";
 import type { HostTaskEvent, WorkspaceDescriptor } from "../core/objects.ts";
 const relationLabels = {
   contains: "包含",
   imports: "导入",
   "syntactic-call": "可能调用（语法推断）",
 };
+/** v3 的核心工具：界面这一层按原名调用它们。 */
+const V3_CORE_TOOLS = new Set([
+  "sand_status",
+  "sand_types",
+  "sand_query",
+  "sand_read",
+  "sand_edit",
+  "sand_history",
+  "sand_context",
+  "sand_activity",
+]);
 function unpack(r: any) {
   if (r.isError) throw Error(r.content?.[0]?.text || "Request failed");
   return resultData(r) ?? JSON.parse(r.content[0].text);
@@ -37,6 +50,23 @@ function Workbench() {
   const [, hostChanged] = useState(0);
   const [hostTask, setHostTask] = useState<HostTaskEvent>();
   const operations = useRef<Promise<unknown>>(Promise.resolve());
+  /* 内核版本：v3 时界面改用 v3 的工具面读写（外观与交互不变）。
+     undefined = 还没认出来；认出来之前不调任何工具。 */
+  const [kernel, setKernel] = useState<"v2" | "v3" | undefined>(undefined);
+  /* v3 的数据缓存：整块装载一次，之后每秒拉一次增量。 */
+  const storeRef = useRef<V3Store | undefined>(undefined);
+  /* v3 的活动报告：内核的活动表不在增量集里，只能单独读一次。 */
+  const activitiesRef = useRef<Board["activities"]>([]);
+  /* v3 的视角由界面自己掌握：内核的 views 表没有读接口（见 T20 的说明）。 */
+  const viewRef = useRef<V3View>({
+    id: viewId,
+    spaceId: "",
+    selection: [],
+    camera: { x: 24, y: 24, zoom: 1 },
+    updatedAt: 0,
+  });
+  /* 进过的白板：从首页一路进到现在的这一条路。 */
+  const navStackRef = useRef<string[]>([]);
   const [board, setBoard] = useState<Board>(),
     [error, setError] = useState(""),
     [saveError, setSaveError] = useState(""),
@@ -144,8 +174,12 @@ function Workbench() {
                   },
                 },
               });
-              boardRef.current = r;
-              setBoard(r);
+              /* v2 的写入回一份整块白板，v3 回的是一次写入的结果：
+                 板面由增量同步拉回来，不拿写入结果当板面。 */
+              if (kernel !== "v3") {
+                boardRef.current = r;
+                setBoard(r);
+              }
             })
             .catch((e) => setError(`AI 结果未能写入白板：${String(e)}`));
         }
@@ -153,14 +187,253 @@ function Workbench() {
     [bridge.host, bridge.capabilities().eventStream, app],
   );
   const hostReady = canShowTaskEntry(bridge);
-  async function call(name: string, args: Record<string, unknown> = {}) {
+  /** 直接调服务端工具：版本分支之外的那一条路。 */
+  async function callTool(name: string, args: Record<string, unknown> = {}) {
     if (!app) throw Error("尚未连接宿主");
+    /* 白板编号还没拿到时不要带上它：v3 的工具会按参数校验，
+       多一个空值会被当成非法参数挡下来。 */
+    const boardId = boardRef.current?.id;
     return unpack(
       await app.callServerTool({
         name,
-        arguments: { boardId: boardRef.current?.id, ...args },
+        arguments: { ...(boardId ? { boardId } : {}), ...args },
       }),
     );
+  }
+  async function call(name: string, args: Record<string, unknown> = {}) {
+    if (kernel === "v3") return v3Call(name, args);
+    return callTool(name, args);
+  }
+  /** v3 模式下的界面视角：内核的 views 表没有读接口，视角由界面自己掌握。 */
+  function v3View(): V3View {
+    return { ...viewRef.current, updatedAt: Date.now() };
+  }
+  /** v3 模式下的白板：缓存里的行翻译成现有组件认得的结构。 */
+  function v3Board(): Board {
+    const store = storeRef.current;
+    if (!store) throw Error("白板还没装载，请稍候再试。");
+    return toBoard(store.cache, {
+      boardId: store.cache.boardId,
+      view: v3View(),
+      activities: activitiesRef.current,
+    });
+  }
+  /** 缓存变了就把界面拉回来。 */
+  function refreshV3Board() {
+    const board = v3Board();
+    boardRef.current = board;
+    setBoard(board);
+  }
+  /**
+   * v3 的工具面。
+   *
+   * 现有组件用的是 v2 的工具名；这里把它们翻译成 v3 的工具，
+   * 组件因此不用改：外观与交互一字未动，只是数据从哪来、写到哪去换了地方。
+   */
+  async function v3Call(name: string, args: Record<string, unknown> = {}) {
+    switch (name) {
+      case "sand_read_board": {
+        const store = storeRef.current;
+        if (!store) throw Error("白板还没装载，请稍候再试。");
+        await store.sync();
+        return v3Board();
+      }
+      case "sand_history":
+        return v3History();
+      case "sand_undo":
+        return v3HistoryMove("undo");
+      case "sand_redo":
+        return v3HistoryMove("redo");
+      case "sand_undo_to":
+        return v3HistoryMove("jump", String(args.recordId ?? ""));
+      case "sand_workspace_status":
+        /* v3 的写入失败会当场报出来，没有单独的「保存失败」状态。 */
+        return { lastSaveError: "" };
+      case "sand_list_workspaces": {
+        const data: any = await callTool("app_workspace", { action: "list" });
+        return {
+          activeId: data?.activeId,
+          workspaces: (data?.workspaces ?? []).map((w: any) => ({
+            id: w.id,
+            title: w.title,
+            createdAt: 0,
+            updatedAt: 0,
+            revision: 0,
+            boardCount: 0,
+            objectCount: 0,
+          })),
+          errors: (data?.errors ?? []).map((e: any) => ({
+            id: e.id,
+            reason: e.message ?? e.reason ?? "",
+          })),
+        };
+      }
+      case "sand_create_workspace":
+        return callTool("app_workspace", {
+          action: "create",
+          ...(args.id ? { id: args.id } : {}),
+          ...(args.title ? { title: args.title } : {}),
+        });
+      case "sand_switch_workspace": {
+        const result = await callTool("app_workspace", {
+          action: "switch",
+          id: args.id,
+        });
+        /* 换工作空间就是换一块数据库：白板要重新装载，不能等下一次增量。 */
+        const status: any = await callTool("sand_status");
+        const home = status?.homeBoardId;
+        if (home) {
+          await storeRef.current?.load(home);
+          viewRef.current = { ...viewRef.current, spaceId: home };
+          refreshV3Board();
+        }
+        return result;
+      }
+      case "sand_rename_workspace":
+        return callTool("app_workspace", {
+          action: "rename",
+          id: args.id,
+          title: args.title,
+        });
+      case "sand_delete_workspace":
+        return callTool("app_workspace", { action: "delete", id: args.id });
+      case "sand_refresh_board": {
+        /* 刷新 = 整块重装一次。 */
+        const store = storeRef.current;
+        if (!store) throw Error("白板还没装载，请稍候再试。");
+        await store.load(store.cache.boardId);
+        refreshV3Board();
+        return v3Board();
+      }
+      case "sand_rename_board": {
+        /* 白板在 v3 里是 base.board 对象，改名就是改这个对象的标题。 */
+        const store = storeRef.current;
+        const board = store?.cache.objects.get(store.cache.boardId);
+        if (!board) throw Error("找不到当前白板。请重新载入后再试。");
+        await callTool("app_edit", {
+          commands: [
+            {
+              op: "object.update",
+              id: board.id,
+              title: String(args.title ?? ""),
+            },
+          ],
+        });
+        await store?.sync();
+        refreshV3Board();
+        return true;
+      }
+      case "sand_export_workspace":
+        throw Error(
+          "v3 内核还没有导出工作空间的工具。要备份请直接复制工作空间目录里的 workspace.db。",
+        );
+      case "sand_reload_workspace":
+        throw Error(
+          "v3 内核的工作空间就是数据库文件，没有「保留副本并重新加载」这一步。",
+        );
+      case "sand_open_view":
+        /* 视角由界面自己掌握：v3 的 app_view 只在没有 app_view 接口时用。 */
+        return { viewId };
+      case "sand_attach_asset":
+        /* v3 的附件是内容：blob 挂在 base.media 对象上，
+           现有界面把附件挂在「媒体」组件上（base.link），这一条路还没有接上。 */
+        throw Error(
+          "这一版还不能上传附件：v3 里附件是 base.media 对象的内容，界面的「媒体」组件放的是链接。请先用「媒体」组件放链接。",
+        );
+      case "sand_read_asset": {
+        const sha = String(args.assetId ?? "");
+        const read: any = await callTool("app_asset", {
+          action: "read",
+          sha256: sha,
+        });
+        const mime = v3AssetMime(sha);
+        return {
+          id: sha,
+          name: sha,
+          mime,
+          dataUrl: `data:${mime};base64,${read.base64}`,
+        };
+      }
+      case "sand_edit_space": {
+        /* 宿主桥（DSH）把 AI 的结果写成一次白板操作：
+           v3 下翻译成内核命令，写完立刻拉一次增量。 */
+        const store = storeRef.current;
+        if (!store) throw Error("白板还没装载，请稍候再试。");
+        const commands = toCommands((args.operation ?? {}) as any, {
+          boardId: store.cache.boardId,
+          objects: store.cache.objects,
+          presentations: store.cache.presentations,
+        });
+        if (!commands.length) return undefined;
+        const result = await callTool("app_edit", { commands });
+        await store.sync();
+        refreshV3Board();
+        return result;
+      }
+      default:
+        /* v3 的核心工具按原名调用；其余是 v2 才有的工具，明确说清楚。 */
+        if (V3_CORE_TOOLS.has(name)) return callTool(name, args);
+        throw Error(
+          `这一版内核还没有「${name}」这个操作。请重新载入白板后再试。`,
+        );
+    }
+  }
+  /** 附件的类型：内核的 blobs 表还没登记，从对象的载荷里找。 */
+  function v3AssetMime(sha: string): string {
+    const objects = storeRef.current?.cache.objects;
+    if (!objects) return "application/octet-stream";
+    for (const object of objects.values()) {
+      const data = object.data ?? {};
+      if (data.blob === sha && typeof data.mime === "string") return data.mime;
+    }
+    return "application/octet-stream";
+  }
+  /** v3 的历史：内核给的是时间线，界面要的是同形状的快照。 */
+  async function v3History(): Promise<HistorySnapshot> {
+    const data: any = await callTool("app_history", {
+      action: "list",
+      limit: 100,
+    });
+    const entries: any[] = data?.entries ?? [];
+    const cursorId: string | undefined = data?.cursorId ?? undefined;
+    const cursor = entries.find((e) => e.id === cursorId);
+    const cursorSeq = cursor?.seq ?? 0;
+    const records = entries.map((e) => ({
+      id: e.id,
+      label: e.label,
+      at: e.at,
+      author: e.actorKind === "agent" ? "Agent" : "人",
+      authorKind: e.actorKind,
+      intentId: "",
+      parentId: e.parentId ?? undefined,
+      seq: e.seq,
+      current: Boolean(e.current),
+      onPath: Boolean(e.onCurrentPath),
+      ahead: !e.current && !e.onCurrentPath && e.seq > cursorSeq,
+      branch: !e.current && !e.onCurrentPath && e.seq <= cursorSeq,
+    }));
+    return {
+      boardId: storeRef.current?.cache.boardId ?? "",
+      records,
+      cursorId,
+      canUndo: Boolean(cursor && cursor.parentId),
+      canRedo: entries.some((e) => e.parentId === cursorId),
+      note: "每一步都是一次原子写入；撤销与重做沿着当前这条线走。",
+    };
+  }
+  /** 撤销、重做与跳转：走内核的历史导航。 */
+  async function v3HistoryMove(
+    action: "undo" | "redo" | "jump",
+    entryId?: string,
+  ) {
+    await callTool("app_history", {
+      action,
+      ...(action === "jump" ? { entryId } : {}),
+    });
+    const store = storeRef.current;
+    if (store) await store.sync();
+    refreshV3Board();
+    return v3History();
   }
   /** 读一次工作空间列表。读不到就不显示条目——不假装有。 */
   async function refreshWorkspaces() {
@@ -273,6 +546,24 @@ function Workbench() {
     }
   }
   function edit(data: Record<string, unknown>) {
+    if (kernel === "v3") {
+      /* v3 的视角只有选择与镜头；备注、导览、分组还没有对应的内核接口。 */
+      if (Array.isArray(data.selection)) {
+        const selection = data.selection as string[];
+        viewRef.current = { ...viewRef.current, selection };
+        return callTool("app_view", {
+          action: "select",
+          viewId,
+          selection,
+        }).then(() => {
+          refreshV3Board();
+          return true;
+        });
+      }
+      return Promise.reject(
+        Error("这一版内核还没有这个操作。请重新载入白板后再试。"),
+      );
+    }
     return action("sand_edit_view", {
       revision: boardRef.current?.revision,
       viewId,
@@ -280,6 +571,17 @@ function Workbench() {
     });
   }
   const operate = (operation: any) => {
+    if (kernel === "v3") {
+      /* 写失败要让人看见：和 v2 一样把原因放到页面上方。 */
+      const next = operations.current
+        .then(() => operateV3(operation))
+        .catch((e) => {
+          setError(e instanceof Error ? e.message : String(e));
+          return undefined;
+        });
+      operations.current = next.catch(() => undefined);
+      return next;
+    }
     const next = operations.current.then(() =>
       action(
         "sand_edit_space",
@@ -295,6 +597,105 @@ function Workbench() {
     operations.current = next.catch(() => undefined);
     return next;
   };
+  /**
+   * v3 的写入。
+   *
+   * 视角（选择、镜头、进入白板）走 app_view，内容走 app_edit：
+   * 一次操作就是内核里的一条命令（或者一批）。
+   */
+  async function operateV3(operation: any) {
+    const kind = String(operation.kind ?? "");
+    if (kind === "select") {
+      const selection = [...(operation.ids ?? [])];
+      viewRef.current = { ...viewRef.current, selection };
+      /* 视角是第一次建立：内核要知道这块视角在看哪块白板。 */
+      await callTool("app_view", {
+        action: "select",
+        viewId,
+        boardId: storeRef.current?.cache.boardId,
+        selection,
+      });
+      refreshV3Board();
+      return true;
+    }
+    if (kind === "camera") {
+      viewRef.current = { ...viewRef.current, camera: operation.camera };
+      await callTool("app_view", {
+        action: "camera",
+        viewId,
+        boardId: storeRef.current?.cache.boardId,
+        camera: operation.camera,
+      });
+      refreshV3Board();
+      return true;
+    }
+    if (kind === "navigate") {
+      const spaceId = String(operation.spaceId);
+      const from = storeRef.current?.cache.boardId;
+      viewRef.current = {
+        ...viewRef.current,
+        spaceId,
+        selection: [],
+        camera: { x: 24, y: 24, zoom: 1 },
+      };
+      if (from && from !== spaceId)
+        navStackRef.current = [...navStackRef.current, from];
+      await callTool("app_view", {
+        action: "navigate",
+        viewId,
+        boardId: spaceId,
+        navStack: navStackRef.current,
+      });
+      await storeRef.current?.load(spaceId);
+      refreshV3Board();
+      return true;
+    }
+    const store = storeRef.current;
+    if (!store) throw Error("白板还没装载，请稍候再试。");
+    const commands = toCommands(operation, {
+      boardId: store.cache.boardId,
+      objects: store.cache.objects,
+      presentations: store.cache.presentations,
+    });
+    if (!commands.length) return true;
+    /* 意图分组沿用现有的编辑会话：一次连续输入仍然只是一步撤销。 */
+    const intentId = operation.intentId ?? operation.intent;
+    const send = (ops: any[]) =>
+      callTool("app_edit", {
+        ...(intentId ? { intentId: String(intentId) } : {}),
+        commands: ops,
+      });
+    try {
+      await send(commands);
+    } catch (e) {
+      /* 版本对不上：先看是不是界面自己连着写了两次（先标题、后正文）。
+         改的不是同一处就拿着新版本再写一次；别人改了同一处就照实报冲突。 */
+      const retry =
+        operation.expectedVersion === undefined
+          ? undefined
+          : v3RetryInfo(operation, {
+              boardId: store.cache.boardId,
+              objects: store.cache.objects,
+              presentations: store.cache.presentations,
+            });
+      if (!retry || !retry.sameFields) throw e;
+      await store.sync();
+      const again = toCommands(
+        { ...operation, expectedVersion: retry.version },
+        {
+          boardId: store.cache.boardId,
+          objects: store.cache.objects,
+          presentations: store.cache.presentations,
+        },
+      );
+      if (!again.length) throw e;
+      await send(again);
+    }
+    /* 自己写完立刻拉一次增量：界面不用等下一个整秒。 */
+    await store.sync();
+    refreshV3Board();
+    return true;
+  }
   /* Board history: the newest record can always be flipped, and the flip is
      itself recorded, so an undo can be undone. */
   const [history, setHistory] = useState<HistorySnapshot>();
@@ -306,6 +707,63 @@ function Workbench() {
     action("sand_undo_to", { recordId, author: "human" });
   const flipRef = useRef(flip);
   flipRef.current = flip;
+  /**
+   * 认出内核版本，然后（v3 时）装载白板。
+   *
+   * 判据只有一个：sand_status 这个工具在不在。
+   * 只有明确的「工具不存在」才回退 v2；鉴权失败、断线、内部错误照实报错，
+   * 不能误判成 v2——那会把人带到一个已经坏掉的服务端面前。
+   */
+  useEffect(() => {
+    if (!isConnected) return;
+    let alive = true;
+    void (async () => {
+      let status: any;
+      try {
+        status = await callTool("sand_status");
+      } catch (e) {
+        if (!alive) return;
+        if (isUnknownToolError(e)) {
+          setKernel("v2");
+          return;
+        }
+        setError(e instanceof Error ? e.message : String(e));
+        return;
+      }
+      if (!alive) return;
+      setKernel("v3");
+      const boardId = status?.homeBoardId;
+      if (!boardId) {
+        setError("服务端没有给出首页白板。请重新连接后再试。");
+        return;
+      }
+      const store = new V3Store(callTool);
+      storeRef.current = store;
+      viewRef.current = { ...viewRef.current, spaceId: boardId };
+      try {
+        await store.load(boardId);
+        /* 登记视角：内核要先有这条视角，之后的选中与镜头才有地方放。
+           app_view 的 select / camera 不带白板编号，视角只能由 navigate 建立。 */
+        await callTool("app_view", {
+          action: "navigate",
+          viewId,
+          boardId,
+          navStack: [],
+        });
+        if (!alive) return;
+        refreshV3Board();
+        setError("");
+      } catch (e) {
+        if (alive)
+          setError(
+            `白板没有装载成功：${e instanceof Error ? e.message : String(e)}`,
+          );
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [isConnected]);
   useEffect(() => {
     if (!board?.id || !isConnected) return;
     let alive = true;
@@ -318,11 +776,61 @@ function Workbench() {
       alive = false;
     };
   }, [board?.id, board?.revision, isConnected]);
+  /**
+   * v3：每秒拉一次增量，页面不可见时暂停。
+   *
+   * 空闲时只有这一个很小的请求；不再每 5 秒整块拉白板。
+   */
+  useEffect(() => {
+    if (kernel !== "v3") return;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      const store = storeRef.current;
+      if (!store) return;
+      void store
+        .sync()
+        .then((changed) => {
+          if (changed) refreshV3Board();
+        })
+        .catch(() => {});
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [kernel]);
+  /**
+   * v3：活动报告单独读一次。
+   *
+   * 活动表不在增量集里（增量只带内容与布局），所以每 5 秒读一次上下文，
+   * 拿别人的活动报告。这一条很小，不是整块拉白板。
+   */
+  useEffect(() => {
+    if (kernel !== "v3") return;
+    const readActivities = async () => {
+      const context: any = await callTool("sand_context");
+      activitiesRef.current = (context?.otherAgents ?? []).map(
+        (agent: any) => ({
+          agentId: String(agent.actor ?? ""),
+          workspaceId: "",
+          objectIds: [],
+          task: String(agent.task ?? ""),
+          action: "",
+          state: agent.state ?? "unknown",
+          reportedAt: 0,
+        }),
+      );
+      refreshV3Board();
+    };
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void readActivities().catch(() => {});
+    }, 5000);
+    void readActivities().catch(() => {});
+    return () => clearInterval(timer);
+  }, [kernel]);
   /* 连上服务端后读一次工作空间列表。 */
   useEffect(() => {
-    if (!isConnected) return;
+    if (!isConnected || !kernel) return;
     void refreshWorkspaces();
-  }, [isConnected]);
+  }, [isConnected, kernel]);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (blocksCanvasShortcut(e)) return;
@@ -353,13 +861,15 @@ function Workbench() {
     setScope("all");
   };
   useEffect(() => {
+    /* v3 不用这一步：视角由界面自己掌握。 */
+    if (kernel !== "v2") return;
     if (!board?.id || !isConnected || board.views[viewId] || opening.current)
       return;
     opening.current = true;
     void action("sand_open_view", { viewId }).finally(
       () => (opening.current = false),
     );
-  }, [board?.id, isConnected, Boolean(board?.views[viewId])]);
+  }, [board?.id, isConnected, Boolean(board?.views[viewId]), kernel]);
   useEffect(() => {
     if (board?.theme) setTheme("custom");
   }, [JSON.stringify(board?.theme)]);
@@ -401,6 +911,8 @@ function Workbench() {
     await readSource(object);
   }
   useEffect(() => {
+    /* v3 不用整块轮询：增量同步每秒一次就够了。 */
+    if (kernel !== "v2") return;
     if (!board?.id || ended) return;
     const timer = setInterval(() => {
       if (!busy && document.visibilityState === "visible") {
@@ -415,7 +927,7 @@ function Workbench() {
       }
     }, 5000);
     return () => clearInterval(timer);
-  }, [board?.id, busy, ended]);
+  }, [board?.id, busy, ended, kernel]);
   const view = board?.views[viewId];
   const selectedInstance = board?.instances.find(
     (c) => c.id === view?.selection.at(-1),
