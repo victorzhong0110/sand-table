@@ -17,13 +17,15 @@
 
 ## 2. 文字链接、关系与局部定位（T43、T51、T53、T60）
 
-正文链接 `[标题](sand://object/<encodeURIComponent(id)>)` 是文字导航，Markdown 为唯一权威；不创建 base.mentions。UI、MCP、迁移、撤销只维护正文，不需要额外同步。链接仅在当前工作空间解析，禁止作为网络 URL 打开；解码一次、拒绝非法编码、保留未知目标原文。代码块/行内代码不转为链接。语义参与、支持等仍必须由关系槽显式建立。
+正文链接 `[标题](sand://object/<encodeURIComponent(id)>)` 是文字导航，Markdown 为唯一权威；不创建 base.mentions。UI、MCP、迁移、撤销只维护正文，不需要额外同步。链接仅在当前工作空间解析，禁止作为网络 URL 打开；对完整对象 id 编码一次、解析时解码一次，拒绝非法编码并保留未知目标原文。代码块/行内代码不转为链接。语义参与、支持等仍必须由关系槽显式建立。
+
+id `人物/林#a%b` 必须写成 `[标题](sand://object/%E4%BA%BA%E7%89%A9%2F%E6%9E%97%23a%25b)`。`/`、`#`、`%`、中文都在这一次编码里。解码一次得到原 id，不能再解码。`%ZZ`、末尾单独的 `%` 这类非法编码保留原文，不转成链接。不要写成未编码的 `sand://object/<id>`。
 
 base.about 保持便签/讲解用途；base.note.about 为单值，不将其扩成任意对象的通用关系。T60 新内容的多方默认关联用 base.related；context → participants 用 base.involves。默认关联明确显示且允许删除；推测关系在结果里标明，不当作已确认事实。
 
-T51 注册 base.comment（body Markdown、resolved 可选布尔，未设按未解决显示）、base.comments_on（comment → 任意对象）、base.reply_to（comment → comment）。根评论只有一条 comments_on，回复只有一条 reply_to，不同时有两种。内核校验数量、无回复环，回复继承根范围。comments_on.attributes 为 `{scope?: "object"|"presentation", presentationId?: string, anchor?: ExternalLocator}`；省略 scope 按 object；presentation scope 必须引用目标对象的展示。presentationId 是关系上的定位元数据，不能作为独立语义关系或写入对象 data。T51 负责实现校验；T53 扩展 anchor 格式校验。删除展示保留局部批注，标“原展示已移除”；复制展示不复制局部批注；删除目标仍按 01 §8 软删除关联关系；评论及回复对象保留。详情可通过带删除标记的关系墓碑显示失效记录，不能把墓碑当有效绑定；撤销可恢复。
+T51 注册 base.comment（body Markdown、resolved 可选布尔，未设按未解决显示）、base.comments_on（comment → 任意对象）、base.reply_to（comment → comment）。根评论只有一条 comments_on，回复只有一条 reply_to，不同时有两种。内核校验数量、无回复环，回复继承根范围。comments_on.attributes 为 `{scope?: "object"|"presentation", presentationId?: string, anchor?: { fragment: string, version?: string, fingerprint?: string }}`；省略 scope 按 object；presentation scope 必须引用目标对象的展示。presentationId 是关系上的定位元数据，不能作为独立语义关系或写入对象 data。anchor 只描述对象内部位置，不写 uri，不写对象 id。T51 负责实现校验；T53 扩展 anchor 的 fragment 格式校验。删除展示保留局部批注，标“原展示已移除”；复制展示不复制局部批注；删除目标仍按 01 §8 软删除关联关系；评论及回复对象保留。详情可通过带删除标记的关系墓碑显示失效记录，不能把墓碑当有效绑定；撤销可恢复。
 
-T45 注册 base.cites（引用对象 → 来源对象），内部引用的定位只在 relation.attributes.anchor；外部资源引用沿用 ExternalLocator。T53 新建文字引用使用 base.note + base.cites，不重写来源。内部文本/表格定位 uri 用 `sand://object/<编码后的 id>`，kind 使用新增的 `object`；T53 正式增加该枚举并同步类型/Schema；PDF/媒体用 blob URI。所有百分号、分号、等号都规范编码。音视频换 blob、时段越界即失效；重复原文不能唯一定位则失效，不猜测。
+T45 注册 base.cites（引用对象 → 来源对象）。来源对象只由关系端点表示。内部锚点是 `attributes.anchor = { fragment, version?, fingerprint? }`，fragment 按 `03` §10；不包含 uri，不包含对象 id，不是 ExternalLocator，也不新增 kind `object`。外部资源仍用 ExternalLocator。T53 新建文字引用使用 base.note + base.cites，不重写来源。音视频换 blob、时段越界即失效；重复原文不能唯一定位则失效，不猜测。fragment 值里的百分号、分号、等号按 `03` §10 编码。
 
 ## 3. 写入口、导入和迁移（T25、T26、T62）
 
@@ -31,7 +33,7 @@ T45 注册 base.cites（引用对象 → 来源对象），内部引用的定位
 
 T25 只可在未发布的新临时库中直接恢复内容行。只导出存活内容、所有被引用附件及隔离清单；不导出会话/运行记录/历史/审计。同一只读事务快照导出所有行，附件按 sha256 核实，避免多进程导出混合版本。保留对象 id/type_version/version/时间与来源；重建工作空间 revision 和所有行 rev 为同一个新基线，清空历史游标，不复制原 deleted_rev。内置包以本机注册表为准并恢复 enabled；未知类型数据无损保留。
 
-导入先预检格式、大小、重复 ID、首页 container、展示/关系端点、父框同板与无环、数据包清单、附件字节/sha256/大小。结构损坏、缺附件或端点、IO 失败整份失败；仅未知类型与无效包允许降级，无效 manifest 存工作空间 `import-report.json` 并随再次导出携带。禁止从导入内容加载执行代码；T67 的视图另需本地信任。限制原始 JSON 300 MiB、解码附件合计 200 MiB；拒绝路径穿越，工作空间目录名由安全 id 生成。关闭 DB/WAL 后以不覆盖已有目录的发布方式落地，目标冲突重新分配后缀。任何失败删除临时目录，既有库不变。
+导入先预检格式、大小、重复 ID、首页 container、展示/关系端点、父框同板与无环、数据包清单、附件字节/sha256/大小。结构损坏、缺附件或端点、IO 失败整份失败，删除临时目录，不留下部分工作空间，也不把这些失败记成「跳过」。仅未知类型与无效包允许降级，无效 manifest 存工作空间 `import-report.json` 并随再次导出携带。成功时的报告列出导入数量、降级条目及原因、未随包带走的外部资源。禁止从导入内容加载执行代码；T67 的视图另需本地信任。限制原始 JSON 300 MiB、解码附件合计 200 MiB；拒绝路径穿越，工作空间目录名由安全 id 生成。关闭 DB/WAL 后以不覆盖已有目录的发布方式落地，目标冲突重新分配后缀。任何失败删除临时目录，既有库不变。
 
 T26 读迁移不写库，写迁移与字段修改在同一事务；只改标题且迁移失败时允许保留旧 data/type_version。返回 migrationError 和 typeVersion 的接口包括 read/query/board/changes；变更工具输出契约一并更新。每步验证返回普通对象和大小上限，最终通过当前 Schema（旧版本 Schema 不要求保留）；不可将未来类型版本降级。历史快照保存真实落盘 before/after，撤销恢复旧类型版本，不把读取投影当历史原值。
 

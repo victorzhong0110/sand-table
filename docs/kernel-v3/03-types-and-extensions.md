@@ -77,7 +77,7 @@ export type PackSpec = {
 
 1. 顶层是 `{"type": "object", "properties": {...}, "additionalProperties": false}`。
 2. **内容字段不写 `default`。** 没填就是字段不存在。只有配置类枚举可以有默认值（例如图表的 `kind`），写在 `x-sand-default` 里，由界面在新建时填入，校验器不使用它。
-3. **不在数据里存其他对象的 id。** 指向对象的语义一律用关系槽（§4）。正文允许 `sand://object/<编码后的 id>` 导航链接；链接是文字内容，不是关系槽，不产生 `base.mentions` 或其他持久关系。UI 与 AI 均只写正文，目标不存在时原文保留并显示失效。见 `05-delivery-contracts.md` §2。
+3. **不在数据里存其他对象的 id。** 指向对象的语义一律用关系槽（§4）。正文允许 `sand://object/<编码后的 id>` 导航链接；链接是文字内容，不是关系槽，不产生 `base.mentions` 或其他持久关系。生成时对完整 id 做一次 `encodeURIComponent`，解析时解码一次。UI 与 AI 均只写正文，目标不存在时原文保留并显示失效。内部锚点不保存对象 id，也不保存含对象 id 的 URI（§10）。见 `05-delivery-contracts.md` §2。
 4. 能用 `required` 的地方慎用：创作草稿允许缺项。只把“没有它这个对象就没有意义”的字段设为必填（例如人物的 `name` 也**不**必填，标题已经承担名字的作用）。
 5. 数字字段写明 `type: "number"` 或 `"integer"`，需要时加 `minimum`；不要用字符串存数字。
 6. 长文本用 `{"type": "string", "x-sand-widget": "markdown"}`，存 Markdown。
@@ -296,7 +296,11 @@ PackSpec.derivedIdPrefix 只允许内置包声明，非空、以冒号结尾、�
 
 ## 10. 锚点格式
 
-精确引用、批注、媒体定位共用 `ExternalLocator`（`01-data-model.md` §5），片段写在 `fragment` 里，格式固定如下。多个键用 `;` 分隔，值里的 `;` 和 `=` 用百分号编码。
+内部锚点放在关系的 `attributes.anchor` 里，形状是 `{ fragment, version?, fingerprint? }`。对象只由关系端点表示。锚点保存对象内部的位置、必要时的版本和指纹，不写 `uri`，不写对象 id，也不是 `ExternalLocator`。
+
+`ExternalLocator`（`01-data-model.md` §5）只描述外部资源。kind 保持 `file | git | pdf | url | dataset | symbol`，不新增 `object`。
+
+`fragment` 格式固定如下。多个键用 `;` 分隔，值里的 `;` 和 `=` 用百分号编码。
 
 | 资源 | `fragment` 格式 | 说明 |
 |---|---|---|

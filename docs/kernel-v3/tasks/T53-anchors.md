@@ -20,7 +20,7 @@
 
 ## 开工前核对
 
-确认 `03` §10 的格式在 `main` 上未被修改；T43、T45、T51 已合并。依赖未完成则等待；机械差异按 05 §1 适配，语义冲突只暂停受影响部分。
+确认 T43、T45、T51 已合并。内部锚点以本卡、`03` §10 和 `05` §2 为准，已经定了：`{ fragment, version?, fingerprint? }`，对象由关系端点表示。不要因为这份格式相对更早草稿改过而停下来，也不要改回带对象 id 的 `sand://object/` uri。依赖未完成则等待；机械差异按 05 §1 适配。
 
 ## 可改文件
 
@@ -30,7 +30,8 @@
 
 ## 不要做
 
-- 不改锚点格式；需要改，先停下来问。
+- 不把对象 id 或 `sand://object/` 写进锚点，不新增 `ExternalLocator` 的 `kind: "object"`，不给内部锚点加 `uri`。
+- 不改 `03` §10 的 fragment 格式；需要改格式，先停下来问。
 - 不做 OCR。
 
 ## 做法
@@ -41,7 +42,7 @@
    - PDF、图片：在查看器里框选一个区域。
    - 音视频：在当前播放位置打点，或拖出一个区间。
    - 表格：选中若干单元格。
-   生成的锚点只放进 base.comments_on 或 base.cites 关系的 `attributes.anchor`（`ExternalLocator`），同时记 fingerprint；新引用建 base.note，引用文字与原文分开。
+   生成的锚点只放进 base.comments_on 或 base.cites 关系的 `attributes.anchor`，形状是 `{ fragment, version?, fingerprint? }`。对象只由关系端点表示。新引用建 base.note，引用文字与原文分开。
 3. **显示**：在原内容上高亮锚点；悬停显示对应的批注或引用；点击引用跳到原内容并高亮。
 4. **重新定位**（`relocate.ts`）：原内容的指纹变了时：
    - 文字：在新内容里找 `quote`；有多处匹配时用 `prefix` / `suffix` 区分；唯一匹配就更新位置并标“已自动跟上”；找不到或仍有歧义就标失效。
@@ -60,4 +61,4 @@
 
 ## 交接与边界验收
 
-音视频内容换 blob 或时段越界判失效；locator 对象 kind 和 relation anchor 校验同步共享类型。关系更新携带版本条件，重定位结果仅唯一匹配可采纳。
+音视频内容换 blob 或时段越界判失效。关系上的 anchor 只接受 fragment、可选 version 和 fingerprint；带 uri 或对象 id 的锚点拒绝写入。不修改 `ExternalLocator` 的 kind 联合。关系更新携带版本条件，重定位结果仅唯一匹配可采纳。

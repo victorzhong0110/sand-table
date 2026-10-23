@@ -14,7 +14,7 @@
 
 逐项实测：
 
-1. **Markdown 往返**：用 `workbench/spikes/text/corpus/` 里你准备的样例（标题、列表、嵌套列表、任务列表、表格、链接、`sand://object/<id>` 链接、行内代码、代码块、引用、行内公式、块公式、中文长段落），加载后不做任何编辑直接导出，与原文逐字比较。列出每个差异。
+1. **Markdown 往返**：用 `workbench/spikes/text/corpus/` 里你准备的样例（标题、列表、嵌套列表、任务列表、表格、链接、对象链接、行内代码、代码块、引用、行内公式、块公式、中文长段落），加载后不做任何编辑直接导出，与原文逐字比较。列出每个差异。对象链接样例必须是编码后的原文，不要写成 `sand://object/<id>`。corpus 里至少包括：`[标题](sand://object/%E4%BA%BA%E7%89%A9%2F%E6%9E%97%23a%25b)`（id `人物/林#a%b` 做一次 `encodeURIComponent`），以及非法编码 `[标题](sand://object/%ZZ)`。两段都要逐字保留，编辑器不能解码后再编码，也不能改写非法百分号。
 2. **中文输入法**：Chrome、Safari 下用拼音输入法连续输入、选词、删除，是否丢字、跳光标、提前提交。
 3. **撤销**：编辑器自己的撤销在编辑期间可用；离开编辑后整段修改作为白板历史里的一步（与 `board/edit-session.ts` 的意图分组配合），说明怎么接。
 4. **体积**：gzip 后多少；按 T41 的规则能否按需加载。
@@ -26,7 +26,7 @@
 
 - `AGENTS.md`
 - `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
-- `docs/kernel-v3/00-decisions.md` K8、`03-types-and-extensions.md` §3.1 第 3 条（`sand://object/<id>` 链接）
+- `docs/kernel-v3/00-decisions.md` K8、`03-types-and-extensions.md` §3.1 第 3 条、`05-delivery-contracts.md` §2（对象链接编码一次；样例见该节）
 - `docs/adr/0002-bundle-loading.md`（T41 产物）
 - issue #37
 
@@ -41,4 +41,4 @@
 
 ## 交付
 
-`docs/adr/0003-rich-text.md`：上面 7 项的实测结果表、选定方案、Markdown 中**不支持**的语法清单（遇到时原样保留为纯文本）、给 T43 的接入要点。架构负责人审过合并后，T43 才开工。
+`docs/adr/0003-rich-text.md`：上面 7 项的实测结果表、选定方案、Markdown 中**不支持**的语法清单（遇到时原样保留为纯文本）、给 T43 的接入要点。接入要点必须写明：插入对象链接时对完整 id 做一次 `encodeURIComponent`，示例用 `05` §2 的 `人物/林#a%b`，不要让 T43 照抄未编码的 `<id>`。架构负责人审过合并后，T43 才开工。

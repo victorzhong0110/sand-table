@@ -15,7 +15,7 @@
 
 - `AGENTS.md`
 - `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
-- `docs/kernel-v3/03-types-and-extensions.md` §3.2（控件列表与提示关键字）、§10（锚点格式，`locator` 控件要用）
+- `docs/kernel-v3/03-types-and-extensions.md` §3.2（控件列表与提示关键字）。`locator` 控件编辑外部资源，用 `01-data-model.md` §5 的 `ExternalLocator`。§10 是内部锚点的 fragment，不是这个控件。
 - `workbench/board/views/registry.ts`、`format.ts`（T34 定的控件接口）
 
 ## 开工前核对

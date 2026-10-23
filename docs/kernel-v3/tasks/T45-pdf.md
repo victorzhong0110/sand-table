@@ -40,7 +40,7 @@ PDF 能在白板上直接翻页、缩放；选中某一页可以“引用这一�
 ## 做法
 
 1. **查看**：卡片上显示当前页；上一页、下一页、页码输入、缩放；双击打开大查看器。翻页和缩放只是视图状态，不进历史。
-2. **页级引用**：查看器里“引用这一页” → 新建一个 `research.evidence`（科研包启用时）或 `base.note`（否则），引用对象正文保存摘录文字；`base.cites` 关系的 `attributes.anchor` 带 `ExternalLocator`：`kind: "pdf"`、`uri: "blob:<sha256>"`、`fragment: "page=<N>"`、`fingerprint`（该页文字的 sha256）；同时建 `base.cites` 关系指向 PDF 对象（本卡注册该关系；内部引用以此关系的锚点为唯一定位权威，外部文件导入仍沿用 `research.evidence.citation`）。
+2. **页级引用**：查看器里“引用这一页” → 新建一个 `research.evidence`（科研包启用时）或 `base.note`（否则），引用对象正文保存摘录文字；建 `base.cites` 指向 PDF 对象（本卡注册该关系）。内部锚点只放在该关系的 `attributes.anchor`：`{ fragment: "page=<N>", fingerprint }`，fingerprint 是该页文字的 sha256。不写 `uri`，不写对象 id，不用 `ExternalLocator`，不新增 kind `object`。对象只由关系端点表示。外部文件导入仍沿用 `research.evidence.citation` 的 `ExternalLocator`。
 3. **回跳**：点击引用里的定位，打开 PDF 查看器并翻到那一页。
 4. **失效检查**：PDF 被替换（sha256 变了）后，引用显示“原文件已更换，页码可能对不上”；同一文件但该页文字指纹不同时显示“该页内容已变化”。
 
