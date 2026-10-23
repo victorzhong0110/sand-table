@@ -62,8 +62,16 @@
   width: 1px;
   background: var(--line);
 }
-.history-node.is-branch::before {
-  left: 20px;
+.history-node.is-branch::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 17px;
+  background: linear-gradient(var(--line), var(--line)) right / 1px 100% no-repeat,
+    linear-gradient(var(--line), var(--line)) 0 11px / 100% 1px no-repeat;
+  pointer-events: none;
 }
 .history-node:first-child::before {
   top: 11px;

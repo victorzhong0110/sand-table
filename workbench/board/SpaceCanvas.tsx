@@ -1,3 +1,4 @@
+import { blocksCanvasShortcut } from "./keyboard.ts";
 import { useEffect, useRef, useState } from "react";
 import type { Board } from "../core/model.ts";
 import { Icon } from "./Icon.tsx";
@@ -83,9 +84,25 @@ export function SpaceCanvas({
   });
   const options = useRef({ operate, edgePan, edgeSpeed, motionPaused });
   options.current = { operate, edgePan, edgeSpeed, motionPaused };
-  /* 选区跟着服务端的状态走，按键处理时读到的必须是最新的一份。 */
   const selection = useRef<string[]>([]);
-  selection.current = view?.selection ?? [];
+  const serverSelection = useRef<string[]>([]);
+  serverSelection.current = view?.selection ?? [];
+  const selectionRequest = useRef(0);
+  const selectionSeq = useRef(0);
+  if (!selectionRequest.current) selection.current = serverSelection.current;
+  const changeSelection = async (ids: string[]) => {
+    const request = ++selectionSeq.current;
+    selectionRequest.current = request;
+    selection.current = ids;
+    try {
+      return await options.current.operate({ kind: "select", ids });
+    } finally {
+      if (selectionRequest.current === request) {
+        selectionRequest.current = 0;
+        selection.current = serverSelection.current;
+      }
+    }
+  };
   const stopAnimation = (commit = false) => {
     if (commit && animation.current)
       void options.current.operate({
@@ -208,6 +225,7 @@ export function SpaceCanvas({
       stopEdge();
     };
     const key = (e: KeyboardEvent) => {
+      if (blocksCanvasShortcut(e)) return;
       const target = e.target as HTMLElement | null;
       /* 正在打字时，键归那个输入框：不让画布抢走。 */
       const typing = Boolean(
@@ -223,7 +241,7 @@ export function SpaceCanvas({
         if (typing) return;
         if (selection.current.length) {
           e.preventDefault();
-          void options.current.operate({ kind: "select", ids: [] });
+          void changeSelection([]);
         }
         return;
       }
@@ -308,8 +326,7 @@ export function SpaceCanvas({
       baseTitle: resolved.title,
       baseData: resolved.data,
     });
-    if (!view?.selection.includes(c.id))
-      void operate({ kind: "select", ids: [c.id] });
+    if (!view?.selection.includes(c.id)) void changeSelection([c.id]);
   };
   const commitEdit = async () => {
     const edit = editing;
@@ -514,14 +531,13 @@ export function SpaceCanvas({
             });
     }
   const select = (id: string, shift = false) =>
-    operate({
-      kind: "select",
-      ids: shift
-        ? view.selection.includes(id)
-          ? view.selection.filter((i) => i !== id)
-          : [...view.selection, id]
+    changeSelection(
+      shift
+        ? selection.current.includes(id)
+          ? selection.current.filter((i) => i !== id)
+          : [...selection.current, id]
         : [id],
-    });
+    );
   const parents = [];
   let space = b.spaces.find((s) => s.id === view.spaceId);
   while (space && parents.length < b.spaces.length) {
@@ -689,7 +705,7 @@ export function SpaceCanvas({
                 y + r.height * camera.zoom > l.y
               );
             });
-            void operate({ kind: "select", ids: picked.map((c) => c.id) });
+            void changeSelection(picked.map((c) => c.id));
             setLasso(undefined);
           } else if (d) {
             if (
@@ -697,7 +713,7 @@ export function SpaceCanvas({
                 Math.abs(live.current.camera.y - d.base.y) <
               4
             )
-              void operate({ kind: "select", ids: [] });
+              void changeSelection([]);
             else void operate({ kind: "camera", camera: live.current.camera });
           }
         }}
