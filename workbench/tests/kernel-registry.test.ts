@@ -42,8 +42,12 @@ const note = (patch: Partial<TypeSpec> = {}): TypeSpec => ({
   ...patch,
 });
 
-function pack(patch: Partial<PackSpec> = {}): PackSpec {
+function pack(
+  patch: Partial<PackSpec> = {},
+): PackSpec & { format: "sand-table-pack"; formatVersion: 2 } {
   return {
+    format: "sand-table-pack",
+    formatVersion: 2,
     id: "demo",
     title: "示例",
     version: 1,
@@ -300,4 +304,93 @@ test("重新注册会替换旧类型", () => {
   assert.equal(registry.getType("demo.note")?.title, "新便签");
   assert.equal(registry.getType("demo.old"), undefined);
   assert.equal(registry.validateData("demo.note", { age: 1 }).ok, true);
+});
+
+test("包结构不合法时返回字段错误而非 TypeError", () => {
+  const r = createRegistry();
+  for (const value of [
+    null,
+    [],
+    {},
+    { id: "demo", title: "示例" },
+    { id: "demo", title: "示例", version: 0 },
+    { ...pack(), types: [null] },
+    { ...pack(), types: [{ type: "demo.note" }] },
+  ])
+    assert.throws(
+      () => r.registerPack(value, "data"),
+      (e: unknown) => e instanceof PackSpecError && e.problems.length > 0,
+    );
+});
+test("失败注册不污染 Schema ID，升级可替换同 ID 的 Schema", () => {
+  const r = createRegistry();
+  const make = (minimum: number) =>
+    pack({
+      types: [
+        note({
+          schema: {
+            ...note().schema,
+            $id: "urn:demo:note",
+            properties: { age: { type: "integer", minimum } },
+          },
+        }),
+      ],
+    });
+  const bad = make(1);
+  bad.types![0].display.summary = ["missing"];
+  assert.throws(() => r.registerPack(bad, "data"), PackSpecError);
+  r.registerPack(make(1), "data");
+  r.registerPack({ ...make(3), version: 2 }, "data");
+  assert.equal(r.validateData("demo.note", { age: 2 }).ok, false);
+});
+test("注册后外部修改不能改变声明和校验", () => {
+  const r = createRegistry(),
+    input = pack();
+  r.registerPack(input, "data");
+  input.title = "外部改动";
+  assert.notEqual(r.getPack("demo")?.spec.title, input.title);
+  assert.throws(() => {
+    r.getType("demo.note")!.title = "绕过";
+  }, TypeError);
+});
+
+test("数据包必须有协议标记，模板命令必须完整且仅含公共操作", () => {
+  const r = createRegistry();
+  const manifest: Record<string, unknown> = { ...pack() };
+  delete manifest.format;
+  delete manifest.formatVersion;
+  assert.throws(() => r.registerPack(manifest, "data"), PackSpecError);
+  for (const command of [
+    { op: "unknown" },
+    { op: "object.create" },
+    { op: "presentation.create", boardId: "$board" },
+    { op: "object.upsert_derived", id: "demo:x" },
+  ])
+    assert.throws(
+      () =>
+        r.registerPack(
+          pack({
+            templates: [
+              { id: "demo.bad", title: "错误模板", commands: [command as any] },
+            ],
+          }),
+          "data",
+        ),
+      PackSpecError,
+    );
+  r.registerPack(
+    pack({
+      templates: [
+        {
+          id: "demo.good",
+          title: "新建便签",
+          commands: [
+            { op: "object.create", type: "demo.note", ref: "x" },
+            { op: "presentation.create", boardId: "$board", objectId: "@x" },
+          ],
+        },
+      ],
+    }),
+    "data",
+  );
 });
