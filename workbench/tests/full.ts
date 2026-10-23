@@ -136,6 +136,20 @@ try {
     }
     throw Error("Board did not reach expected state after UI operation.");
   };
+  /* 界面上的按钮是异步写：点了不等它落到服务端，下一步就可能读到旧状态。
+     提案的「确认这一版」就是这种——确认没记上就 prepare，会被服务端拒绝。 */
+  const untilProposal = async (
+    proposalId: string,
+    predicate: (p: any) => boolean,
+  ) => {
+    const end = Date.now() + 10000;
+    while (Date.now() < end) {
+      const p = await call("sand_read_proposal", { boardId, proposalId });
+      if (predicate(p)) return p;
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    throw Error("Proposal did not reach expected state after UI operation.");
+  };
   await page.getByRole("button", { name: "返回白板" }).click();
   await frame.getByRole("textbox", { name: "搜索对象" }).fill("src/index.js");
   await frame
@@ -190,6 +204,7 @@ try {
   assert.equal(pre.isError, true);
   assert.equal(readFileSync(join(repo, file.path), "utf8"), before);
   await frame.getByRole("button", { name: "确认这一版" }).click();
+  await untilProposal(proposal.id, (p: any) => p.decision === "accepted");
   const args = {
     boardId,
     proposalId: proposal.id,

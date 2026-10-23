@@ -86,6 +86,20 @@ try {
     }
     throw Error("Expected state not reached.");
   };
+  /* 按键前要等界面把选区画出来。
+     画布上的 Delete / Esc 读的是界面这一版板面（SpaceCanvas 的 selection），
+     只等服务端会差半拍：服务端先记下选中，浏览器还没收到回话，
+     这时按下的键会落在空选区上，什么都不发生。
+     人看不见高亮就不会按 Esc，所以这不是产品缺陷，是等待口径不对。 */
+  const untilUiSelection = async (count: number) => {
+    for (let i = 0; i < 150; i++) {
+      if ((await frame.locator(".component-card.selected").count()) === count) {
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    throw Error("The board never showed the expected selection.");
+  };
   /* #10: the zoom bar's five controls must stay visible and clickable. A "放大"
      button that silently disappeared was reported; visibility is asserted
      here so it cannot regress unnoticed. The ruler in the issue is "any
@@ -480,6 +494,7 @@ try {
     "Dragging the handle resizes the selected component.",
   );
   /* Delete 移除选中的组件，撤销一次把它带回来。 */
+  await untilUiSelection(1);
   await page.keyboard.press("Delete");
   b = await until((b) => !b.instances.some((i: any) => i.id === noteId));
   assert.equal(
@@ -496,6 +511,7 @@ try {
   /* Esc 取消选择。 */
   await t02.click();
   b = await until((b) => selectedInstances(b).includes(noteId));
+  await untilUiSelection(1);
   await page.keyboard.press("Escape");
   b = await until((b) => selectedInstances(b).length === 0);
   assert.equal(selectedInstances(b).length, 0, "Escape clears the selection.");
@@ -513,6 +529,7 @@ try {
   );
   await nameField.fill("我的计划");
   /* 第一次 Escape 归输入框（撤销改动并失焦），第二次才是取消选择。 */
+  await untilUiSelection(1);
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
   b = await until((b) => selectedInstances(b).length === 0);
