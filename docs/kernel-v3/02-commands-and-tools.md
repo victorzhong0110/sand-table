@@ -132,8 +132,8 @@ export class CommandError extends Error {
 公共 Command 不接受任意 ID 或内置包初始化。T13 另实现 `applySystemCommands(db, registry, batch)`，与 applyCommands 复用同一个私有事务/校验/修订/审计实现：
 
 - `pack.sync_builtin { id, version, enabledByDefault }`：核实注册表同 ID/version 的 builtin；不存在才插入，已有行保留 enabled；拒绝覆盖同 ID 数据包。
-- `object.upsert_derived { id, type, title, data, source }`：只允许 derived 来源和内置包的 ID 命名空间策略；已存在必须为同包 derived，不覆盖人工内容；创建/刷新保留稳定 ID，仍校验 Schema。
-- 两者不进撤销历史，但更新修订号与审计。命名空间策略由包提供，内核不硬编码代码领域词。
+- `object.upsert_derived { packId, id, type, title, data, source }`：只允许 derived 来源和内置包的 ID 命名空间策略；已存在必须为同包 derived，不覆盖人工内容；创建/刷新保留稳定 ID，仍校验 Schema。
+- 两者不进撤销历史，但更新修订号与审计。命名空间策略为 PackSpec.derivedIdPrefix，由 Registry.getPack(packId) 读取，校验规则见03的派生身份策略。内核不硬编码领域前缀。
 - MCP、UI、模板和数据包解析器只接受公共 Command，拒绝这两个内部 op；不能由调用者伪造 actor 获得权限。
 - `@ref` / `$board` 只在实体引用槽 id/boardId/objectId/parentId/sourceId/targetId 解析；正文、URL、代码和其他用户数据不扫描替换，`@alice` 保持原文。
 

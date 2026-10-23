@@ -79,3 +79,5 @@ export function importV2(jsonFile: string, dbFile: string, registry: Registry, n
 手工核对（写进 PR 描述，不提交数据）：若本机 `~/.sand-table/workspaces/` 下有真实工作空间，**复制**一份到临时目录后导入，报告对象、展示、关系数量和 `skipped` 条目。
 
 命令：`npm run format:check`、`npm run typecheck`、`npm test` 全部通过。
+
+旧代码派生对象保留稳定 external URI/fragment，供内部upsert核对身份并复用原ID；不得仅凭可重名的标题覆盖旧对象。

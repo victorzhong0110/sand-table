@@ -22,6 +22,7 @@
 
 - 新建 `workbench/kernel/commands.ts`、`workbench/kernel/history-record.ts`、`workbench/kernel/packs-state.ts`、`workbench/kernel/labels.ts`
 - `workbench/kernel/index.ts`（加导出）
+- `workbench/kernel/types.ts`（声明 SystemCommand/SystemCommandBatch，与02 §1.5一致）
 - 新建 `workbench/tests/kernel-commands.test.ts`
 
 ## 不要做
@@ -100,3 +101,5 @@ export function recordHistory(db: Db, batch: CommandBatch, changes: Change[], la
 
 ## T07 补充验收
 实现 02 §1.5 内部命令并复用统一事务。公共解析器拒绝内部 op；内置包首次初始化成功、重新打开保留启停；固定 derived ID 可更新但不得覆盖人工对象；正文 @alice 不被替换。allowsInferred=false 在创建/更新时都拦截。设置/包移除及撤销创建生成墓碑。注册表只在事务成功后切换，回滚不残留。
+
+内部upsert的packId、derivedIdPrefix和旧ID定位校验按03派生身份策略；不要猜测未声明的namespace API。
