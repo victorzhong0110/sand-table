@@ -1,5 +1,6 @@
 import Ajv2020 from "ajv/dist/2020.js";
 import type { ValidateFunction } from "ajv";
+import { PACK_SCHEMA } from "./pack-schema.ts";
 import { ajvErrorsToFieldErrors, type SchemaProblem } from "./messages.ts";
 import type {
   JsonSchema,
@@ -55,7 +56,7 @@ export class PackSpecError extends Error {
 type RegisteredPack = { spec: PackSpec; kind: "builtin" | "data" };
 
 export type Registry = {
-  registerPack(spec: PackSpec, kind: "builtin" | "data"): void;
+  registerPack(spec: unknown, kind: "builtin" | "data"): void;
   unregisterPack(id: string): void;
   getPack(id: string): RegisteredPack | undefined;
   listPacks(): RegisteredPack[];
@@ -72,8 +73,9 @@ export type Registry = {
 export function createRegistry(): Registry {
   const packs = new Map<string, RegisteredPack>();
   const validators = new Map<string, ValidateFunction>();
-  const ajv = new Ajv2020({ strict: true, allErrors: true });
-  for (const keyword of SCHEMA_KEYWORDS) ajv.addKeyword(keyword);
+  const validatePack = new Ajv2020({ strict: true, allErrors: true }).compile(
+    PACK_SCHEMA,
+  );
 
   function typesOf(spec: PackSpec) {
     return spec.types ?? [];
@@ -107,8 +109,19 @@ export function createRegistry(): Registry {
     return { typeNames, relationNames, templateIds };
   }
 
-  function registerPack(spec: PackSpec, kind: "builtin" | "data") {
+  function registerPack(input: unknown, kind: "builtin" | "data") {
+    if (!validatePack(input))
+      throw new PackSpecError(
+        ajvErrorsToFieldErrors(validatePack.errors, PACK_SCHEMA),
+      );
+    if (kind !== "builtin" && kind !== "data")
+      throw new PackSpecError([
+        { path: "/kind", message: "包种类必须是 builtin 或 data。" },
+      ]);
+    const spec = copySpec(input as PackSpec);
     const problems = checkPack(spec, kind, taken(spec.id));
+    const ajv = new Ajv2020({ strict: true, allErrors: true });
+    for (const keyword of SCHEMA_KEYWORDS) ajv.addKeyword(keyword);
     const compiled = new Map<string, ValidateFunction>();
     for (const [index, type] of typesOf(spec).entries()) {
       if (!isSchemaRecord(type.schema)) continue;
@@ -126,7 +139,7 @@ export function createRegistry(): Registry {
     }
     if (problems.length) throw new PackSpecError(problems);
     removePack(spec.id);
-    packs.set(spec.id, { spec, kind });
+    packs.set(spec.id, Object.freeze({ spec: freezeSpec(spec), kind }));
     for (const [type, validate] of compiled) validators.set(type, validate);
   }
 
@@ -210,12 +223,20 @@ function checkPack(
       });
     if ((spec.presets?.length ?? 0) > 50)
       problems.push({ path: "/presets", message: "数据包最多 50 个预设。" });
-    if (spec.registerTools)
+    if (Object.prototype.hasOwnProperty.call(spec, "registerTools"))
       problems.push({
         path: "/registerTools",
         message: "数据包不能注册工具。",
       });
   }
+  if (
+    spec.registerTools !== undefined &&
+    typeof spec.registerTools !== "function"
+  )
+    problems.push({
+      path: "/registerTools",
+      message: "工具注册器必须是函数。",
+    });
   const relationNames = new Set(taken.relationNames);
   for (const [index, relation] of (spec.relationKinds ?? []).entries()) {
     const path = `/relationKinds/${index}/kind`;
@@ -245,16 +266,28 @@ function checkPack(
         message: `类型名「${type.type}」重复了。`,
       });
     typeNames.add(type.type);
-    if (kind === "data" && type.display.view)
+    if (
+      kind === "data" &&
+      Object.prototype.hasOwnProperty.call(type.display, "view")
+    )
       problems.push({
         path: `${base}/display/view`,
         message: "数据包的类型不能指定自定义视图。",
       });
-    if (kind === "data" && type.migrations?.length)
+    if (
+      kind === "data" &&
+      Object.prototype.hasOwnProperty.call(type, "migrations")
+    )
       problems.push({
         path: `${base}/migrations`,
         message: "数据包的类型不能带迁移函数。",
       });
+    for (const [i, migration] of (type.migrations ?? []).entries())
+      if (typeof migration.migrate !== "function")
+        problems.push({
+          path: `${base}/migrations/${i}/migrate`,
+          message: "迁移必须是函数。",
+        });
     checkSchema(type, base, problems);
     const properties = schemaProperties(type.schema);
     for (const [fieldIndex, field] of (type.display.summary ?? []).entries()) {
@@ -277,6 +310,11 @@ function checkPack(
   }
   const templateIds = new Set(taken.templateIds);
   for (const [index, template] of (spec.templates ?? []).entries()) {
+    if (!prefixedName(spec.id, template.id))
+      problems.push({
+        path: `/templates/${index}/id`,
+        message: "模板 id 必须以本包前缀开头。",
+      });
     if (templateIds.has(template.id))
       problems.push({
         path: `/templates/${index}/id`,
@@ -385,4 +423,20 @@ function isSchemaRecord(value: unknown): value is Record<string, unknown> {
 
 function escapePointer(name: string) {
   return name.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+function copySpec<T>(v: T): T {
+  if (Array.isArray(v)) return v.map(copySpec) as T;
+  if (v && typeof v === "object")
+    return Object.fromEntries(
+      Object.entries(v).map(([k, x]) => [k, copySpec(x)]),
+    ) as T;
+  return v;
+}
+function freezeSpec<T>(v: T): T {
+  if (v && typeof v === "object") {
+    for (const x of Object.values(v)) freezeSpec(x);
+    Object.freeze(v);
+  }
+  return v;
 }
