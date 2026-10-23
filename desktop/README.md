@@ -80,3 +80,10 @@ xvfb-run -a node scripts/smoke.mjs   # Linux 上跑真实应用
 
 冒烟检查会确认：窗口确实打开本地工作台、白板渲染出来、本地 API 可用、
 MCP 配置指向桌面版自身。截图落在 `desktop/dist/smoke/`。
+
+
+## 预览版验证边界
+
+Windows 命令面向 PowerShell，全部配置格式带运行所需环境变量。便携版首次启动将 MCP 运行时复制到用户数据目录 mcp-runtime/<内容指纹>，增加约一份应用大小的占用；临时解压目录删除后已保存入口仍可用，旧版本副本保留。升级后可重新生成当前版本配置。
+
+Windows CI 执行实际构建、安装与窗口检查。真人安装、保存重启及真实 Codex/Claude 客户端连接仍需记录；Linux交叉打包不代替Windows验收。
