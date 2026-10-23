@@ -1,3 +1,6 @@
+import type { Db } from "./db.ts";
+import type { Registry } from "./registry.ts";
+
 export type Actor = { id: string; kind: "human" | "agent" };
 
 export type ExternalLocator = {
@@ -214,7 +217,22 @@ export type CommandResult = {
 
 export type JsonSchema = Record<string, unknown>;
 
-export type ToolRegistrar = unknown;
+/**
+ * 工具注册器。内核不认 zod，参数结构按 zod 的 shape 传进来，
+ * 具体类型由 server/v3/ 那一层收窄。
+ */
+export type ToolRegistrar = {
+  tool(
+    name: string,
+    description: string,
+    shape: Record<string, unknown>,
+    handler: (
+      args: any,
+      ctx: { actor: Actor; db: Db; registry: Registry },
+    ) => unknown,
+    options?: { appOnly?: boolean; readOnly?: boolean; ui?: boolean },
+  ): void;
+};
 
 export type PresetSpec = {
   key: string;

@@ -1,6 +1,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { bind } from "../connectors/git.ts";
 import { createServer } from "./server.ts";
+import { createServerV3 } from "./v3/server.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -32,8 +33,16 @@ const derived = roots.length
   ? "project-" +
     createHash("sha256").update(roots.join("|")).digest("hex").slice(0, 12)
   : "default";
-const { server } = createServer(roots.length ? bind(roots) : [], undefined, {
-  workspaceRoot: root,
-  workspaceId: workspaceId || derived,
-});
-await server.connect(new StdioServerTransport());
+if (process.env.SAND_KERNEL === "v3") {
+  const { server } = createServerV3({
+    workspaceRoot: root,
+    workspaceId: workspaceId || derived,
+  });
+  await server.connect(new StdioServerTransport());
+} else {
+  const { server } = createServer(roots.length ? bind(roots) : [], undefined, {
+    workspaceRoot: root,
+    workspaceId: workspaceId || derived,
+  });
+  await server.connect(new StdioServerTransport());
+}
