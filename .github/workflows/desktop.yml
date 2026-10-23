@@ -1,0 +1,50 @@
+name: Windows desktop
+on:
+  pull_request:
+    paths: ['desktop/**', 'workbench/local/**', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - run: npm ci --ignore-scripts
+        working-directory: workbench
+      - run: npm run build
+        working-directory: workbench
+      - run: npm ci
+        working-directory: desktop
+      - run: node --test desktop/tests/*.test.cjs
+      - run: npm run dist
+        working-directory: desktop
+      - name: Install the actual setup executable
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem desktop/dist/*-setup.exe | Select-Object -First 1
+          $target = Join-Path $env:RUNNER_TEMP 'sand-installed'
+          $p = Start-Process $setup.FullName -ArgumentList @('/S', "/D=$target") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Installer failed: $($p.ExitCode)" }
+          $exe = Get-ChildItem $target -Filter '*.exe' | Where-Object Name -NotMatch 'uninstall' | Select-Object -First 1
+          if (!$exe) { throw 'Installed application missing' }
+          node desktop/scripts/smoke.mjs --executable $exe.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Open the actual portable executable
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem desktop/dist/*-portable.exe | Select-Object -First 1
+          node desktop/scripts/portable-smoke.mjs --executable $exe.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-desktop-preview
+          path: |
+            desktop/dist/*-setup.exe
+            desktop/dist/*-portable.exe
+            desktop/dist/smoke/**/*.png

@@ -8,6 +8,12 @@ const { app, BrowserWindow, Menu, dialog, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const { existsSync, mkdirSync } = require("node:fs");
 const path = require("node:path");
+const { persistMcpRuntime } = require("./mcp-runtime.cjs");
+if (process.env.SAND_DESKTOP_USER_DATA) {
+  const userData = path.resolve(process.env.SAND_DESKTOP_USER_DATA);
+  mkdirSync(userData, { recursive: true, mode: 0o700 });
+  app.setPath("userData", userData);
+}
 
 const isPackaged = app.isPackaged;
 // 打包后工作台在 resources/workbench，开发时在仓库的 workbench/。
@@ -18,11 +24,16 @@ const workbenchRoot = process.env.SAND_DESKTOP_WORKBENCH
   : isPackaged
     ? path.join(process.resourcesPath, "workbench")
     : path.join(__dirname, "..", "..", "workbench");
-const sessionFile = path.join(app.getPath("userData"), "session", "connection.json");
+const sessionFile = path.join(
+  app.getPath("userData"),
+  "session",
+  "connection.json",
+);
 
 let service = null;
 let mainWindow = null;
 let quitting = false;
+let serviceOrigin;
 
 function log(message) {
   if (process.env.SAND_DESKTOP_LOG) console.log(`[sand-table] ${message}`);
@@ -39,7 +50,17 @@ function assertBuilt() {
 }
 
 function startService() {
-  const bridge = path.join(workbenchRoot, "local", "bridge.ts");
+  const mcp =
+    isPackaged && process.env.PORTABLE_EXECUTABLE_FILE
+      ? persistMcpRuntime({
+          execPath: process.execPath,
+          workbenchRoot,
+          userData: app.getPath("userData"),
+        })
+      : {
+          command: process.execPath,
+          bridge: path.join(workbenchRoot, "local", "bridge.ts"),
+        };
   // 会话文件所在目录要求只有本人可读写（Windows 上这项检查不生效）。
   mkdirSync(path.dirname(sessionFile), { recursive: true, mode: 0o700 });
   // MCP 客户端与工作台服务端都用这个可执行文件当 Node 运行时，
@@ -47,10 +68,10 @@ function startService() {
   const runtime = {
     serverEnv: { ELECTRON_RUN_AS_NODE: "1" },
     mcpEntry: {
-      command: process.execPath,
+      command: mcp.command,
       args: [
         "--experimental-strip-types",
-        bridge,
+        mcp.bridge,
         "--session-file",
         sessionFile,
       ],
@@ -118,7 +139,7 @@ main{max-width:560px;padding:32px}
 h1{font-size:18px;font-weight:600;margin:0 0 12px}
 pre{background:#fffdf7;border:1px solid #ddd5c4;border-radius:8px;padding:12px;
 white-space:pre-wrap;word-break:break-word;font:12px/1.6 ui-monospace,Consolas,monospace;color:#6d675b}
-</style></head><body><main><h1>本地工作台没有启动</h1><pre>${detail}</pre></main></body></html>`;
+</style></head><body><main><h1>本地工作台没有启动</h1><pre>${String(detail).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")}</pre></main></body></html>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
@@ -146,7 +167,7 @@ function createWindow() {
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event, url) => {
-    if (!url.startsWith("http://127.0.0.1:")) {
+    if (!serviceOrigin || new URL(url).origin !== serviceOrigin) {
       event.preventDefault();
       if (/^https?:\/\//.test(url)) shell.openExternal(url);
     }
@@ -158,17 +179,25 @@ function waitForReady(child, timeoutMs) {
   return new Promise((resolve, reject) => {
     let buffer = "";
     const timer = setTimeout(() => {
-      reject(Error(`本地工作台在 ${Math.round(timeoutMs / 1000)} 秒内没有就绪。`));
+      reject(
+        Error(`本地工作台在 ${Math.round(timeoutMs / 1000)} 秒内没有就绪。`),
+      );
     }, timeoutMs);
     const onData = (chunk) => {
       buffer += chunk;
-      const match = buffer.match(/READY (http:\/\/127\.0\.0\.1:\d+\/#session=\w+)/);
+      const match = buffer.match(
+        /READY (http:\/\/127\.0\.0\.1:\d+\/#session=\w+)/,
+      );
       if (!match) return;
       clearTimeout(timer);
       child.stdout.off("data", onData);
       resolve(match[1]);
     };
     child.stdout.on("data", onData);
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
     child.once("exit", (code) => {
       clearTimeout(timer);
       reject(Error(`本地工作台进程退出（代码 ${code ?? "未知"}）。`));
@@ -189,7 +218,8 @@ async function start() {
       mainWindow.loadURL(errorPage(detail));
   });
   const url = await waitForReady(service, 60000);
-  log(`工作台就绪：${url}`);
+  serviceOrigin = new URL(url).origin;
+  log("工作台已就绪");
   await mainWindow.loadURL(url);
 }
 

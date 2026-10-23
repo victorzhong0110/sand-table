@@ -7,6 +7,7 @@
 // 截图落在 desktop/dist/smoke/ 下，作为「窗口里真的有东西」的证据。
 
 import { mkdirSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { _electron as electron } from "playwright";
@@ -21,17 +22,23 @@ const workbenchRoot =
   workbenchArg === -1 ? undefined : resolve(process.argv[workbenchArg + 1]);
 
 mkdirSync(outputDir, { recursive: true });
+mkdirSync(join(outputDir, "user"), { recursive: true, mode: 0o700 });
 // 会话文件要求目录只有本人可读写。
 mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
 
 const failures = [];
+let savedEntry;
 const check = (name, ok, detail = "") => {
   console.log(`${ok ? "✓" : "✗"} ${name}${detail ? " · " + detail : ""}`);
   if (!ok) failures.push(name);
 };
 
+const executableArg = process.argv.indexOf("--executable");
+const executablePath =
+  executableArg < 0 ? undefined : resolve(process.argv[executableArg + 1]);
 const app = await electron.launch({
-  args: [desktopRoot],
+  ...(executablePath ? { executablePath } : {}),
+  args: executablePath ? [] : [desktopRoot],
   cwd: desktopRoot,
   env: {
     ...process.env,
@@ -39,6 +46,8 @@ const app = await electron.launch({
     ELECTRON_DISABLE_SANDBOX: "1",
     SAND_DESKTOP_LOG: "1",
     SAND_DESKTOP_SMOKE: "1",
+    SAND_DESKTOP_USER_DATA: join(outputDir, "user"),
+    SAND_WORKSPACE_DIR: join(outputDir, "workspaces"),
     ...(workbenchRoot ? { SAND_DESKTOP_WORKBENCH: workbenchRoot } : {}),
   },
 });
@@ -52,19 +61,31 @@ try {
   // 1) 窗口标题与地址
   // 页面加载后会把凭据片段从地址栏去掉，所以这里只看本地地址。
   const url = window.url();
-  check("窗口打开了本地工作台", /^http:\/\/127\.0\.0\.1:\d+\/?$/.test(url), url);
+  check(
+    "窗口打开了本地工作台",
+    /^http:\/\/127\.0\.0\.1:\d+\/?$/.test(url),
+    url,
+  );
 
   // 2) 宿主页面渲染出来了
   await window.waitForSelector("nav #connection", { timeout: 30000 });
   const connection = await window.textContent("nav #connection");
-  check("本地会话状态可见", !!connection && connection.trim().length > 0, connection?.trim());
+  check(
+    "本地会话状态可见",
+    !!connection && connection.trim().length > 0,
+    connection?.trim(),
+  );
 
   // 3) 白板 iframe 真的挂上了
   await window.waitForSelector("#board-stage iframe", { timeout: 30000 });
   const frame = window.frameLocator("#board-stage iframe");
   await frame.locator("body").waitFor({ timeout: 30000 });
   const bodyText = (await frame.locator("body").innerText()).slice(0, 400);
-  check("白板画布已渲染", bodyText.length > 0, bodyText.replace(/\s+/g, " ").slice(0, 80));
+  check(
+    "白板画布已渲染",
+    bodyText.length > 0,
+    bodyText.replace(/\s+/g, " ").slice(0, 80),
+  );
 
   // 4) 工具箱里的组件分组在（空白板也要有可用的左侧工具箱）
   const hasToolbox = (await frame.locator("text=组件").count()) > 0;
@@ -96,9 +117,12 @@ try {
   );
   const config = JSON.parse(bootstrap.body?.config?.json ?? "{}");
   const entry = config?.mcpServers?.["sand-table"];
+  savedEntry = entry;
   check(
     "MCP 配置指向桌面版自身",
-    !!entry?.command && entry.command.includes("electron") && !!entry?.env?.ELECTRON_RUN_AS_NODE,
+    !!entry?.command &&
+      existsSync(entry.command) &&
+      !!entry?.env?.ELECTRON_RUN_AS_NODE,
     entry ? `command=${entry.command}` : "缺少条目",
   );
 
@@ -119,6 +143,20 @@ try {
   await app.close().catch(() => undefined);
 }
 
+if (savedEntry) {
+  const runtime = spawnSync(savedEntry.command, ["--version"], {
+    env: { ...process.env, ...savedEntry.env },
+    encoding: "utf8",
+    timeout: 15000,
+    windowsHide: true,
+  });
+  check(
+    "关闭窗口后 MCP 运行时仍可启动",
+    runtime.status === 0 && /^v\d+/.test(runtime.stdout ?? ""),
+    runtime.stderr || runtime.error?.message || "",
+  );
+  check("关闭窗口后桥接脚本仍存在", existsSync(savedEntry.args[1]));
+}
 if (failures.length) {
   console.error(`\n冒烟检查失败：${failures.length} 项`);
   process.exit(1);

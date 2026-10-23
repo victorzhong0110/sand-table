@@ -47,7 +47,9 @@ function fail(message) {
 if (!existsSync(workbench)) fail(`找不到工作台目录：${workbench}`);
 for (const file of ["dist/board.html", "dist/host.js"]) {
   if (!existsSync(join(workbench, file)))
-    fail(`工作台还没构建：缺少 ${file}。请先在 workbench/ 目录执行 npm run build。`);
+    fail(
+      `工作台还没构建：缺少 ${file}。请先在 workbench/ 目录执行 npm run build。`,
+    );
 }
 
 rmSync(join(desktopRoot, ".stage"), { recursive: true, force: true });
@@ -65,7 +67,7 @@ for (const file of runtimeFiles) {
 // 把页面渲染成图，这里只取文本与指纹，用不上；交叉打包时它们还是错平台的）。
 console.log("正在安装工作台的运行期依赖…");
 const install = spawnSync(
-  "npm",
+  process.platform === "win32" ? "npm.cmd" : "npm",
   [
     "ci",
     "--omit=dev",
@@ -75,7 +77,7 @@ const install = spawnSync(
     "--no-fund",
     "--loglevel=error",
   ],
-  { cwd: stage, stdio: "inherit" },
+  { cwd: stage, stdio: "inherit", shell: process.platform === "win32" },
 );
 if (install.status !== 0) fail("工作台运行期依赖安装失败。");
 
@@ -87,8 +89,7 @@ if (existsSync(pdfjs)) {
   for (const dir of ["build", "types", "web"])
     rmSync(join(pdfjs, dir), { recursive: true, force: true });
   for (const file of readdirSync(pdfjs, { recursive: true })) {
-    if (file.endsWith(".map"))
-      rmSync(join(pdfjs, file), { force: true });
+    if (file.endsWith(".map")) rmSync(join(pdfjs, file), { force: true });
   }
 }
 
@@ -98,8 +99,8 @@ const manifest = {
   dirs: runtimeDirs,
   files: runtimeFiles,
   dependencies: Object.keys(
-    JSON.parse(readFileSync(join(stage, "package.json"), "utf8")).dependencies ??
-      {},
+    JSON.parse(readFileSync(join(stage, "package.json"), "utf8"))
+      .dependencies ?? {},
   ),
 };
 writeFileSync(

@@ -12,7 +12,11 @@ export type McpEntry = {
   env?: Record<string, string>;
 };
 
-export function connectionConfig(sessionFile: string, entry?: McpEntry) {
+export function connectionConfig(
+  sessionFile: string,
+  entry?: McpEntry,
+  platform = process.platform,
+) {
   const args = [
     "--experimental-strip-types",
     fileURLToPath(new URL("./bridge.ts", import.meta.url)),
@@ -24,9 +28,24 @@ export function connectionConfig(sessionFile: string, entry?: McpEntry) {
     args: entry?.args ?? args,
     ...(entry?.env ? { env: entry.env } : {}),
   };
+  const cliQuote =
+    platform === "win32"
+      ? (value: string) => `'${value.replaceAll("'", "''")}'`
+      : quote;
+  const envArgs = Object.entries(resolved.env ?? {}).flatMap(([key, value]) => [
+    "--env",
+    `${key}=${value}`,
+  ]);
+  const envToml = Object.keys(resolved.env ?? {}).length
+    ? `\n[mcp_servers.sand-table.env]\n${Object.entries(resolved.env ?? {})
+        .map(
+          ([key, value]) => `${JSON.stringify(key)} = ${JSON.stringify(value)}`,
+        )
+        .join("\n")}\n`
+    : "";
   return {
     json: JSON.stringify({ mcpServers: { "sand-table": resolved } }, null, 2),
-    codex: `codex mcp add sand-table -- ${[resolved.command, ...resolved.args].map(quote).join(" ")}`,
-    toml: `[mcp_servers.sand-table]\ncommand = ${JSON.stringify(resolved.command)}\nargs = ${JSON.stringify(resolved.args)}\n`,
+    codex: `codex mcp add sand-table ${[...envArgs, "--", resolved.command, ...resolved.args].map(cliQuote).join(" ")}`,
+    toml: `[mcp_servers.sand-table]\ncommand = ${JSON.stringify(resolved.command)}\nargs = ${JSON.stringify(resolved.args)}\n${envToml}`,
   };
 }
