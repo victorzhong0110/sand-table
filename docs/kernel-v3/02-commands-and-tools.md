@@ -196,7 +196,9 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
 
 参数：`{ types?: string[] (≤20), pack?: string }`
 
-输出：不带参数时只给精简列表 `{ types: [{type, title, description, pack, container}], relationKinds: [{kind, title, inverseTitle, allowsInferred, requiresBasis}], templates: [{id, title, pack}] }`；带 `types` 时给这些类型的完整声明（见 `03-types-and-extensions.md` §2）。
+输出：不带参数时只给精简列表 `{ types: [{type, title, description, pack, container, icon, capabilities, presets}], relationKinds: [{kind, title, inverseTitle, allowsInferred, requiresBasis}], templates: [{id, title, pack}] }`；带 `types` 时给这些类型的完整声明（见 `03-types-and-extensions.md` §2）。
+
+精简项里的 `icon` 是内置图标名，`capabilities` 是 `{container?, cover?}`（没声明的键不出现），`presets` 是这个类型在工具箱里的预填条目 `{key, title, width?, height?, data?}`——工具箱画按钮要用的就是这三样。
 
 #### `sand_query`
 
@@ -309,11 +311,18 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
 | `app_changes` | `{ since }` | 返回 `changesSince`，界面每秒调用一次 |
 | `app_edit` | 同 `sand_edit` | 人的写入，`actor` 为 human |
 | `app_history` | 同 `sand_history` | 人的撤销、重做、跳转 |
-| `app_view` | `{ action: "get" \| "select" \| "camera" \| "navigate", viewId, ... }` | 视角、选区、进入或返回白板；不进历史 |
+| `app_view` | `{ action: "get" \| "select" \| "camera" \| "navigate", viewId, boardId?, ... }` | 视角、选区、进入或返回白板；不进历史。`get` 返回 `navStack`；`select` 与 `camera` 也接受 `boardId`，第一次调用就能登记视角，不用先 `navigate` 一次 |
 | `app_asset` | `{ action: "upload", name, mime, base64 }` / `{ action: "read", sha256 }` | 上传返回 sha256；建 `base.media` 对象由界面再调 `app_edit` |
 | `app_workspace` | `{ action: "list" \| "create" \| "switch" \| "rename" \| "delete" \| "export" \| "import", ... }` | 管理工作空间。`export`、`import` 由 T25 实现，T20 只做前五个 |
 | `app_pack` | `{ action: "export", id }` | 导出数据包；导入走 `app_edit` 的 `pack.import` |
+| `app_activity` | `{ action: "list", limit? }` | 列出还没过期的活动，至多 100 条，带 `truncated` 标记。**只读：不推进 `agent_reads`**，界面读活动不会挪走 Agent 的读取游标 |
 | `code_decide` | `{ proposalId, decision: "approve" \| "reject", digest }` | 代码包注册；人批准或拒绝提案 |
+
+#### 读接口怎么认过期结果
+
+界面每一秒都在拉数据，切换工作空间时旧请求可能晚回来。读接口的返回值都带 `workspaceId`（这次读的是哪个工作空间）和 `revision`（读到的是第几代）。界面按「工作空间编号 + 自己发的请求代号 + 修订号」三样一起判：三样对不上就丢掉这次结果，不合进当前白板。
+
+`app_board` 和 `app_changes` 还接受一个可选的 `workspaceId` 参数：请求里带的编号和当前打开的不一样时直接报错，不给数据——旧工作空间的增量不会混进新库。
 
 ### 3.5 工具数量规则
 
@@ -321,6 +330,7 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
 - 每个启用的领域包最多增加 2 个模型可见工具；文件夹连接器 1 个。
 - 新工作空间默认启用 `base`、`novel`、`research`，`code` 在第一次导入仓库时启用。所以默认情况下模型看到 9 个工具（8 + `research_pdf`）。
 - 包在运行中启用或停用时，它的工具随之启用或停用，客户端会收到工具列表变化的通知。
+- 别的进程改了包的启停，这一边也要跟着改：服务端每秒读一次 `packs` 表的修订号，变了才刷新工具句柄；服务退出时收掉计时器。
 - 这些数字由架构测试强制（见 `tasks/T16-architecture-tests.md`）。
 
 ## 4. 旧工具 → 新工具

@@ -26,7 +26,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   applyCommands,
+  auditFrameCoordinates,
   createRegistry,
+  FRAME_COORDS_MARKER,
   getMeta,
   importV2,
   openWorkspace,
@@ -1770,6 +1772,94 @@ test("v1 的文件先升到 v2 的形状再导入", () => {
     assert.equal(shown!.boardId, "overview");
     assert.equal(getMeta(db, "home_board_id"), "overview");
     db.close();
+  } finally {
+    s.close();
+  }
+});
+
+// —— T74：嵌套框的坐标往返、坐标版本标记与人工确认通道 ——
+
+test("嵌套框：导入后框内坐标换算回绝对坐标与 v2 一致，旧文件字节不变", () => {
+  const s = scene("nested-frames.json");
+  const original = readFileSync(join(s.dir, "workspace.json"));
+  try {
+    const { db } = openWorkspace(s.root, "demo", s.registry);
+    const presentations = presentationsOf(db);
+
+    // 外框在首页上，框里有一张便签和一块可以进入的子白板。
+    const outer = presentations.find((p) => p.id === "group-outer:frame");
+    assert.ok(outer, "外框的展示");
+    assert.equal(outer!.boardId, "overview");
+    const outerText = presentations.find((p) => p.id === "p-outer-text");
+    const nestedBoard = presentations.find((p) => p.id === "p-nested-board");
+    assert.equal(outerText!.parentId, outer!.id, "便签挂在外框里");
+    assert.equal(nestedBoard!.parentId, outer!.id, "子白板挂在框里");
+
+    // v2 里的绝对坐标：便签 (100,200)，子白板 (460,200)。
+    assert.equal(outer!.x + outerText!.x, 100);
+    assert.equal(outer!.y + outerText!.y, 200);
+    assert.equal(outer!.x + nestedBoard!.x, 460);
+    assert.equal(outer!.y + nestedBoard!.y, 200);
+
+    // 内框在子白板上：换算回绝对坐标仍然是 v2 里的 (40,90)。
+    const inner = presentations.find((p) => p.id === "group-inner:frame");
+    assert.ok(inner, "内框的展示");
+    assert.equal(inner!.boardId, "space-child", "内框在自己的白板上");
+    const innerText = presentations.find((p) => p.id === "p-inner-text");
+    assert.equal(innerText!.parentId, inner!.id);
+    assert.equal(inner!.x + innerText!.x, 40);
+    assert.equal(inner!.y + innerText!.y, 90);
+
+    // 不在框里的展示坐标不动：它没有父框，坐标还是白板上的绝对坐标。
+    const free = presentations.find((p) => p.id === "p-free");
+    assert.equal(free!.parentId, null);
+    assert.equal(free!.x, 600);
+    assert.equal(free!.y, 500);
+
+    db.close();
+    // 旧文件一个字节都没动。
+    assert.ok(original.equals(readFileSync(join(s.dir, "workspace.json"))));
+  } finally {
+    s.close();
+  }
+});
+
+test("导入的库记下坐标版本标记，体检说不用迁移", () => {
+  const s = scene("nested-frames.json");
+  try {
+    const { db, frameCoords } = openWorkspace(s.root, "demo", s.registry);
+    assert.equal(getMeta(db, "frame_coords"), FRAME_COORDS_MARKER);
+    assert.equal(frameCoords.state, "ok");
+    assert.equal(frameCoords.items.length, 0);
+    assert.equal(auditFrameCoordinates(db).state, "ok");
+    db.close();
+  } finally {
+    s.close();
+  }
+});
+
+test("说不准坐标口径的库只报给人确认，数据一个字节都不改", () => {
+  const s = scene("nested-frames.json");
+  try {
+    const { db } = openWorkspace(s.root, "demo", s.registry);
+    // 造一个「有框内展示却没有坐标标记」的库：坐标说不准是相对还是绝对。
+    db.prepare("DELETE FROM meta WHERE key = 'frame_coords'").run();
+    const before = presentationsOf(db);
+    const audit = auditFrameCoordinates(db);
+    assert.equal(audit.state, "needs-review");
+    assert.equal(audit.items.length, 3, "三个框内展示都要人确认");
+    assert.ok(audit.message.includes("没有改动"), "说清没有改动数据");
+    assert.deepEqual(presentationsOf(db), before, "数据一个字节都没改");
+
+    // 再打开一次：同一批展示不重复记审计。
+    db.close();
+    const again = openWorkspace(s.root, "demo", s.registry);
+    const rows = again.db
+      .prepare("SELECT detail FROM audit WHERE action = 'frame_coords'")
+      .all();
+    assert.equal(rows.length, 1, "同一批展示只记一次审计");
+    assert.equal(again.frameCoords.state, "needs-review");
+    again.db.close();
   } finally {
     s.close();
   }

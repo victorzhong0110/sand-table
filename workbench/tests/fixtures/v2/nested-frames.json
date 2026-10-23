@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 2,
+  "id": "nested-frames",
+  "title": "嵌套框",
+  "createdAt": 1699999000000,
+  "updatedAt": 1700000009000,
+  "revision": 9,
+  "contentRevision": 4,
+  "boards": [
+    {
+      "id": "board-1",
+      "title": "主白板",
+      "revision": 9,
+      "contentRevision": 4,
+      "spaces": [
+        { "id": "overview", "title": "总览" },
+        { "id": "space-child", "title": "第二章", "parentId": "overview" }
+      ],
+      "presentations": [
+        {
+          "id": "p-outer-text",
+          "spaceId": "overview",
+          "type": "text",
+          "binding": { "kind": "object", "objectId": "obj-outer-text" },
+          "objectId": "obj-outer-text",
+          "title": "外层便签",
+          "data": {},
+          "rect": { "x": 100, "y": 200, "width": 280, "height": 180 },
+          "updatedAt": 1700000001000,
+          "author": "lin"
+        },
+        {
+          "id": "p-nested-board",
+          "spaceId": "overview",
+          "type": "board",
+          "title": "第二章",
+          "data": { "spaceId": "space-child" },
+          "rect": { "x": 460, "y": 200, "width": 280, "height": 160 },
+          "updatedAt": 1700000002000,
+          "author": "lin"
+        },
+        {
+          "id": "p-inner-text",
+          "spaceId": "space-child",
+          "type": "text",
+          "binding": { "kind": "object", "objectId": "obj-inner-text" },
+          "objectId": "obj-inner-text",
+          "title": "内层便签",
+          "data": {},
+          "rect": { "x": 40, "y": 90, "width": 200, "height": 120 },
+          "updatedAt": 1700000003000,
+          "author": "lin"
+        },
+        {
+          "id": "p-free",
+          "spaceId": "space-child",
+          "type": "text",
+          "title": "不在框里的便签",
+          "data": { "text": "这一条不归任何分组" },
+          "rect": { "x": 600, "y": 500, "width": 280, "height": 180 },
+          "updatedAt": 1700000004000,
+          "author": "lin"
+        }
+      ],
+      "views": {},
+      "selection": [],
+      "placements": {},
+      "notes": {},
+      "groups": [
+        {
+          "id": "group-outer",
+          "title": "外框",
+          "objectIds": ["obj-outer-text"],
+          "instanceIds": ["p-outer-text", "p-nested-board"]
+        },
+        {
+          "id": "group-inner",
+          "title": "内框",
+          "objectIds": ["obj-inner-text"],
+          "instanceIds": ["p-inner-text"]
+        }
+      ],
+      "spaceLinks": [],
+      "assets": [],
+      "activities": [],
+      "spaceActivities": [],
+      "guides": [],
+      "intents": [],
+      "proposals": [],
+      "validations": [],
+      "theme": {
+        "base": "paper",
+        "background": "#ffffff",
+        "surface": "#f5f5f5",
+        "ink": "#111111",
+        "muted": "#888888",
+        "line": "#dddddd",
+        "accent": "#0066cc",
+        "font": "system",
+        "density": "comfortable",
+        "radius": 8,
+        "reduceMotion": false
+      },
+      "componentPacks": []
+    }
+  ],
+  "objects": [
+    {
+      "id": "obj-outer-text",
+      "kind": "native",
+      "type": "text",
+      "typeVersion": 1,
+      "title": "外层便签",
+      "data": { "text": "外层框里的内容" },
+      "source": { "origin": "human", "author": "lin" },
+      "version": 1,
+      "createdAt": 1699999000000,
+      "updatedAt": 1700000001000,
+      "author": "lin"
+    },
+    {
+      "id": "obj-inner-text",
+      "kind": "native",
+      "type": "text",
+      "typeVersion": 1,
+      "title": "内层便签",
+      "data": { "text": "内层框里的内容" },
+      "source": { "origin": "human", "author": "lin" },
+      "version": 1,
+      "createdAt": 1699999001000,
+      "updatedAt": 1700000003000,
+      "author": "lin"
+    }
+  ],
+  "relations": [],
+  "resources": [],
+  "activities": [],
+  "audit": []
+}

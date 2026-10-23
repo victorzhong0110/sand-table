@@ -13,6 +13,7 @@ import {
   transaction,
   type Db,
 } from "./db.ts";
+import { auditFrameCoordinates, type FrameCoordAudit } from "./frame-coords.ts";
 import { importV2, type ImportReport } from "./legacy/import-v2.ts";
 import { syncPacks } from "./packs-state.ts";
 import { createRegistry, PackSpecError, type Registry } from "./registry.ts";
@@ -30,6 +31,13 @@ export type OpenWorkspaceResult = {
   imported: ImportReport | null;
   /** 库里不合格、被跳过的组件包。空数组表示没有。 */
   skippedPacks: SkippedPack[];
+  /**
+   * 框内坐标的体检结果。
+   *
+   * state 是 needs-review 时，库里有说不准是相对还是绝对的框内坐标。
+   * 这时候不改任何数据，只是报给人确认。
+   */
+  frameCoords: FrameCoordAudit;
 };
 
 /** 一个被跳过的组件包：id 与能照着做的提示。 */
@@ -55,14 +63,14 @@ export function openWorkspace(
   const jsonFile = join(dir, "workspace.json");
   if (existsSync(dbFile)) {
     const db = openWorkspaceDb(dbFile, { create: false });
-    const skippedPacks = prepareOpen(db, registry, now);
-    return { db, imported: null, skippedPacks };
+    const { skippedPacks, frameCoords } = prepareOpen(db, registry, now);
+    return { db, imported: null, skippedPacks, frameCoords };
   }
   if (existsSync(jsonFile)) {
     const report = importV2(jsonFile, dbFile, registry, now);
     const db = openWorkspaceDb(dbFile, { create: false });
-    const skippedPacks = prepareOpen(db, registry, now);
-    return { db, imported: report, skippedPacks };
+    const { skippedPacks, frameCoords } = prepareOpen(db, registry, now);
+    return { db, imported: report, skippedPacks, frameCoords };
   }
   mkdirSync(dir, { recursive: true });
   const db = openWorkspaceDb(dbFile, {
@@ -71,8 +79,34 @@ export function openWorkspace(
     ...(options?.title ? { title: options.title } : {}),
     now,
   });
-  const skippedPacks = prepareOpen(db, registry, now);
-  return { db, imported: null, skippedPacks };
+  const { skippedPacks, frameCoords } = prepareOpen(db, registry, now);
+  return { db, imported: null, skippedPacks, frameCoords };
+}
+
+/**
+ * 框内坐标说不准时记一笔审计。
+ *
+ * 同一批展示只记一次：每次打开都记一条，审计表就成了噪声，
+ * 真要人工确认时反而找不到那一条。
+ */
+function noteFrameCoordReview(
+  db: Db,
+  audit: FrameCoordAudit,
+  now: () => number,
+): void {
+  if (audit.state !== "needs-review") return;
+  const detail = JSON.stringify({
+    items: audit.items.map((item) => item.presentationId),
+  });
+  const last = db
+    .prepare(
+      "SELECT detail FROM audit WHERE action = 'frame_coords' ORDER BY seq DESC LIMIT 1",
+    )
+    .get() as { detail: string | null } | undefined;
+  if (last?.detail === detail) return;
+  db.prepare(
+    "INSERT INTO audit (at, actor, actor_kind, action, history_id, detail) VALUES (?, 'system', 'system', 'frame_coords', NULL, ?)",
+  ).run(now(), detail);
 }
 
 /**
@@ -83,11 +117,13 @@ function prepareOpen(
   db: Db,
   registry: Registry,
   now: () => number,
-): SkippedPack[] {
+): { skippedPacks: SkippedPack[]; frameCoords: FrameCoordAudit } {
   try {
     const skippedPacks = skipInvalidPacks(db, registry, now);
     syncPacks(db, registry, IMPORT_ACTOR);
-    return skippedPacks;
+    const frameCoords = auditFrameCoordinates(db);
+    noteFrameCoordReview(db, frameCoords, now);
+    return { skippedPacks, frameCoords };
   } catch (error) {
     try {
       db.close();
