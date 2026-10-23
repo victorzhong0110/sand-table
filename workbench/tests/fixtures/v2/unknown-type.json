@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "id": "unknown-type-workspace",
+  "title": "未知类型",
+  "createdAt": 1700002000000,
+  "updatedAt": 1700002001000,
+  "revision": 1,
+  "contentRevision": 1,
+  "boards": [
+    {
+      "id": "board-unknown",
+      "title": "主白板",
+      "revision": 1,
+      "contentRevision": 1,
+      "spaces": [{ "id": "overview", "title": "总览" }],
+      "presentations": [
+        {
+          "id": "p-foo",
+          "spaceId": "overview",
+          "type": "foo",
+          "binding": { "kind": "object", "objectId": "obj-foo" },
+          "objectId": "obj-foo",
+          "title": "一个没人认识的东西",
+          "data": {},
+          "rect": { "x": 10, "y": 20, "width": 280, "height": 180, "pinned": false },
+          "updatedAt": 1700002001000,
+          "author": "lin"
+        }
+      ],
+      "views": {},
+      "selection": [],
+      "placements": {},
+      "notes": {},
+      "groups": [],
+      "spaceLinks": [],
+      "assets": [],
+      "activities": [],
+      "guides": [],
+      "intents": [],
+      "proposals": [],
+      "validations": []
+    }
+  ],
+  "objects": [
+    {
+      "id": "obj-foo",
+      "kind": "native",
+      "type": "foo",
+      "typeVersion": 1,
+      "title": "一个没人认识的东西",
+      "data": { "whatever": "原样", "count": 0, "list": [] },
+      "source": { "origin": "human", "author": "lin" },
+      "version": 1,
+      "createdAt": 1700002001000,
+      "updatedAt": 1700002001000,
+      "author": "lin"
+    }
+  ],
+  "relations": [],
+  "resources": [],
+  "activities": [],
+  "audit": []
+}

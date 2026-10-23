@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 0,
+  "id": "old-workspace",
+  "title": "很老的工作空间",
+  "createdAt": 1690000000000,
+  "updatedAt": 1690000005000,
+  "revision": 3,
+  "board": {
+    "id": "board-old",
+    "title": "旧白板",
+    "revision": 3,
+    "contentRevision": 1,
+    "spaces": [{ "id": "overview", "title": "总览" }],
+    "presentations": [
+      {
+        "id": "p-old",
+        "spaceId": "overview",
+        "type": "text",
+        "binding": { "kind": "object", "objectId": "obj-old" },
+        "objectId": "obj-old",
+        "title": "老便签",
+        "data": {},
+        "rect": { "x": 12, "y": 24, "width": 280, "height": 180, "pinned": false },
+        "updatedAt": 1690000005000,
+        "author": "old"
+      }
+    ],
+    "views": {},
+    "selection": [],
+    "placements": {},
+    "notes": {},
+    "groups": [],
+    "spaceLinks": [],
+    "assets": [],
+    "activities": [],
+    "guides": [],
+    "intents": [],
+    "proposals": [],
+    "validations": []
+  },
+  "objects": [
+    {
+      "id": "obj-old",
+      "kind": "native",
+      "type": "text",
+      "typeVersion": 1,
+      "title": "老便签",
+      "data": { "text": "很久以前写的" },
+      "source": { "origin": "human", "author": "old" },
+      "version": 1,
+      "createdAt": 1690000000000,
+      "updatedAt": 1690000005000,
+      "author": "old"
+    }
+  ],
+  "relations": []
+}
