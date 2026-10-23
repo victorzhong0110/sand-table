@@ -604,11 +604,25 @@ export function setActivity(
       "当前动作不能超过 200 字。请缩短后再发。",
       null,
     );
+  if (input.objectIds !== undefined) {
+    if (
+      !Array.isArray(input.objectIds) ||
+      input.objectIds.some((id) => typeof id !== "string")
+    )
+      throw new CommandError(
+        "INVALID_DATA",
+        "对象列表必须是文字列表。请改好后再发。",
+        null,
+      );
+    if (input.objectIds.length > ACTIVITY_OBJECT_LIMIT)
+      throw new CommandError(
+        "LIMIT",
+        "一次最多标出 30 个对象。请减少后再发。",
+        null,
+      );
+  }
   transaction(db, () => {
-    const objectIds = existingIds(db, input.objectIds ?? []).slice(
-      0,
-      ACTIVITY_OBJECT_LIMIT,
-    );
+    const objectIds = existingIds(db, input.objectIds ?? []);
     const ttl = input.state === "done" ? DONE_TTL_MS : ACTIVITY_TTL_MS;
     db.prepare(
       `INSERT INTO activities (

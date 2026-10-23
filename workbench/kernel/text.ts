@@ -30,17 +30,31 @@ function fieldText(value: unknown): string {
 }
 
 function stripMarkdown(input: string) {
-  return input
-    .replace(/```[\w-]*\n?([\s\S]*?)```/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
+  const code: string[] = [];
+  const hold = (body: string) => {
+    code.push(body);
+    return `\uE000${String(code.length - 1)}\uE000`;
+  };
+  const text = input
+    .replace(/```[^\n]*\n([\s\S]*?)```/g, (_, body: string) => hold(body))
+    .replace(
+      /(^|[^`])`([^`]+)`(?!`)/g,
+      (_, lead: string, body: string) => lead + hold(body),
+    )
     .replace(/!\[[^\]]*]\([^)]*\)/g, "")
     .replace(/\[([^\]]*)]\([^)]*\)/g, "$1")
     .replace(/^\s{0,3}#{1,6}\s+/gm, "")
-    .replace(/(\*\*\*|___)(.*?)\1/g, "$2")
-    .replace(/(\*\*|__)(.*?)\1/g, "$2")
-    .replace(/(\*|_)(.*?)\1/g, "$2")
+    .replace(/\*\*\*(.*?)\*\*\*/g, "$1")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\*(.*?)\*/g, "$1")
+    // 紧贴文字的下划线是标识符，不是强调。
+    .replace(/(^|[^\p{L}\p{N}_])_([^_\n]+?)_(?=$|[^\p{L}\p{N}_])/gu, "$1$2")
     .replace(/~~(.*?)~~/g, "$1")
-    .trim();
+    .replace(
+      /\uE000(\d+)\uE000/g,
+      (_, index: string) => code[Number(index)] ?? "",
+    );
+  return text.trim();
 }
 
 function clip(text: string, max: number) {

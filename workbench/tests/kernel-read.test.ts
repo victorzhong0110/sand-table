@@ -7,6 +7,7 @@ import {
   applyCommands,
   boardContents,
   changesSince,
+  CommandError,
   context,
   createRegistry,
   getMeta,
@@ -18,10 +19,12 @@ import {
   setMeta,
   setView,
   status,
+  summarize,
   undo,
   type Actor,
   type Db,
   type Registry,
+  type TypeSpec,
 } from "../kernel/index.ts";
 
 const human: Actor = { id: "hui", kind: "human" };
@@ -279,6 +282,11 @@ test("查询按白板、类型、文字和关系过滤，分页不重复，已�
     assert.deepEqual(
       underscores.rows.map((row) => row.id),
       [made.created.score!],
+    );
+    const folded = query(db, registry, { text: "axb" });
+    assert.deepEqual(
+      folded.rows.map((row) => row.id),
+      [made.created.wide!],
     );
 
     const related = query(db, registry, {
@@ -931,6 +939,136 @@ test("停用组件包后类型不可用，对象仍能查到和读到", () => {
     assert.equal(read.objects[0]?.typeAvailable, false);
     assert.equal(read.objects[0]?.title, "还在");
     assert.equal(read.missing.length, 0);
+  } finally {
+    close();
+  }
+});
+
+test("摘要去掉强调和代码围栏，保留标识符里的下划线", () => {
+  const spec: TypeSpec = {
+    type: "demo.card",
+    title: "卡片",
+    description: "一张卡片",
+    icon: "note",
+    version: 1,
+    schema: { type: "object", additionalProperties: false },
+    display: {
+      material: "paper",
+      defaultSize: { width: 200, height: 120 },
+      summary: ["blurb"],
+    },
+  };
+  assert.equal(
+    summarize(
+      spec,
+      { blurb: "see_the_sea 和 _斜体_，还有 obj.__init__()" },
+      "",
+    ),
+    "see_the_sea 和 斜体，还有 obj.__init__()",
+  );
+  assert.equal(
+    summarize(spec, { blurb: "使用 ```ref``` 引用" }, ""),
+    "使用 ```ref``` 引用",
+  );
+  assert.equal(
+    summarize(spec, { blurb: "```\n**不要去掉**\n```" }, ""),
+    "**不要去掉**",
+  );
+  assert.equal(summarize(spec, { blurb: "`a_b_c`" }, ""), "a_b_c");
+});
+
+test("活动对象超过 30 个时拒绝，过期时间按状态计算", () => {
+  const { db, registry, close } = scene();
+  try {
+    const made = applyCommands(db, registry, {
+      actor: agent,
+      intentId: "one",
+      commands: [
+        { op: "object.create", type: "demo.card", title: "一", data: {} },
+      ],
+    });
+    const id = made.created["0"]!;
+    const now = 5_000;
+    setActivity(
+      db,
+      agent,
+      {
+        state: "done",
+        task: "做完了",
+        action: "收尾",
+        objectIds: [id, "missing"],
+      },
+      now,
+    );
+    const done = db
+      .prepare(
+        "SELECT object_ids, reported_at, expires_at FROM activities WHERE actor = ?",
+      )
+      .get(agent.id) as {
+      object_ids: string;
+      reported_at: number;
+      expires_at: number;
+    };
+    assert.deepEqual(JSON.parse(done.object_ids), [id]);
+    assert.equal(
+      Number(done.expires_at) - Number(done.reported_at),
+      2 * 60 * 1000,
+    );
+
+    setActivity(
+      db,
+      { id: "other", kind: "agent" },
+      { state: "running", task: "还在做", action: "读" },
+      now,
+    );
+    const running = db
+      .prepare("SELECT expires_at, reported_at FROM activities WHERE actor = ?")
+      .get("other") as { expires_at: number; reported_at: number };
+    assert.equal(
+      Number(running.expires_at) - Number(running.reported_at),
+      10 * 60 * 1000,
+    );
+
+    assert.throws(
+      () =>
+        setActivity(
+          db,
+          agent,
+          {
+            state: "running",
+            task: "太多",
+            action: "看",
+            objectIds: Array.from({ length: 31 }, () => id),
+          },
+          now + 1,
+        ),
+      (error: unknown) =>
+        error instanceof CommandError &&
+        error.code === "LIMIT" &&
+        error.message.includes("30"),
+    );
+    const kept = db
+      .prepare("SELECT task, reported_at FROM activities WHERE actor = ?")
+      .get(agent.id) as { task: string; reported_at: number };
+    assert.equal(kept.task, "做完了");
+    assert.equal(Number(kept.reported_at), now);
+
+    assert.throws(
+      () =>
+        setActivity(
+          db,
+          agent,
+          {
+            state: "running",
+            task: "坏",
+            action: "看",
+            objectIds: "不是列表" as unknown as string[],
+          },
+          now + 2,
+        ),
+      (error: unknown) =>
+        error instanceof CommandError && error.code === "INVALID_DATA",
+    );
   } finally {
     close();
   }
