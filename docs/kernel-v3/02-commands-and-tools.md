@@ -186,9 +186,14 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
   "tips": [
     "Call sand_types before creating objects of a type you have not used.",
     "Call sand_context to see what the person is looking at."
-  ]
+  ],
+  "frameCoords": { "state": "ok", "count": 0, "message": "…" }
 }
 ```
+
+`frameCoords` 是框内坐标的体检结论（`state` 是 `ok` 或 `needs-review`）。
+`needs-review` 表示库里有说不准是相对还是绝对的框内坐标——数据没被动过，但要人来确认。
+这时同一条提示也会出现在 `tips` 里：人和模型一调 `sand_status` 就看得见。
 
 #### `sand_types`
 

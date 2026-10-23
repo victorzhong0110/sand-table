@@ -1,5 +1,6 @@
 import { getMeta, transaction, type Db } from "./db.ts";
 import { CommandError } from "./errors.ts";
+import { auditFrameCoordinates } from "./frame-coords.ts";
 import { isPackEnabled } from "./packs-state.ts";
 import type { Registry } from "./registry.ts";
 import { toObjectRow, toPresentationRow, toRelationRow } from "./rows.ts";
@@ -41,6 +42,13 @@ export type StatusResult = {
   boards: { id: string; title: string; presentations: number }[];
   packs: { id: string; title: string; enabled: boolean }[];
   tips: string[];
+  /**
+   * 框内坐标的体检结论。
+   *
+   * state 是 needs-review 时，库里有说不准是相对还是绝对的框内坐标，
+   * 要人来确认。数据本身没被动过。
+   */
+  frameCoords: { state: "ok" | "needs-review"; count: number; message: string };
 };
 
 /** 工具箱里的一个预填条目。 */
@@ -227,6 +235,9 @@ export function status(db: Db, registry: Registry): StatusResult {
       title: String(row.title),
       presentations: Number(row.presentations),
     }));
+    /* 框内坐标说不准时要人来确认：这是已有的状态出口，
+       人和模型一调 sand_status 就看得见，不用另开一个工具。 */
+    const frameCoords = auditFrameCoordinates(db);
     return {
       workspace: {
         id: requiredMeta(db, "workspace_id", "工作空间编号"),
@@ -240,7 +251,15 @@ export function status(db: Db, registry: Registry): StatusResult {
         title: pack.title,
         enabled: pack.enabled,
       })),
-      tips: [...TIPS],
+      tips:
+        frameCoords.state === "needs-review"
+          ? [...TIPS, frameCoords.message]
+          : [...TIPS],
+      frameCoords: {
+        state: frameCoords.state,
+        count: frameCoords.items.length,
+        message: frameCoords.message,
+      },
     };
   });
 }

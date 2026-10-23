@@ -1864,3 +1864,63 @@ test("说不准坐标口径的库只报给人确认，数据一个字节都不�
     s.close();
   }
 });
+
+test("新建的工作空间就带坐标标记：建了框内展示再重开，不用人确认", () => {
+  const root = mkdtempSync(join(tmpdir(), "sand-new-ws-"));
+  try {
+    const registry = createRegistry();
+    for (const pack of builtinPacks) registry.registerPack(pack, "builtin");
+    const opened = openWorkspace(root, "fresh", registry);
+    assert.equal(
+      getMeta(opened.db, "frame_coords"),
+      FRAME_COORDS_MARKER,
+      "新建的库就记下坐标口径",
+    );
+    const home = getMeta(opened.db, "home_board_id")!;
+
+    // 建一个框内的展示：外框 + 挂在框里的那一件。
+    const written = applyCommands(opened.db, registry, {
+      actor,
+      commands: [
+        {
+          op: "object.create",
+          ref: "outer",
+          type: "base.note",
+          title: "外框",
+        },
+        {
+          op: "object.create",
+          ref: "inner",
+          type: "base.note",
+          title: "框里的",
+        },
+        {
+          op: "presentation.create",
+          ref: "outerView",
+          boardId: home,
+          objectId: "@outer",
+        },
+        {
+          op: "presentation.create",
+          boardId: home,
+          objectId: "@inner",
+          parentId: "@outerView",
+        },
+      ],
+    });
+    assert.equal(written.warnings.length, 0);
+    opened.db.close();
+
+    // 重开：坐标是 v3 自己写的相对坐标，不用人去确认。
+    const again = openWorkspace(root, "fresh", registry);
+    assert.equal(again.frameCoords.state, "ok", "新建的库不该要人确认");
+    assert.equal(again.frameCoords.items.length, 0);
+    const rows = again.db
+      .prepare("SELECT detail FROM audit WHERE action = 'frame_coords'")
+      .all();
+    assert.equal(rows.length, 0, "健康的库不记「要人确认」的审计");
+    again.db.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

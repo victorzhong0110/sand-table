@@ -13,7 +13,11 @@ import {
   transaction,
   type Db,
 } from "./db.ts";
-import { auditFrameCoordinates, type FrameCoordAudit } from "./frame-coords.ts";
+import {
+  auditFrameCoordinates,
+  markFrameCoords,
+  type FrameCoordAudit,
+} from "./frame-coords.ts";
 import { importV2, type ImportReport } from "./legacy/import-v2.ts";
 import { syncPacks } from "./packs-state.ts";
 import { createRegistry, PackSpecError, type Registry } from "./registry.ts";
@@ -79,6 +83,10 @@ export function openWorkspace(
     ...(options?.title ? { title: options.title } : {}),
     now,
   });
+  /* 新建的库：v3 契约下框内坐标本来就是相对的，记下坐标口径。
+     不记的话，以后建了带 parentId 的展示，重开时会被当成「说不不准的库」，
+     白白让人去确认一件本来就对的事。 */
+  markFrameCoords(db);
   const { skippedPacks, frameCoords } = prepareOpen(db, registry, now);
   return { db, imported: null, skippedPacks, frameCoords };
 }

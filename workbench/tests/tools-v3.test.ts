@@ -823,3 +823,76 @@ test("运行状态不进作品历史：视角和活动写完，历史还是空�
     await session.close();
   }
 });
+
+test("框内坐标说不准：sand_status 里带着要人工确认的提示；健康的库不带", async () => {
+  const session = await open();
+  try {
+    const client = session.client;
+    const healthy = await call(client, "sand_status");
+    assert.equal(healthy.isError, false, healthy.text);
+    const clean = healthy.data.frameCoords as {
+      state: string;
+      count: number;
+      message: string;
+    };
+    assert.equal(clean.state, "ok", "新建的工作空间是健康的");
+    assert.equal(clean.count, 0);
+    assert.equal(
+      (healthy.data.tips as string[]).some((tip) => tip.includes("人工确认")),
+      false,
+      "健康的库不带人工确认的提示",
+    );
+
+    // 造一个「有框内展示但没有坐标标记」的库。
+    const homeBoardId = healthy.data.homeBoardId as string;
+    const written = await call(client, "app_edit", {
+      commands: [
+        {
+          op: "object.create",
+          ref: "outer",
+          type: "base.note",
+          title: "外框",
+        },
+        {
+          op: "object.create",
+          ref: "inner",
+          type: "base.note",
+          title: "框里的",
+        },
+        {
+          op: "presentation.create",
+          ref: "outerView",
+          boardId: homeBoardId,
+          objectId: "@outer",
+        },
+        {
+          op: "presentation.create",
+          boardId: homeBoardId,
+          objectId: "@inner",
+          parentId: "@outerView",
+        },
+      ],
+    });
+    assert.equal(written.isError, false, written.text);
+    session.db().prepare("DELETE FROM meta WHERE key = 'frame_coords'").run();
+
+    const review = await call(client, "sand_status");
+    assert.equal(review.isError, false, review.text);
+    const state = review.data.frameCoords as {
+      state: string;
+      count: number;
+      message: string;
+    };
+    assert.equal(state.state, "needs-review", "坐标说不准时要人来确认");
+    assert.equal(state.count, 1, "一个框内展示要确认");
+    assert.match(state.message, /人工确认/);
+    const tips = review.data.tips as string[];
+    assert.equal(
+      tips.some((tip) => tip.includes("人工确认")),
+      true,
+      "提示里也要看得见要人工确认",
+    );
+  } finally {
+    await session.close();
+  }
+});
