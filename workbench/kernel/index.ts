@@ -5,6 +5,8 @@ export type {
   Command,
   CommandBatch,
   CommandResult,
+  SystemCommand,
+  SystemCommandBatch,
   ErrorCode,
   ExternalLocator,
   JsonSchema,
@@ -31,6 +33,12 @@ export {
 } from "./db.ts";
 export type { Db } from "./db.ts";
 export { newId } from "./ids.ts";
+export {
+  applyCommands,
+  applySystemCommands,
+  parsePublicCommands,
+} from "./commands.ts";
+export { syncPacks, isPackEnabled } from "./packs-state.ts";
 export { createRegistry, PackSpecError } from "./registry.ts";
 export type { Registry } from "./registry.ts";
 export { toObjectRow, toPresentationRow, toRelationRow } from "./rows.ts";

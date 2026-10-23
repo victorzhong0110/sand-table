@@ -182,6 +182,28 @@ export type Command =
       y?: number;
     };
 
+export type SystemCommand =
+  | {
+      op: "pack.sync_builtin";
+      id: string;
+      version: number;
+      enabledByDefault: boolean;
+    }
+  | {
+      op: "object.upsert_derived";
+      packId: string;
+      id: string;
+      type: string;
+      title?: string;
+      data?: Record<string, unknown>;
+      source: ObjectSource;
+    };
+
+export type SystemCommandBatch = {
+  actor: Actor;
+  commands: SystemCommand[];
+};
+
 export type CommandResult = {
   revision: number;
   historyId: string | null;
