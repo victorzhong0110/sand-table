@@ -665,21 +665,21 @@ function Workbench() {
         ...(intentId ? { intentId: String(intentId) } : {}),
         commands: ops,
       });
+    let written: any;
     try {
-      await send(commands);
+      written = await send(commands);
     } catch (e) {
-      /* 版本对不上：先看是不是界面自己连着写了两次（先标题、后正文）。
-         改的不是同一处就拿着新版本再写一次；别人改了同一处就照实报冲突。 */
-      const retry =
-        operation.expectedVersion === undefined
-          ? undefined
-          : v3RetryInfo(operation, {
-              boardId: store.cache.boardId,
-              objects: store.cache.objects,
-              presentations: store.cache.presentations,
-            });
-      if (!retry || !retry.sameFields) throw e;
+      /* 版本对不上：先同步一次（拿最新的内容），再看是不是界面自己
+         连着写了两次（先标题、后正文）。改的不是同一处就拿着新版本
+         再写一次；别人改了同一处就照实报冲突。 */
+      if (operation.expectedVersion === undefined) throw e;
       await store.sync();
+      const retry = v3RetryInfo(operation, {
+        boardId: store.cache.boardId,
+        objects: store.cache.objects,
+        presentations: store.cache.presentations,
+      });
+      if (!retry || !retry.sameFields) throw e;
       const again = toCommands(
         { ...operation, expectedVersion: retry.version },
         {
@@ -689,7 +689,25 @@ function Workbench() {
         },
       );
       if (!again.length) throw e;
-      await send(again);
+      written = await send(again);
+    }
+    /* 建完就选中：v2 里新建完组件是选中的（属性面板会打开），
+       v3 也要一样。选中的是展示编号，内核新建时把它回传了。 */
+    if (operation.kind === "create") {
+      const created = written?.created ?? {};
+      const presentationId = created["newP"];
+      if (presentationId) {
+        viewRef.current = {
+          ...viewRef.current,
+          selection: [String(presentationId)],
+        };
+        await callTool("app_view", {
+          action: "select",
+          viewId,
+          boardId: store.cache.boardId,
+          selection: [String(presentationId)],
+        });
+      }
     }
     /* 自己写完立刻拉一次增量：界面不用等下一个整秒。 */
     await store.sync();

@@ -607,7 +607,9 @@ export function toCommands(op: any, ctx: WriteContext): V3Command[] {
         title: String(op.title ?? ""),
         data: v3DataOf(v3Type, data),
       });
-      commands.push(place("@new", ctx.boardId));
+      /* 展示也要一个 ref：内核回传 created 的时候才知道新卡片的编号，
+         选中要的是展示编号（v2 里建完就选中，属性面板会打开）。 */
+      commands.push(place("@new", ctx.boardId, "newP"));
       /* 新建的白板里先放预设内容：预设也是对象与展示。 */
       if (v2Type === "board") {
         const definitions = BOARD_PRESETS[String(data.preset ?? "")] ?? [];
@@ -657,19 +659,23 @@ export function toCommands(op: any, ctx: WriteContext): V3Command[] {
           set[v3FieldOf(object.type, key)] = next[key];
         }
       }
+      /* 标题跟编辑器的基线比，不跟缓存比：缓存可能已经是新标题了
+         （上一次保存刚写进去），拿缓存比会把这次该写的标题丢掉。 */
+      const baselineTitle =
+        op.baseTitle !== undefined ? String(op.baseTitle) : object.title;
       const title =
-        op.title !== undefined && op.title !== object.title
+        op.title !== undefined && op.title !== baselineTitle
           ? String(op.title)
           : undefined;
       if (title !== undefined || Object.keys(set).length)
         commands.push({
           op: "object.update",
           id: object.id,
-          /* 版本用界面这一侧看到的当前版本：界面自己连着写两次时
-             （先标题、后正文），第二次拿到的是第一次写完的版本，
-             不会自己跟自己冲突。别人改过这个对象时，缓存里的版本
-             会比内核旧，这一次写入就会被内核挡下来。 */
-          expectedVersion: object.version,
+          /* 版本用编辑器捕获的那一版：那是人看到的那份内容的版本。
+             别人在这期间改过这个对象，内核会挡下来。 */
+          ...(op.expectedVersion !== undefined
+            ? { expectedVersion: op.expectedVersion }
+            : {}),
           ...(title !== undefined ? { title } : {}),
           ...(Object.keys(set).length ? { set } : {}),
         });

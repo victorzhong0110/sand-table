@@ -31,8 +31,13 @@ let startupError;
 child.on("error", (error) => {
   startupError = error;
 });
-child.stdout.resume();
-child.stderr.resume();
+// 子进程的输出要留着：失败时「本地服务为什么没就绪」全在这里面。
+const childOutput = { stdout: "", stderr: "" };
+const collect = (key) => (chunk) => {
+  childOutput[key] = (childOutput[key] + String(chunk)).slice(-8000);
+};
+child.stdout.on("data", collect("stdout"));
+child.stderr.on("data", collect("stderr"));
 try {
   const end = Date.now() + 90000;
   let ws;
@@ -59,6 +64,26 @@ try {
       .find((p) => /^http:\/\/127\.0\.0\.1:\d+/.test(p.url()));
     if (page) break;
     await new Promise((r) => setTimeout(r, 250));
+  }
+  if (!page) {
+    // 失败时把看到的东西都打出来：窗口里是哪个页面、服务端说了什么。
+    const pages = context
+      .pages()
+      .map((p) => `${p.url()}${p.url() ? "" : ""} | ${p.title?.() ?? ""}`);
+    const body = await context
+      .pages()
+      .map((p) => p.innerText().catch(() => ""))
+      .join("\n---\n")
+      .slice(0, 2000);
+    console.error(
+      [
+        "便携窗口没有打开本地工作台。",
+        `窗口里的页面：${pages.join(" || ") || "(没有页面)"}`,
+        `页面正文：${body || "(空)"}`,
+        `子进程 stdout 尾部：${childOutput.stdout || "(空)"}`,
+        `子进程 stderr 尾部：${childOutput.stderr || "(空)"}`,
+      ].join("\n"),
+    );
   }
   assert.ok(page, "便携窗口没有打开本地工作台");
   const frame = page.frameLocator("iframe");
@@ -95,7 +120,10 @@ try {
   const exited = new Promise((resolve, reject) => {
     if (child.exitCode !== null) return resolve();
     const timer = setTimeout(() => reject(Error("便携窗口关闭超时")), 15000);
-    child.once("exit", () => { clearTimeout(timer); resolve(); });
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
   });
   void session.send("Browser.close").catch(() => {});
   await exited;

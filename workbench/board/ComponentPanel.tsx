@@ -421,6 +421,10 @@ function ComponentEditor({
     const paths = Object.keys(edits.current);
     const titleChanged = titleRef.current !== startTitle.current;
     if (!paths.length && !titleChanged) return true;
+    /* 这次写回带出去的值：写回期间人又改过的字段不算写成功了，
+       排队的下一笔还得看得见那些改动。 */
+    const written: Record<string, unknown> = { ...edits.current };
+    const writtenTitle = titleRef.current;
     const op: any = {
       kind: "update",
       instanceId: c.id,
@@ -453,11 +457,14 @@ function ComponentEditor({
       return false;
     }
     for (const path of paths) {
+      /* 人在这笔写回期间又改过这个字段：改动留着，下一笔再写。 */
+      if (!sameValue(edits.current[path], written[path])) continue;
       delete edits.current[path];
       delete starts.current[path];
       delete labels.current[path];
     }
-    if (titleChanged) startTitle.current = titleRef.current;
+    if (titleChanged && titleRef.current === writtenTitle)
+      startTitle.current = writtenTitle;
     /* 服务端把对象版本加了一：下一次保存要用新版本。 */
     if (version.current !== undefined) version.current += 1;
     setFailure("");
