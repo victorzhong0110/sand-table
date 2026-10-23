@@ -23,7 +23,7 @@ import {
   type Db,
 } from "../db.ts";
 import { newId } from "../ids.ts";
-import type { Registry } from "../registry.ts";
+import { createRegistry, PackSpecError, type Registry } from "../registry.ts";
 import type { Appearance, ExternalLocator, ObjectSource } from "../types.ts";
 import {
   readV2Workspace,
@@ -99,9 +99,13 @@ const SPACE_LINK_KINDS: Record<string, string> = {
 const TITLE_LIMIT = 300;
 /** 提案里单个文件内容超过这个大小就写进附件区。 */
 const BLOB_THRESHOLD = 1024 * 1024;
-/** 分组框的留白：和 v2 画布画分组框时一样（左右 12、上下 28）。 */
+/**
+ * 分组框的留白：和 v2 画布画分组框时一样（左右 12、上 28、下 12）。
+ * 见 workbench/board/SpaceCanvas.tsx 画分组框的那段。
+ */
 const FRAME_PADDING_X = 12;
-const FRAME_PADDING_Y = 28;
+const FRAME_PADDING_TOP = 28;
+const FRAME_PADDING_BOTTOM = 12;
 /** 导入的写入算一次修订。 */
 const IMPORT_REV = 1;
 
@@ -117,11 +121,11 @@ export type Rect = { x: number; y: number; width: number; height: number };
 export function groupFrameBox(members: readonly Rect[]): Rect {
   if (!members.length) return { x: 0, y: 0, width: 1, height: 1 };
   const left = Math.min(...members.map((m) => m.x)) - FRAME_PADDING_X;
-  const top = Math.min(...members.map((m) => m.y)) - FRAME_PADDING_Y;
+  const top = Math.min(...members.map((m) => m.y)) - FRAME_PADDING_TOP;
   const right =
     Math.max(...members.map((m) => m.x + m.width)) + FRAME_PADDING_X;
   const bottom =
-    Math.max(...members.map((m) => m.y + m.height)) + FRAME_PADDING_Y;
+    Math.max(...members.map((m) => m.y + m.height)) + FRAME_PADDING_BOTTOM;
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
@@ -172,13 +176,20 @@ type Ctx = {
   objectIds: Set<string>;
   /** 对象 id → 类型名（用来找默认尺寸）。 */
   objectType: Map<string, string>;
+  /** 对象 id → 标题（用来在报告里说清是哪个对象占了 id）。 */
+  objectTitle: Map<string, string>;
   /** 已经写入的关系 id。 */
   relationIds: Set<string>;
   /** v2 的「白板序号:分区 id」→ v3 的白板对象 id。 */
   spaceMap: Map<string, string>;
   /** v2 的展示 id → 它绑定的 v3 对象 id。 */
   presentationObject: Map<string, string>;
-  /** v2 的展示 id → 它在 v3 里的位置和所在白板。 */
+  /**
+   * v2 的展示 id → 它在 v3 里的位置和所在白板。
+   *
+   * 这里存的是 v2 的绝对坐标（白板上的位置）；数据库里存的展示坐标在框内
+   * 是相对框左上角的，换算见 toFrameRelative。
+   */
   presentationRect: Map<string, Rect & { boardId: string }>;
   /** 标题 → 同名对象的 id 列表（用来给名单匹配出建议）。 */
   titles: Map<string, string[]>;
@@ -186,6 +197,12 @@ type Ctx = {
   packIds: Set<string>;
   /** 已写入 blobs 的附件：v2 asset id → sha256 与 mime。 */
   assetsById: Map<string, { sha: string; mime: string }>;
+  /** 由 v2 分区变成的白板对象 id（用来发现展示被改绑到分区上）。 */
+  spaceObjectIds: Set<string>;
+  /** 这次导入写出去的附件文件路径；事务失败时要删掉，不能留孤儿文件。 */
+  writtenBlobs: string[];
+  /** 校验组件包清单用的暂存注册表：和内核写库前用的是同一套规则。 */
+  staged: Registry;
 };
 
 type ObjectInput = {
@@ -232,8 +249,9 @@ export function importV2(
     title: workspace.title,
     now: () => timestamp,
   });
+  const ctx = createCtx(db, registry, timestamp, jsonFile, dbFile, report);
   try {
-    writeAll(db, workspace, registry, timestamp, jsonFile, dbFile, report);
+    writeAll(ctx, workspace);
   } catch (error) {
     try {
       db.close();
@@ -247,22 +265,29 @@ export function importV2(
         /* 半成品文件可能不存在 */
       }
     }
+    // 事务回滚了，附件字节却已经落盘：一起删掉，不留孤儿文件。
+    for (const file of ctx.writtenBlobs) {
+      try {
+        rmSync(file, { force: true });
+      } catch {
+        /* 删不掉就留着，但不能盖掉原来的错误 */
+      }
+    }
     throw error;
   }
   db.close();
   return report;
 }
 
-function writeAll(
+function createCtx(
   db: Db,
-  workspace: V2Workspace,
   registry: Registry,
   now: number,
   jsonFile: string,
   dbFile: string,
   report: ImportReport,
-): void {
-  const ctx: Ctx = {
+): Ctx {
+  return {
     db,
     registry,
     now,
@@ -271,6 +296,7 @@ function writeAll(
     report,
     objectIds: new Set(),
     objectType: new Map(),
+    objectTitle: new Map(),
     relationIds: new Set(),
     spaceMap: new Map(),
     presentationObject: new Map(),
@@ -278,10 +304,27 @@ function writeAll(
     titles: new Map(),
     packIds: new Set(),
     assetsById: new Map(),
+    spaceObjectIds: new Set(),
+    writtenBlobs: [],
+    staged: stageRegistry(registry),
   };
-  transaction(db, () => {
-    importSpaces(ctx, workspace);
+}
+
+/**
+ * 暂存注册表：和内核写命令前用的一样（kernel/commands.ts 的 stageRegistry）。
+ * 组件包清单先在这里过一遍，不合格的不写库。
+ */
+function stageRegistry(registry: Registry): Registry {
+  const staged = createRegistry();
+  for (const pack of registry.listPacks())
+    staged.registerPack(pack.spec, pack.kind);
+  return staged;
+}
+
+function writeAll(ctx: Ctx, workspace: V2Workspace): void {
+  transaction(ctx.db, () => {
     importObjects(ctx, workspace);
+    importSpaces(ctx, workspace);
     importAssets(ctx, workspace);
     importCodeFlow(ctx, workspace);
     importGuides(ctx, workspace);
@@ -314,11 +357,14 @@ function importSpaces(ctx: Ctx, workspace: V2Workspace): void {
       if (ctx.spaceMap.has(key)) continue;
       let id = space.id;
       if (ctx.objectIds.has(id)) {
-        // 不同白板都叫「overview」时不能撞车：给后来的加白板前缀。
+        // 分区 id 已经被别的对象占了：分区改名，占着 id 的那个对象保留原 id。
         id = `${board.id}:${space.id}`;
-        ctx.report.skipped.push({
+        const holder = ctx.spaceObjectIds.has(space.id)
+          ? `另一块白板的分区「${space.id}」`
+          : `内容对象「${ctx.objectTitle.get(space.id) ?? space.id}」`;
+        ctx.report.warnings.push({
           what: `分区「${space.title}」`,
-          reason: `与另一块白板的分区 id「${space.id}」重名，已改用「${id}」。`,
+          reason: `它的 id「${space.id}」和${holder}重名，分区改用「${id}」；占着原 id 的对象保留原 id，指向它的展示不会被改绑到别的对象上。`,
         });
       }
       insertObject(ctx, {
@@ -330,6 +376,7 @@ function importSpaces(ctx: Ctx, workspace: V2Workspace): void {
         updatedAt: workspace.updatedAt,
         author: "v2",
       });
+      ctx.spaceObjectIds.add(id);
       ctx.spaceMap.set(key, id);
     }
   });
@@ -394,8 +441,15 @@ function importAssets(ctx: Ctx, workspace: V2Workspace): void {
         continue;
       }
       const mime = asset.mime || "application/octet-stream";
-      const sha = writeBlob(ctx, read.bytes, mime);
-      ctx.assetsById.set(asset.id, { sha, mime });
+      const written = writeBlob(ctx, read.bytes, mime);
+      if (!written.ok) {
+        ctx.report.skipped.push({
+          what: asset.name ? `附件「${asset.name}」` : "一个附件",
+          reason: `${written.reason}这个附件没有导入。`,
+        });
+        continue;
+      }
+      ctx.assetsById.set(asset.id, { sha: written.sha, mime });
       if (ctx.objectIds.has(asset.id)) {
         ctx.report.skipped.push({
           what: `附件「${asset.name}」`,
@@ -408,7 +462,7 @@ function importAssets(ctx: Ctx, workspace: V2Workspace): void {
         type: "base.media",
         title: asset.name,
         data: {
-          blob: sha,
+          blob: written.sha,
           mime,
           caption: asset.name,
           alt: asset.name,
@@ -433,7 +487,13 @@ function importCodeFlow(ctx: Ctx, workspace: V2Workspace): void {
         });
         continue;
       }
-      if (ctx.objectIds.has(id)) continue;
+      if (ctx.objectIds.has(id)) {
+        ctx.report.skipped.push({
+          what: "一个改动意图",
+          reason: `id「${id}」和已经导入的对象重名，没有导入。`,
+        });
+        continue;
+      }
       const data = { ...intent };
       delete data.id;
       insertObject(ctx, {
@@ -455,7 +515,13 @@ function importCodeFlow(ctx: Ctx, workspace: V2Workspace): void {
         });
         continue;
       }
-      if (ctx.objectIds.has(id)) continue;
+      if (ctx.objectIds.has(id)) {
+        ctx.report.skipped.push({
+          what: "一个目标版本",
+          reason: `id「${id}」和已经导入的对象重名，没有导入。`,
+        });
+        continue;
+      }
       const data = { ...proposal };
       delete data.id;
       const files = Array.isArray(proposal.files) ? proposal.files : [];
@@ -490,7 +556,13 @@ function importCodeFlow(ctx: Ctx, workspace: V2Workspace): void {
         });
         continue;
       }
-      if (ctx.objectIds.has(id)) continue;
+      if (ctx.objectIds.has(id)) {
+        ctx.report.skipped.push({
+          what: "一条验证结果",
+          reason: `id「${id}」和已经导入的对象重名，没有导入。`,
+        });
+        continue;
+      }
       const data = { ...validation };
       delete data.id;
       insertObject(ctx, {
@@ -522,7 +594,13 @@ function importGuides(ctx: Ctx, workspace: V2Workspace): void {
   for (const board of workspace.boards) {
     for (const guide of board.guides) {
       const id = guide.id || newId();
-      if (ctx.objectIds.has(id)) continue;
+      if (ctx.objectIds.has(id)) {
+        ctx.report.skipped.push({
+          what: `导览「${guide.title}」`,
+          reason: `id「${id}」和已经导入的对象重名，没有导入。`,
+        });
+        continue;
+      }
       const legacySteps: unknown[] = [];
       const stops: {
         objectId: string;
@@ -663,7 +741,14 @@ function resolvePresentationObject(
   }
   const bound = presentation.binding?.objectId ?? presentation.objectId;
   if (bound) {
-    if (ctx.objectIds.has(bound)) return bound;
+    if (ctx.objectIds.has(bound)) {
+      if (ctx.spaceObjectIds.has(bound))
+        ctx.report.warnings.push({
+          what: `展示「${presentation.title || presentation.type}」`,
+          reason: `它绑定的 id「${bound}」是白板分区（base.board）的 id，不是内容对象的 id；这条展示被绑到了分区对象上，可能不是它原来要指的对象。`,
+        });
+      return bound;
+    }
     if (isCodeEntryId(bound))
       return createCodePlaceholder(ctx, bound, presentation.title);
     ctx.report.skipped.push({
@@ -1066,6 +1151,22 @@ function importPacks(ctx: Ctx, workspace: V2Workspace): void {
         });
         continue;
       }
+      // 写库前先用内核同一套规则校验清单：不合格的包不写库，
+      // 否则 syncPacks 会在打开工作空间时报错，工作空间就打不开了。
+      try {
+        ctx.staged.registerPack(manifest, "data");
+      } catch (error) {
+        if (error instanceof PackSpecError) {
+          const problem = error.problems[0];
+          const detail = (problem?.message ?? error.message).replace(/。$/, "");
+          ctx.report.skipped.push({
+            what: `组件包「${pack.name || pack.id}」`,
+            reason: `清单不合格，未装入：${detail}。这个包没有写进数据库，其余数据照常导入。`,
+          });
+          continue;
+        }
+        throw error;
+      }
       ctx.packIds.add(manifest.id);
       ctx.db
         .prepare(
@@ -1182,6 +1283,7 @@ function insertObject(ctx: Ctx, input: ObjectInput): string {
     );
   ctx.objectIds.add(id);
   ctx.objectType.set(id, input.type);
+  ctx.objectTitle.set(id, input.title);
   ctx.report.objects += 1;
   return id;
 }
@@ -1293,19 +1395,53 @@ function insertRelation(
   ctx.report.relations += 1;
 }
 
-/** 写一个附件：字节进 blobs/，登记进 blobs 表。 */
-function writeBlob(ctx: Ctx, bytes: Buffer, mime: string): string {
+/**
+ * 写一个附件：字节进 blobs/，登记进 blobs 表。
+ *
+ * blobs/<sha> 是按内容命名的：文件已经存在就核对内容，对不上说明那里
+ * 摆的不是这份字节，不能登记。
+ */
+function writeBlob(
+  ctx: Ctx,
+  bytes: Buffer,
+  mime: string,
+): { ok: true; sha: string } | { ok: false; reason: string } {
   const sha = createHash("sha256").update(bytes).digest("hex");
   const dir = join(dirname(ctx.dbFile), "blobs");
   mkdirSync(dir, { recursive: true });
   const target = join(dir, sha);
-  if (!existsSync(target)) writeFileSync(target, bytes);
+  if (existsSync(target)) {
+    let existing: Buffer;
+    try {
+      existing = readFileSync(target);
+    } catch {
+      return {
+        ok: false,
+        reason: `blobs 目录里已有一个叫「${sha}」的条目，但它不是文件，没有登记。`,
+      };
+    }
+    if (createHash("sha256").update(existing).digest("hex") !== sha)
+      return {
+        ok: false,
+        reason: `blobs 目录里已有一个叫「${sha}」的文件，它的内容和这个哈希对不上，没有登记。`,
+      };
+  } else {
+    try {
+      writeFileSync(target, bytes);
+    } catch (error) {
+      throw new V2MigrationError(
+        `附件写不进 ${dir} 目录：${error instanceof Error ? error.message : String(error)}。请检查这个工作空间目录的权限和磁盘空间，处理好之后重新导入。`,
+        { cause: error },
+      );
+    }
+    ctx.writtenBlobs.push(target);
+  }
   ctx.db
     .prepare(
       "INSERT OR REPLACE INTO blobs (sha256, mime, bytes, created_at) VALUES (?, ?, ?, ?)",
     )
     .run(sha, mime || "application/octet-stream", bytes.length, ctx.now);
-  return sha;
+  return { ok: true, sha };
 }
 
 /**
@@ -1376,7 +1512,7 @@ function readAssetBytes(
     return {
       ok: false,
       reason:
-        "附件名含有路径分隔或 ..，不能读取工作空间 attachments 目录以外的文件。",
+        "附件名越界：含有路径分隔或 ..，不能读取工作空间 attachments 目录以外的文件，没有导入。",
     };
   const located = locateAttachment(jsonFile, asset.name);
   if (!located.ok) return located;
@@ -1423,7 +1559,8 @@ function locateAttachment(
   if (!inside || inside.startsWith("..") || isAbsolute(inside))
     return {
       ok: false,
-      reason: "附件路径解析后超出了工作空间的 attachments 目录，没有读取。",
+      reason:
+        "附件路径越界：解析后超出了工作空间的 attachments 目录，没有读取。",
     };
   if (!existsSync(file))
     return {
@@ -1446,7 +1583,8 @@ function locateAttachment(
   if (!resolved || resolved.startsWith("..") || isAbsolute(resolved))
     return {
       ok: false,
-      reason: "附件路径解析后超出了工作空间的 attachments 目录，没有读取。",
+      reason:
+        "附件路径越界：解析后超出了工作空间的 attachments 目录，没有读取。",
     };
   return { ok: true, file: fileReal };
 }
@@ -1460,8 +1598,16 @@ function mapProposalFile(ctx: Ctx, file: unknown): unknown {
     if (typeof content !== "string") continue;
     const bytes = Buffer.byteLength(content, "utf8");
     if (bytes <= BLOB_THRESHOLD) continue;
-    const sha = writeBlob(ctx, Buffer.from(content, "utf8"), "text/plain");
-    copy[key] = { blob: sha, bytes };
+    const written = writeBlob(ctx, Buffer.from(content, "utf8"), "text/plain");
+    if (!written.ok) {
+      // 内容留在原地，不丢；只是没有搬进附件区。
+      ctx.report.warnings.push({
+        what: `提案里的文件内容（${key}）`,
+        reason: `${written.reason}这段内容仍留在提案数据里，没有搬进附件区。`,
+      });
+      continue;
+    }
+    copy[key] = { blob: written.sha, bytes };
   }
   return copy;
 }

@@ -299,12 +299,15 @@ export const V2_MIGRATIONS: V2Migration[] = [
   },
 ];
 
-const readSchemaVersion = (raw: Record<string, unknown>): number => {
+const readSchemaVersion = (
+  raw: Record<string, unknown>,
+  source: string,
+): number => {
   const value = raw.schemaVersion;
   if (value === undefined || value === null) return 0;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0)
     throw new V2MigrationError(
-      `工作空间文件的 schemaVersion 必须是大于等于 0 的整数，实际是 ${JSON.stringify(value)}`,
+      `${source} 的 schemaVersion 必须是大于等于 0 的整数，实际是 ${JSON.stringify(value)}。请确认这个文件是完整的 Sand Table 工作空间文件；如果是手工改过的，请把 schemaVersion 改成一个非负整数后再导入。`,
     );
   return value;
 };
@@ -324,21 +327,26 @@ const normalizeSpace = (raw: unknown): V2Space => {
  * 展示实例逐字段归一化。
  * 缺 id / spaceId / type / rect 的实例是坏数据：判为损坏，而不是放行到运行时才炸。
  */
-const normalizePresentation = (raw: unknown): V2Presentation => {
+const normalizePresentation = (
+  raw: unknown,
+  index: number,
+  source: string,
+): V2Presentation => {
   const r = isRecord(raw) ? raw : {};
   const rect = isRecord(r.rect) ? r.rect : {};
   const id = asString(r.id, "");
   const spaceId = asString(r.spaceId, "");
   const type = asString(r.type, "");
   const numbers = [rect.x, rect.y, rect.width, rect.height];
-  if (
-    !id ||
-    !spaceId ||
-    !type ||
-    !numbers.every((n) => typeof n === "number" && Number.isFinite(n))
-  )
+  const missing: string[] = [];
+  if (!id) missing.push("id");
+  if (!spaceId) missing.push("spaceId（所在分区）");
+  if (!type) missing.push("type（组件类型）");
+  if (!numbers.every((n) => typeof n === "number" && Number.isFinite(n)))
+    missing.push("rect（位置与宽高）");
+  if (missing.length)
     throw new V2MigrationError(
-      `展示实例坏了：${JSON.stringify(raw).slice(0, 200)}`,
+      `${source} 里第 ${index + 1} 条展示实例缺 ${missing.join("、")}，无法导入。请用旧版本 Sand Table 打开这个工作空间另存一份，或手工补上缺的那一项后再导入。`,
     );
   const presentation: V2Presentation = {
     id,
@@ -582,7 +590,7 @@ const normalizeComponentPack = (raw: unknown): V2ComponentPack => {
   return pack;
 };
 
-const normalizeBoard = (raw: unknown): V2Board => {
+const normalizeBoard = (raw: unknown, source: string): V2Board => {
   const r = isRecord(raw) ? raw : {};
   const notes: Record<string, string> = {};
   if (isRecord(r.notes))
@@ -594,7 +602,9 @@ const normalizeBoard = (raw: unknown): V2Board => {
     revision: asNumber(r.revision, 0),
     contentRevision: asNumber(r.contentRevision, 0),
     spaces: asArray(r.spaces).filter(isRecord).map(normalizeSpace),
-    presentations: asArray(r.presentations).map(normalizePresentation),
+    presentations: asArray(r.presentations).map((item, index) =>
+      normalizePresentation(item, index, source),
+    ),
     views: isRecord(r.views) ? { ...r.views } : {},
     selection: asArray(r.selection).filter(
       (value): value is string => typeof value === "string",
@@ -619,13 +629,17 @@ const normalizeBoard = (raw: unknown): V2Board => {
 };
 
 /** 唯一性检查：重复 id 是坏数据，必须在读回时就说清楚，而不是静默取第一个。 */
-const assertUniqueIds = (objects: V2Object[], relations: V2Relation[]) => {
+const assertUniqueIds = (
+  objects: V2Object[],
+  relations: V2Relation[],
+  source: string,
+) => {
   const seen = new Set<string>();
   for (const object of objects) {
     if (!object.id) continue;
     if (seen.has(object.id))
       throw new V2MigrationError(
-        `工作空间文件里有重复的对象 id「${object.id}」`,
+        `${source} 里有重复的对象 id「${object.id}」，无法导入。请用旧版本 Sand Table 打开这个工作空间另存一份，把重复的那一条去掉后再导入。`,
       );
     seen.add(object.id);
   }
@@ -633,25 +647,25 @@ const assertUniqueIds = (objects: V2Object[], relations: V2Relation[]) => {
     if (!relation.id) continue;
     if (seen.has(relation.id))
       throw new V2MigrationError(
-        `工作空间文件里有重复的 id「${relation.id}」（对象与关系用了同一个 id）`,
+        `${source} 里有重复的 id「${relation.id}」（对象与关系用了同一个 id），无法导入。请用旧版本 Sand Table 打开这个工作空间另存一份，改掉重复的 id 后再导入。`,
       );
     seen.add(relation.id);
   }
 };
 
 /** 把任意（可能来自旧版本或外部编辑的）结构收敛为当前版本的 v2 工作空间。 */
-const normalizeWorkspace = (raw: unknown): V2Workspace => {
+const normalizeWorkspace = (raw: unknown, source: string): V2Workspace => {
   const r = isRecord(raw) ? raw : {};
   const id = asString(r.id, "");
   if (!id)
     throw new V2MigrationError(
-      "工作空间文件里没有可用的 id，不会凭空造一个空工作空间。",
+      `${source} 里没有可用的 id，不会凭空造一个空工作空间。请用旧版本 Sand Table 打开这个工作空间另存一份后再导入。`,
     );
   const objects = asArray(r.objects).filter(isRecord).map(normalizeObject);
   const relations = asArray(r.relations)
     .filter(isRecord)
     .map(normalizeRelation);
-  assertUniqueIds(objects, relations);
+  assertUniqueIds(objects, relations, source);
   return {
     schemaVersion: V2_SCHEMA_VERSION,
     id,
@@ -660,7 +674,9 @@ const normalizeWorkspace = (raw: unknown): V2Workspace => {
     updatedAt: asNumber(r.updatedAt, 0),
     revision: asNumber(r.revision, 0),
     contentRevision: asNumber(r.contentRevision, 0),
-    boards: asArray(r.boards).filter(isRecord).map(normalizeBoard),
+    boards: asArray(r.boards)
+      .filter(isRecord)
+      .map((board) => normalizeBoard(board, source)),
     objects,
     relations,
     resources: asArray(r.resources).filter(isRecord),
@@ -672,26 +688,31 @@ const normalizeWorkspace = (raw: unknown): V2Workspace => {
 /**
  * 把任意来源的原始内容迁移到 v2 的形状。
  * 未来版本抛错（不丢弃数据）；结构非法抛错。
+ *
+ * source 是这个内容的出处（一般是文件路径），错误信息里要写清楚，
+ * 用户才知道去哪儿改。
  */
-export function migrateV2(raw: unknown): V2Workspace {
+export function migrateV2(raw: unknown, source = "工作空间文件"): V2Workspace {
   if (!isRecord(raw))
-    throw new V2MigrationError("工作空间文件必须是一个 JSON 对象。");
+    throw new V2MigrationError(
+      `${source} 必须是一个 JSON 对象。请确认这个文件是 Sand Table 的工作空间文件。`,
+    );
   let current: Record<string, unknown> = raw;
-  let version = readSchemaVersion(current);
+  let version = readSchemaVersion(current, source);
   if (version > V2_SCHEMA_VERSION)
     throw new V2MigrationError(
-      `工作空间文件的版本是 ${version}，比这个导入器支持的版本 ${V2_SCHEMA_VERSION} 还新，没有丢弃数据，请换更新的 Sand Table 打开。`,
+      `${source} 的版本是 ${version}，比这个导入器支持的版本 ${V2_SCHEMA_VERSION} 还新，没有丢弃数据，请换更新的 Sand Table 打开。`,
     );
   while (version < V2_SCHEMA_VERSION) {
     const step = V2_MIGRATIONS.find((m) => m.from === version);
     if (!step)
       throw new V2MigrationError(
-        `工作空间文件的版本 ${version} 没有可用的升级路径。`,
+        `${source} 的版本 ${version} 没有可用的升级路径，请换更新的 Sand Table 打开。`,
       );
     current = step.apply(current);
     version = step.to;
   }
-  return normalizeWorkspace(current);
+  return normalizeWorkspace(current, source);
 }
 
 /** 读取并解析一个 v2 工作空间文件。读不了就抛错，调用方据此不改任何文件。 */
@@ -714,5 +735,5 @@ export function readV2Workspace(file: string): V2Workspace {
       { cause: error },
     );
   }
-  return migrateV2(parsed);
+  return migrateV2(parsed, file);
 }
