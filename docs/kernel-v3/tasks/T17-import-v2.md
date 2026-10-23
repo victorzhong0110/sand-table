@@ -69,7 +69,7 @@ export function importV2(jsonFile: string, dbFile: string, registry: Registry, n
 `workbench/tests/kernel-import.test.ts`。在 `tests/fixtures/v2/` 下手写小型 v2 文件，至少覆盖：
 
 1. 原生对象、绑定展示、本地内容展示、嵌套空间（`board` / `space-link` 展示）、空间链接（5 种 kind 各一条）、对象关系、分组、备注、附件、意图 / 提案 / 验证、导览、主题、组件包（v1）、审计。每种映射都断言导入后的结果（类型名、id 保留、关系方向、`parent_id`、blob 文件存在等）。
-2. 占位清理：人物 `age: 0` 被删掉；`age: 30` 保留；事件 `participants: ["林舟", "无名氏"]`，其中“林舟”有对应人物 → 生成一条 `novel.participates`，“无名氏”进 `data.legacyParticipants`。
+2. 无损迁移：真实 0、空字符串、空数组和未知字段均保留。重复同名、唯一同名及未知名单只报告/建议，不凭名字创建已确认关系；原始稳定 ID 关系保留。
 3. 未知类型 `foo` → `legacy.foo`，数据原样保留。
 4. 展示指向不存在的对象 → 被跳过并出现在报告里，其余正常导入。
 5. 损坏的 JSON → 抛错，目录里没有 `workspace.db`，`workspace.json` 字节不变。

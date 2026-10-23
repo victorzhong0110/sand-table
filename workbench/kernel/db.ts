@@ -46,7 +46,7 @@ export function openWorkspaceDb(
       const now = (options.now ?? Date.now)();
       const homeId = newId();
       transaction(db, () => {
-        db.exec(MIGRATIONS[0]);
+        for (const sql of MIGRATIONS) db.exec(sql);
         const insert = db.prepare(
           "INSERT INTO meta (key, value) VALUES (?, ?)",
         );

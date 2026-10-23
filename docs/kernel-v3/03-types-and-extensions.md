@@ -168,7 +168,7 @@ export type ViewProps = {
 };
 ```
 
-自定义视图只能通过 `dispatch` 写入，不能直接调用工具或访问其他对象的数据。
+自定义视图通过 dispatch 写入，通过下述受控绑定读取关联数据，不能直接调用工具、SQL 或任意网络。
 
 ## 6. 数据包（一级扩展）
 
@@ -278,3 +278,12 @@ v1 清单（`{version: 1, id, name, components: [...]}`）导入时自动转换�
 类型：`code.repository`、`code.file`、`code.symbol`（这三个 `source.origin = "derived"`，不进历史）、`code.intent`、`code.proposal`、`code.validation`。
 关系：`code.contains`、`code.imports`、`code.calls`（推测，`allowsInferred`）。
 工具：`code_repo`、`code_change`（模型可见），`code_decide`（界面专用）。
+
+
+## 9. 功能组件的受控绑定（组件阶段验收）
+
+图表读取表格、比较读取两个对象/版本、关系图读取有界查询，通过持久关系槽声明绑定，不复制源数据。宿主提供 readBindings({slot, ids?, fields?, limit?, cursor?})：仅可访问声明并已绑定的目标，返回版本、来源与失效原因。任意未绑定 ID 拒绝。
+
+subscribeBindings 提供可取消订阅，源对象/关系变化、删除、包停用或权限变化时通知；卸载释放，以 revision/version 拒绝过期结果。沙箱消息携带 requestId 并逐次验证声明与范围；可读不等于可跨对象写。跨对象动作由显式规则/用户操作授权。
+
+首次组件接入前建立任务卡：同一表格驱动两张图、比较读取两个版本、未绑定读取被拒、删除来源不丢引用记录。这是组件阶段接口，T11 不提前实现运行时。

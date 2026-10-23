@@ -1,3 +1,5 @@
+import { DatabaseSync } from "node:sqlite";
+import { MIGRATIONS } from "../kernel/schema.ts";
 import assert from "node:assert/strict";
 import {
   existsSync,
@@ -61,7 +63,14 @@ test("新建库写入全部 meta，并有首页白板", () => {
       ).map((row) => [row.key, row.value]),
     );
     for (const key of REQUIRED_META) assert.ok(key in meta, key);
-    assert.equal(meta.schema_version, "1");
+    assert.equal(meta.schema_version, "2");
+    for (const table of ["settings", "packs"])
+      assert.ok(
+        db
+          .prepare(`PRAGMA table_info(${table})`)
+          .all()
+          .some((r) => r.name === "deleted_rev"),
+      );
     assert.equal(meta.workspace_id, "demo");
     assert.equal(meta.title, "未命名工作空间");
     assert.equal(meta.created_at, String(now));
@@ -351,6 +360,36 @@ function row(db: Db, table: string, id: string) {
     unknown
   >;
 }
+
+test("版本1升级保留设置和包，删除可通过墓碑同步", () => {
+  const dir = tempDir(),
+    file = join(dir, "workspace.db");
+  const old = new DatabaseSync(file);
+  old.exec(MIGRATIONS[0]);
+  old.exec(
+    `INSERT INTO meta VALUES ('schema_version','1'); INSERT INTO settings VALUES ('theme','"paper"',4); INSERT INTO packs VALUES ('reading-kit','data',1,1,'{}',4);`,
+  );
+  old.close();
+  const db = openWorkspaceDb(file, { create: false });
+  try {
+    assert.equal(getMeta(db, "schema_version"), "2");
+    assert.equal(
+      db.prepare("SELECT value FROM settings").get()?.value,
+      '"paper"',
+    );
+    for (const table of ["settings", "packs"]) {
+      db.exec(`UPDATE ${table} SET rev=5, deleted_rev=5`);
+      assert.equal(
+        db.prepare(`SELECT deleted_rev FROM ${table} WHERE rev>4`).get()
+          ?.deleted_rev,
+        5,
+      );
+    }
+  } finally {
+    db.close();
+    remove(dir);
+  }
+});
 
 test("锁冲突后同一连接可以重试事务", () => {
   const dir = tempDir();

@@ -29,11 +29,11 @@
 
 - 不修改 v2 的 `connectors/`、`domains/`、`server/changes.ts`、`core/changes.ts`。需要的逻辑（索引器、Python 索引脚本、摘要计算）**复制**到 `packs/code/`，因为 T24 会删除 v2 目录。
 - 不把批准动作放进 `code_change`；`code_decide` 必须是界面专用工具。
-- 索引写入不进历史：代码文件、符号、仓库对象一律 `source.origin = "derived"`，用 `applyCommands(..., record: false)` 写入。
+- 索引写入不进历史：代码文件、符号、仓库对象一律 `source.origin = "derived"`，用 02 §1.5 的内部 object.upsert_derived 命令；不向公共 create 开放任意 ID。
 
 ## 做法
 
-1. **对象 id 要稳定**：`code.file` 的 id 用 `code:<仓库 id>:<相对路径>`，`code.symbol` 用 `code:<仓库 id>:<相对路径>#<符号名>:<起始行>`。这样 T17 导入的占位对象在刷新后能被同一 id 更新。
+1. **对象 id 要稳定**：`code.file` 的 id 用 `code:<仓库 id>:<相对路径>`，`code.symbol` 用 `code:<仓库 id>:<相对路径>#<符号名>:<起始行>`。通过内部 derived upsert 更新。旧索引 ID 格式不同则保留 ID→稳定定位映射，刷新优先复用旧 ID，不断开已有引用。
 2. **`code_repo`**：`import` 绑定本机仓库并索引；`refresh` 重新索引，删除已不存在的文件和符号对象（软删除）；`read_source` 读源码片段（沿用 v2 的分段和指纹）。
 3. **`code_change`**：9 个动作与 v2 对应工具语义一致；意图、提案、验证存为 `code.intent`、`code.proposal`、`code.validation` 对象（用 `applyCommands`，**进历史**）。超过 1 MB 的基线文件内容写入 `blobs/`。
 4. **`code_decide`**：`appOnly`；只接受 `actor.kind === "human"`，否则抛 `FORBIDDEN`；`digest` 必须与当前提案的摘要一致。
