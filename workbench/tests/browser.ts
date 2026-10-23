@@ -168,6 +168,20 @@ try {
   const focused = resultData(await rpc("sand_read_context"));
   assert.equal(focused.guideFocus.step, 1);
   assert.equal(focused.objects[0].title, "toVal");
+  await frame.locator(".card.selected").evaluate(async (card) => {
+    const canvas = card.closest(".canvas");
+    if (!canvas) throw Error("找不到白板画布");
+    const end = performance.now() + 5000;
+    while (performance.now() < end) {
+      const target = card.getBoundingClientRect();
+      const viewport = canvas.getBoundingClientRect();
+      if (target.x >= viewport.x && target.right <= viewport.right) return;
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+    }
+    throw Error("镜头移动后选中组件仍超出画布边界");
+  });
   const targetBox = await frame.locator(".card.selected").boundingBox();
   const canvasBox = await frame.locator(".canvas").boundingBox();
   assert.ok(
