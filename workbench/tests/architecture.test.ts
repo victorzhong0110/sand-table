@@ -1,3 +1,5 @@
+import ts from "typescript";
+import { posix } from "node:path";
 // 架构测试：把 v3 的目录边界和命名规则钉死，越界的改动在 CI 里直接失败。
 //
 // 规则出处：docs/kernel-v3/01-data-model.md §1（术语与禁用名词）、§9（V8），
@@ -154,32 +156,40 @@ const IMPORT_PATTERNS: RegExp[] = [
  * 在「去注释后」的源码上找：注释里写的 import 不算数。
  */
 function importSpecifiers(file: SourceFile): { spec: string; line: number }[] {
-  const { stripped } = scanOf(file);
+  const ast = ts.createSourceFile(
+    file.path,
+    file.source,
+    ts.ScriptTarget.Latest,
+    true,
+    file.path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
   const found: { spec: string; line: number }[] = [];
-  for (const pattern of IMPORT_PATTERNS) {
-    pattern.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(stripped))) {
+  const add = (n: ts.Node | undefined) => {
+    if (n && ts.isStringLiteralLike(n))
       found.push({
-        spec: match[2]!,
-        line: lineAt(stripped, match.index),
+        spec: n.text,
+        line: ast.getLineAndCharacterOfPosition(n.getStart(ast)).line + 1,
       });
-    }
+  };
+  function visit(n: ts.Node) {
+    if (ts.isImportDeclaration(n) || ts.isExportDeclaration(n))
+      add(n.moduleSpecifier);
+    if (
+      ts.isCallExpression(n) &&
+      (n.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(n.expression) && n.expression.text === "require"))
+    )
+      add(n.arguments[0]);
+    ts.forEachChild(n, visit);
   }
+  visit(ast);
   return found;
 }
 
 /** 相对路径解析：把 "./x.ts"、"../y/z.ts" 变成相对 workbench/ 的路径。 */
 function resolveRelative(fromPath: string, spec: string): string {
-  const stack = fromPath.split("/").slice(0, -1);
-  for (const part of spec.split("/")) {
-    if (!part || part === ".") continue;
-    if (part === "..") stack.pop();
-    else stack.push(part);
-  }
-  const last = stack[stack.length - 1];
-  if (last && !last.includes(".")) stack[stack.length - 1] = last + ".ts";
-  return stack.join("/");
+  const result = posix.normalize(posix.join(posix.dirname(fromPath), spec));
+  return /\.[cm]?[jt]sx?$/.test(result) ? result : result + ".ts";
 }
 
 /** 内核里的领域词：内核只提供机制，内容类型归包。 */
@@ -203,7 +213,7 @@ const V2_NAMES = [
 
 /** SQL 写语句：只能出现在内核里（V8）。 */
 const SQL_WRITE_PATTERNS: [string, RegExp][] = [
-  ["INSERT INTO", /\binsert\s+into\b/i],
+  ["INSERT INTO", /\binsert\s+(?:or\s+\w+\s+)?into\b/i],
   ["UPDATE … SET", /\bupdate\b[^;]*\bset\b/i],
   ["DELETE FROM", /\bdelete\s+from\b/i],
   ["REPLACE INTO", /\breplace\s+into\b/i],
@@ -236,8 +246,12 @@ function checkKernelImports(files: SourceFile[]): Violation[] {
   for (const file of files.filter(isKernel)) {
     for (const { spec, line } of importSpecifiers(file)) {
       if (spec.startsWith("node:")) continue;
-      if (spec.startsWith("ajv")) continue;
-      if (spec.startsWith("./")) continue;
+      if (spec === "ajv" || spec.startsWith("ajv/")) continue;
+      if (
+        spec.startsWith(".") &&
+        resolveRelative(file.path, spec).startsWith("kernel/")
+      )
+        continue;
       violations.push({
         file: file.path,
         line,
@@ -254,7 +268,15 @@ function checkPackImports(files: SourceFile[]): Violation[] {
   for (const file of files.filter(isPack)) {
     const pack = file.path.split("/")[1] ?? "";
     for (const { spec, line } of importSpecifiers(file)) {
-      if (!spec.startsWith(".")) continue;
+      if (!spec.startsWith(".")) {
+        if (!spec.startsWith("node:"))
+          violations.push({
+            file: file.path,
+            line,
+            message: `包的第三方依赖未被允许：${spec}`,
+          });
+        continue;
+      }
       const resolved = resolveRelative(file.path, spec);
       if (resolved === "kernel/index.ts") continue;
       if (resolved.startsWith(`packs/${pack}/`)) continue;
@@ -342,7 +364,7 @@ function listSourceFiles(
     if (entry.name.startsWith(".")) continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) listSourceFiles(full, root, out);
-    else if (entry.name.endsWith(".ts"))
+    else if (/\.[cm]?tsx?$/.test(entry.name))
       out.push({
         path: relative(root, full).split(sep).join("/"),
         source: readFileSync(full, "utf8"),
@@ -503,4 +525,41 @@ test("自检：注释里的 // 不是注释结束，字符串里的网址不能�
   assert.ok(!stripped.includes("真的注释"));
   assert.equal(literals.length, 1);
   assert.equal(literals[0]?.value, "https://example.com/a");
+});
+
+test("路径归一化及真实 import 的补充边界", () => {
+  const f = (path: string, source: string) => ({ path, source });
+  for (const source of [
+    'import "./../core/store.ts";',
+    'const x=require("../core/store.ts");',
+    'export {x} from "../core/store.ts";',
+  ])
+    assert.ok(checkKernelImports([f("kernel/demo.ts", source)]).length);
+  assert.equal(
+    checkKernelImports([f("kernel/sub/demo.ts", 'import "../db.ts";')]).length,
+    0,
+  );
+  assert.ok(
+    checkKernelImports([f("kernel/demo.ts", 'import "ajv-unapproved";')])
+      .length,
+  );
+  assert.equal(
+    checkKernelImports([
+      f("kernel/demo.ts", 'const text=`import "../core/store.ts"`;'),
+    ]).length,
+    0,
+  );
+  assert.ok(
+    checkKernelEntry([
+      f("board/demo.tsx", 'import {x} from "../kernel/db.ts";const y=<div/>;'),
+    ]).length,
+  );
+  assert.ok(
+    checkPackImports([f("packs/demo/index.ts", 'import "unapproved";')]).length,
+  );
+  assert.ok(
+    checkSqlWrites([
+      f("server/a.ts", 'const q="INSERT OR REPLACE INTO x VALUES (1)";'),
+    ]).length,
+  );
 });

@@ -45,3 +45,6 @@
 3. 在本地临时往 `kernel/` 某个文件里加一行 `import "../core/store.ts"`，测试失败；删掉后通过（在 PR 描述里说明你做过这个核对）。
 
 命令：`npm run format:check`、`npm run typecheck`、`npm test` 全部通过。
+
+
+T19修订：导入检查用已有TypeScript AST，路径归一化后判断是否在内核/本包。允许内核子目录引用上级内核，ajv精确包或子路径；包可用Node内置模块，其他裸依赖必须显式批准。扫描TSX/MTS/CTS并覆盖require、export、动态import与INSERT OR变体。
