@@ -193,7 +193,7 @@ function startOpening() {
     opening = false;
     element("opening").hidden = true;
     showError(
-      Error("白板没有加载出来。数据已保存在本机，可以点「重新连接」再试。"),
+      Error("白板没有加载出来。暂时无法确认保存状态，请点「重新连接」重试。"),
     );
   }, 15000);
   return cycle;

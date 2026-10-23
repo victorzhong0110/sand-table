@@ -267,7 +267,13 @@ try {
   await frame
     .getByRole("button", { name: "添加研究比较白板", exact: true })
     .click();
-  let b = await readBoard(),
+  const selectedBoard = (board: any) =>
+    Object.values(board.views).some((v: any) =>
+      v.selection.some((id: string) =>
+        board.instances.some((c: any) => c.id === id && c.type === "board"),
+      ),
+    );
+  let b = await untilBoard(selectedBoard),
     view = Object.values(b.views).find((v: any) =>
       v.selection.some((id: string) =>
         b.instances.some((c: any) => c.id === id && c.type === "board"),

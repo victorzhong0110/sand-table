@@ -649,7 +649,11 @@ export function CanvasShell({
             aria-label="设置"
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
-              if (e.key === "Escape") setSettingsOpen(false);
+              if (e.key === "Escape" && !e.defaultPrevented) {
+                e.preventDefault();
+                e.stopPropagation();
+                setSettingsOpen(false);
+              }
               if (e.key === "Tab") {
                 const items = [
                   ...e.currentTarget.querySelectorAll<HTMLElement>(

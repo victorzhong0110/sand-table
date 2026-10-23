@@ -1,3 +1,4 @@
+import { blocksCanvasShortcut } from "./keyboard.ts";
 import "./domain-ui.ts";
 import { CanvasShell } from "./CanvasShell.tsx";
 import React, { useState, useEffect, useRef, type CSSProperties } from "react";
@@ -214,8 +215,12 @@ function Workbench() {
       setBusy(false);
     }
   }
-  async function action(name: string, args: Record<string, unknown> = {}) {
-    setBusy(true);
+  async function action(
+    name: string,
+    args: Record<string, unknown> = {},
+    options: { background?: boolean } = {},
+  ) {
+    if (!options.background) setBusy(true);
     if (name !== "sand_read_board") setError("");
     const absorb = (data: any) => {
       if (
@@ -264,7 +269,7 @@ function Workbench() {
         } catch {}
       return undefined;
     } finally {
-      setBusy(false);
+      if (!options.background) setBusy(false);
     }
   }
   function edit(data: Record<string, unknown>) {
@@ -276,12 +281,16 @@ function Workbench() {
   }
   const operate = (operation: any) => {
     const next = operations.current.then(() =>
-      action("sand_edit_space", {
-        revision: boardRef.current?.revision,
-        viewId,
-        author: "human",
-        operation,
-      }),
+      action(
+        "sand_edit_space",
+        {
+          revision: boardRef.current?.revision,
+          viewId,
+          author: "human",
+          operation,
+        },
+        { background: ["select", "camera", "place"].includes(operation.kind) },
+      ),
     );
     operations.current = next.catch(() => undefined);
     return next;
@@ -316,6 +325,7 @@ function Workbench() {
   }, [isConnected]);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (blocksCanvasShortcut(e)) return;
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
       const key = e.key.toLowerCase();
       if (key !== "z" && key !== "y") return;

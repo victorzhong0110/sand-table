@@ -90,7 +90,7 @@ try {
      画布上的 Delete / Esc 读的是界面这一版板面（SpaceCanvas 的 selection），
      只等服务端会差半拍：服务端先记下选中，浏览器还没收到回话，
      这时按下的键会落在空选区上，什么都不发生。
-     人看不见高亮就不会按 Esc，所以这不是产品缺陷，是等待口径不对。 */
+     测试确认可见选区；快速点击后的键盘响应另由产品的待确认选区保证。 */
   const untilUiSelection = async (count: number) => {
     for (let i = 0; i < 150; i++) {
       if ((await frame.locator(".component-card.selected").count()) === count) {
@@ -469,6 +469,19 @@ try {
     );
   await frame.getByRole("button", { name: "浏览", exact: true }).click();
   const t02 = frame.locator('[data-instance-id="' + noteId + '"]');
+  await frame.locator(".palette-list").evaluate((root) => {
+    (window as any).__paletteDisabledChanges = 0;
+    const observer = new MutationObserver((records) => {
+      (window as any).__paletteDisabledChanges += records.length;
+    });
+    observer.observe(root, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ["disabled"],
+    });
+    (window as any).__paletteObserver = observer;
+  });
+
   await t02.click();
   b = await until((b) => selectedInstances(b).includes(noteId));
   assert.ok(
@@ -493,6 +506,17 @@ try {
       b.instances[0].rect.height > sizeBefore.height,
     "Dragging the handle resizes the selected component.",
   );
+  const paletteDisabledChanges = await frame
+    .locator(".palette-list")
+    .evaluate(() => {
+      (window as any).__paletteObserver.disconnect();
+      return (window as any).__paletteDisabledChanges;
+    });
+  assert.equal(
+    paletteDisabledChanges,
+    0,
+    "Selecting/resizing must not flash disabled toolbox controls.",
+  );
   /* Delete 移除选中的组件，撤销一次把它带回来。 */
   await untilUiSelection(1);
   await page.keyboard.press("Delete");
@@ -508,6 +532,23 @@ try {
     b.instances.some((i: any) => i.id === noteId),
     "One undo brings the removed component back.",
   );
+  /* 设置中的键只影响设置，不删除卡片或改变撤销位置。 */
+  await t02.click();
+  await untilUiSelection(1);
+  const beforeModal = await call("sand_history", { boardId });
+  await frame.getByRole("button", { name: "设置", exact: true }).click();
+  await frame.getByRole("button", { name: "关闭设置" }).focus();
+  await page.keyboard.press("Delete");
+  await page.keyboard.press("Control+z");
+  await page.keyboard.press("Escape");
+  await frame
+    .getByRole("dialog", { name: "设置" })
+    .waitFor({ state: "hidden" });
+  b = await read();
+  assert.ok(b.instances.some((c: any) => c.id === noteId));
+  assert.ok(selectedInstances(b).includes(noteId));
+  const afterModal = await call("sand_history", { boardId });
+  assert.equal(afterModal.cursorId, beforeModal.cursorId);
   /* Esc 取消选择。 */
   await t02.click();
   b = await until((b) => selectedInstances(b).includes(noteId));
