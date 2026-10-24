@@ -525,8 +525,12 @@ function visibleFields(schema: Record<string, unknown>) {
 
 test("每个字段都有中文标签和控件，摘要只取可见字段", () => {
   for (const pack of builtinPacks) {
-    if (pack.id === "code")
-      assert.equal(typeof pack.registerTools, "function", "代码包要注册工具");
+    if (pack.id === "code" || pack.id === "research")
+      assert.equal(
+        typeof pack.registerTools,
+        "function",
+        `${pack.id} 要注册工具`,
+      );
     else assert.equal(pack.registerTools, undefined, `${pack.id} 不该注册工具`);
     for (const type of pack.types ?? []) {
       assert.equal(

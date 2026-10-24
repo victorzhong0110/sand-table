@@ -27,10 +27,15 @@ export function bridgeEntry(
 ): McpEntry | undefined {
   if (kernel !== "v3") return entry;
   const base = entry ?? defaultMcpEntry(sessionFile);
+  const folder = process.env.SAND_FOLDER?.trim();
   return {
     command: base.command,
     args: base.args,
-    env: { ...base.env, SAND_KERNEL: "v3" },
+    env: {
+      ...base.env,
+      SAND_KERNEL: "v3",
+      ...(folder ? { SAND_FOLDER: folder } : {}),
+    },
   };
 }
 
@@ -111,6 +116,9 @@ export async function startLocal(options: {
               ...getDefaultEnvironment(),
               ...options.serverEnv,
               SAND_KERNEL: "v3",
+              ...(process.env.SAND_FOLDER?.trim()
+                ? { SAND_FOLDER: process.env.SAND_FOLDER.trim() }
+                : {}),
             }
           : options.serverEnv,
     }),

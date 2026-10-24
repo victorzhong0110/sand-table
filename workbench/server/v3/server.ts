@@ -30,6 +30,7 @@ import {
 import { builtinPacks } from "../../packs/index.ts";
 import { registerAppTools } from "./app-tools.ts";
 import { registerCoreTools } from "./core-tools.ts";
+import { registerFolderTools } from "./folder-tools.ts";
 import { toolError, toolResult } from "./output.ts";
 import type { WorkspaceSession } from "./workspaces.ts";
 
@@ -55,6 +56,12 @@ export type ServerOptions = {
   forward?: Forwarder;
   /** 内置包清单。缺省是仓库里的内置包；换掉它是为了能测包工具的启停。 */
   packs?: PackSpec[];
+  /**
+   * 启动时绑定的文件夹。
+   *
+   * 只有绑了才注册 folder_read，而且只能读这一个目录。
+   */
+  folder?: string;
 };
 
 export function createServerV3(options: ServerOptions) {
@@ -228,6 +235,10 @@ export function createServerV3(options: ServerOptions) {
     );
     syncPackTools(spec.id);
   }
+
+  /* 文件夹不是包工具：停用领域包不会把它关掉，没绑定就不会出现。 */
+  const folder = options.folder?.trim();
+  if (folder) registerFolderTools(registrar, folder);
 
   /* 记下现在的包状态：这一秒之后的变动才算变化。 */
   for (const [packId, mark] of packMarks()) appliedPacks.set(packId, mark);
