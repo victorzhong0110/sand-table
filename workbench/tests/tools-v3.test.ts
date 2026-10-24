@@ -27,6 +27,7 @@ const CORE_TOOLS = [
 ];
 
 const APP_TOOLS = [
+  "app_activity",
   "app_asset",
   "app_board",
   "app_changes",
@@ -55,6 +56,8 @@ async function open(workspaceId = "test", packs?: PackSpec[]) {
   return {
     root,
     client,
+    /** 工作空间数据库：造数据用。 */
+    db: () => created.workspace()!.db,
     close: async () => {
       created.dispose();
       await client.close();
@@ -91,6 +94,19 @@ async function modelTools(client: Client) {
     })
     .map((tool) => tool.name)
     .sort();
+}
+
+/** agent_reads 表里的每一行。没写过就返回空数组。 */
+function readAgentReads(db: {
+  prepare: (sql: string) => { all: () => unknown[] };
+}): { rows: number; seqs: number[] } {
+  const rows = db
+    .prepare("SELECT actor, history_seq FROM agent_reads ORDER BY actor")
+    .all() as { actor: string; history_seq: number }[];
+  return {
+    rows: rows.length,
+    seqs: rows.map((row) => Number(row.history_seq)),
+  };
 }
 
 test("停用领域包后，模型可见的工具正好 8 个", async () => {
@@ -562,4 +578,324 @@ test("不设内核版本时，条目跟以前一样", () => {
     undefined,
   );
   assert.equal(bridgeEntry(undefined, custom, "/tmp/session.json"), custom);
+});
+
+// —— T74：app_activity、app_view 的 boardId、类型元数据、过期响应隔离 ——
+
+test("app_activity 列出未过期的活动，最多 100 条，读取不推进 agent_reads", async () => {
+  const session = await open();
+  try {
+    const client = session.client;
+    // 先让一个 Agent 报两条活动：模型工具写的是 agent 的活动。
+    const first = await call(client, "sand_activity", {
+      state: "running",
+      task: "在整理人物",
+      action: "读第 1 章",
+      objectIds: [],
+    });
+    assert.equal(first.isError, false, first.text);
+    const second = await call(client, "sand_activity", {
+      state: "waiting",
+      task: "在等资料",
+      action: "翻档案",
+    });
+    assert.equal(second.isError, false, second.text);
+
+    const listed = await call(client, "app_activity", { action: "list" });
+    assert.equal(listed.isError, false, listed.text);
+    const activities = listed.data.activities as {
+      actor: string;
+      state: string;
+      task: string;
+    }[];
+    assert.equal(activities.length, 1, "同一个 Agent 只留最新一条");
+    assert.equal(activities[0]?.state, "waiting");
+    assert.equal(activities[0]?.task, "在等资料");
+    assert.equal(listed.data.truncated, false);
+    assert.equal(typeof listed.data.revision, "number");
+    assert.equal(listed.data.workspaceId, "test");
+
+    // 读取活动不能推进 Agent 的读取游标。
+    // 先让 sand_context 走一遍（它本来就会写游标），再读活动，
+    // 游标不能被带着往前走。
+    const context = await call(client, "sand_context");
+    assert.equal(context.isError, false, context.text);
+    const before = readAgentReads(session.db());
+    assert.ok(before && before.rows > 0, "sand_context 写下了读取游标");
+
+    const again = await call(client, "app_activity", { action: "list" });
+    assert.equal(again.isError, false, again.text);
+    const after = readAgentReads(session.db());
+    assert.deepEqual(after, before, "读活动不动 agent_reads");
+  } finally {
+    await session.close();
+  }
+});
+
+test("app_activity 一次至多 100 条，多的报截断，过期的活动消失", async () => {
+  const session = await open();
+  try {
+    const client = session.client;
+    // 直接写库造 120 条活动：模型工具一次只能写一个 Agent。
+    const db = session.db();
+    const now = Date.now();
+    const insert = db.prepare(
+      `INSERT INTO activities (actor, state, task, action, board_id, object_ids, reported_at, expires_at)
+       VALUES (?, 'running', ?, '干活', NULL, '[]', ?, ?)`,
+    );
+    for (let i = 0; i < 120; i++)
+      insert.run(`agent-${i}`, `任务 ${i}`, now + i, now + 60_000);
+    // 再写一条过期的：过期的活动不该出现在列表里。
+    insert.run("agent-expired", "早该没了", now - 1000, now - 1);
+
+    const listed = await call(client, "app_activity", { action: "list" });
+    assert.equal(listed.isError, false, listed.text);
+    const activities = listed.data.activities as { actor: string }[];
+    assert.equal(activities.length, 100, "一次至多 100 条");
+    assert.equal(listed.data.truncated, true, "多的要报截断");
+    assert.equal(
+      activities.some((item) => item.actor === "agent-expired"),
+      false,
+      "过期的活动消失",
+    );
+    assert.equal(
+      activities.filter((item) => item.actor.startsWith("agent-")).length,
+      100,
+    );
+  } finally {
+    await session.close();
+  }
+});
+
+test("app_view get 给出导航栈，select 和 camera 能带上白板编号", async () => {
+  const session = await open();
+  try {
+    const client = session.client;
+    const state = await call(client, "sand_status");
+    const homeBoardId = state.data.homeBoardId as string;
+
+    // 第一次直接 select：带上白板编号，不用先 navigate 登记一次。
+    const selected = await call(client, "app_view", {
+      action: "select",
+      viewId: "v1",
+      boardId: homeBoardId,
+      selection: [],
+    });
+    assert.equal(selected.isError, false, selected.text);
+    assert.equal(selected.data.workspaceId, "test");
+
+    const camera = await call(client, "app_view", {
+      action: "camera",
+      viewId: "v1",
+      boardId: homeBoardId,
+      camera: { x: 10, y: 20, zoom: 2 },
+    });
+    assert.equal(camera.isError, false, camera.text);
+
+    const view = await call(client, "app_view", {
+      action: "get",
+      viewId: "v1",
+    });
+    assert.equal(view.isError, false, view.text);
+    assert.equal(
+      (view.data.board as { id: string }).id,
+      homeBoardId,
+      "视角在白板上",
+    );
+    assert.deepEqual(view.data.camera, { x: 10, y: 20, zoom: 2 });
+    assert.deepEqual(view.data.navStack, [], "还没有进过子白板");
+    assert.equal(typeof view.data.revision, "number");
+    assert.equal(view.data.workspaceId, "test");
+
+    // 进了子白板之后，nav_stack 要能读回来。
+    const navigated = await call(client, "app_view", {
+      action: "navigate",
+      viewId: "v1",
+      boardId: homeBoardId,
+      navStack: [{ boardId: homeBoardId, camera: { x: 0, y: 0, zoom: 1 } }],
+    });
+    assert.equal(navigated.isError, false, navigated.text);
+    const after = await call(client, "app_view", {
+      action: "get",
+      viewId: "v1",
+    });
+    const navStack = after.data.navStack as unknown[];
+    assert.equal(navStack.length, 1, "导航栈读回来了");
+  } finally {
+    await session.close();
+  }
+});
+
+test("sand_types 的精简列表带上工具箱要的 icon、capabilities 和 presets", async () => {
+  const session = await open();
+  try {
+    const client = session.client;
+    const types = await call(client, "sand_types");
+    assert.equal(types.isError, false, types.text);
+    const list = types.data.types as {
+      type: string;
+      icon: string;
+      capabilities: { container?: boolean; cover?: boolean };
+      presets: { key: string; title: string }[];
+    }[];
+    const board = list.find((item) => item.type === "base.board");
+    assert.ok(board, "有 base.board");
+    assert.equal(typeof board!.icon, "string");
+    assert.ok(board!.icon.length > 0, "图标名不能空");
+    assert.equal(board!.capabilities.container, true);
+    assert.ok(Array.isArray(board!.presets), "预填条目是个列表");
+    const note = list.find((item) => item.type === "base.note");
+    assert.equal(note!.capabilities.container, undefined, "没声明的能力不出现");
+  } finally {
+    await session.close();
+  }
+});
+
+test("旧工作空间的读请求被拒：不能把旧板增量合进新库", async () => {
+  const session = await open();
+  try {
+    const client = session.client;
+    const ok = await call(client, "app_changes", {
+      since: 0,
+      workspaceId: "test",
+    });
+    assert.equal(ok.isError, false, ok.text);
+    assert.equal(ok.data.workspaceId, "test");
+
+    const stale = await call(client, "app_changes", {
+      since: 0,
+      workspaceId: "上一个工作空间",
+    });
+    assert.equal(stale.isError, true, "工作空间对不上就不给数据");
+    assert.equal(stale.data.code, "INVALID_DATA");
+    assert.match(String(stale.data.message), /工作空间/);
+
+    const board = await call(client, "app_board", {
+      boardId: (await call(client, "sand_status")).data.homeBoardId as string,
+      workspaceId: "上一个工作空间",
+    });
+    assert.equal(board.isError, true, "app_board 同样要拒");
+  } finally {
+    await session.close();
+  }
+});
+
+test("运行状态不进作品历史：视角和活动写完，历史还是空的", async () => {
+  const session = await open();
+  try {
+    const client = session.client;
+    const homeBoardId = (await call(client, "sand_status")).data
+      .homeBoardId as string;
+
+    const selected = await call(client, "app_view", {
+      action: "select",
+      viewId: "v1",
+      boardId: homeBoardId,
+      selection: [],
+    });
+    assert.equal(selected.isError, false, selected.text);
+    const activity = await call(client, "sand_activity", {
+      state: "running",
+      task: "在写东西",
+      action: "读文档",
+    });
+    assert.equal(activity.isError, false, activity.text);
+
+    const history = await call(client, "sand_history", { action: "list" });
+    assert.equal(history.isError, false, history.text);
+    assert.equal(
+      (history.data.entries as unknown[]).length,
+      0,
+      "视角和活动是运行状态，不进作品历史",
+    );
+
+    // 作品写入照旧进历史。
+    const written = await call(client, "app_edit", {
+      commands: [{ op: "object.create", type: "base.note", title: "一条便签" }],
+    });
+    assert.equal(written.isError, false, written.text);
+    const after = await call(client, "sand_history", { action: "list" });
+    assert.equal(
+      (after.data.entries as unknown[]).length,
+      1,
+      "作品写入才是历史里的一步",
+    );
+  } finally {
+    await session.close();
+  }
+});
+
+test("框内坐标说不准：sand_status 里带着要人工确认的提示；健康的库不带", async () => {
+  const session = await open();
+  try {
+    const client = session.client;
+    const healthy = await call(client, "sand_status");
+    assert.equal(healthy.isError, false, healthy.text);
+    const clean = healthy.data.frameCoords as {
+      state: string;
+      count: number;
+      message: string;
+    };
+    assert.equal(clean.state, "ok", "新建的工作空间是健康的");
+    assert.equal(clean.count, 0);
+    assert.match(clean.message, /相对父框/);
+    assert.doesNotMatch(clean.message, /导入器/, "新建的库不是导入器写的");
+    assert.equal(
+      (healthy.data.tips as string[]).some((tip) => tip.includes("人工确认")),
+      false,
+      "健康的库不带人工确认的提示",
+    );
+
+    // 造一个「有框内展示但没有坐标标记」的库。
+    const homeBoardId = healthy.data.homeBoardId as string;
+    const written = await call(client, "app_edit", {
+      commands: [
+        {
+          op: "object.create",
+          ref: "outer",
+          type: "base.note",
+          title: "外框",
+        },
+        {
+          op: "object.create",
+          ref: "inner",
+          type: "base.note",
+          title: "框里的",
+        },
+        {
+          op: "presentation.create",
+          ref: "outerView",
+          boardId: homeBoardId,
+          objectId: "@outer",
+        },
+        {
+          op: "presentation.create",
+          boardId: homeBoardId,
+          objectId: "@inner",
+          parentId: "@outerView",
+        },
+      ],
+    });
+    assert.equal(written.isError, false, written.text);
+    session.db().prepare("DELETE FROM meta WHERE key = 'frame_coords'").run();
+
+    const review = await call(client, "sand_status");
+    assert.equal(review.isError, false, review.text);
+    const state = review.data.frameCoords as {
+      state: string;
+      count: number;
+      message: string;
+    };
+    assert.equal(state.state, "needs-review", "坐标说不准时要人来确认");
+    assert.equal(state.count, 1, "一个框内展示要确认");
+    assert.match(state.message, /人工确认/);
+    const tips = review.data.tips as string[];
+    assert.equal(
+      tips.some((tip) => tip.includes("人工确认")),
+      true,
+      "提示里也要看得见要人工确认",
+    );
+  } finally {
+    await session.close();
+  }
 });

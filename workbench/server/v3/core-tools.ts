@@ -52,6 +52,8 @@ export function registerCoreTools(
         packs: state.packs,
         host: host.host(),
         tips: state.tips,
+        /* 框内坐标说不准时，这里带着要人工确认的提示。 */
+        frameCoords: state.frameCoords,
       };
       return fitBoards(result);
     },
