@@ -803,9 +803,16 @@ export function toCommands(op: any, ctx: WriteContext): V3Command[] {
       break;
     }
     case "remove": {
-      const presentation = ctx.presentations.get(String(op.instanceId));
-      if (!presentation) break;
-      commands.push({ op: "presentation.delete", id: presentation.id });
+      const ids = Array.isArray(op.instanceIds)
+        ? op.instanceIds.map((id: unknown) => String(id))
+        : op.instanceId !== undefined
+          ? [String(op.instanceId)]
+          : [];
+      for (const id of ids) {
+        const presentation = ctx.presentations.get(id);
+        if (!presentation) continue;
+        commands.push({ op: "presentation.delete", id: presentation.id });
+      }
       break;
     }
     case "link": {

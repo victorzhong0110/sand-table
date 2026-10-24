@@ -201,7 +201,7 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
 
 参数：`{ types?: string[] (≤20), pack?: string }`
 
-输出：不带参数时只给精简列表 `{ types: [{type, title, description, pack, container, icon, capabilities, presets}], relationKinds: [{kind, title, inverseTitle, allowsInferred, requiresBasis}], templates: [{id, title, pack}] }`；带 `types` 时给这些类型的完整声明（见 `03-types-and-extensions.md` §2）。
+输出：不带参数时只给精简列表 `{ types: [{type, title, description, pack, container, icon, capabilities, presets}], relationKinds: [{kind, title, inverseTitle, allowsInferred, requiresBasis, sourceTypes?, targetTypes?}], templates: [{id, title, pack}] }`；带 `types` 时给这些类型的完整声明（见 `03-types-and-extensions.md` §2）。关系种类声明了端点类型时，精简列表带上 `sourceTypes` / `targetTypes`，没有限制的不出现这两项。
 
 精简项里的 `icon` 是内置图标名，`capabilities` 是 `{container?, cover?}`（没声明的键不出现），`presets` 是这个类型在工具箱里的预填条目 `{key, title, width?, height?, data?}`——工具箱画按钮要用的就是这三样。
 

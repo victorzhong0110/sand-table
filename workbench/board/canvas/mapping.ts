@@ -118,6 +118,47 @@ export function openingViewport(input: {
   return { viewport: { ...DEFAULT_VIEWPORT }, fit: true };
 }
 
+/**
+ * 进入另一块白板。上一张上的点击不能挡住这张的镜头，所以 touched 固定清掉。
+ * camera 必须是这块白板自己的镜头，不是上一张留下的变换。
+ */
+export function enterBoard(input: {
+  touched: boolean;
+  camera: Viewport | null;
+  isHome: boolean;
+  presentationCount: number;
+}): { touched: false; viewport: Viewport; fit: boolean } {
+  const decision = openingViewport({
+    camera: input.camera,
+    isHome: input.isHome,
+    presentationCount: input.presentationCount,
+  });
+  return { touched: false, ...decision };
+}
+
+/** 切走之后，旧计时器上的序号对不上，选区和镜头就不能再写。 */
+export function viewWriteStillCurrent(
+  scheduledEpoch: number,
+  boardEpoch: number,
+): boolean {
+  return scheduledEpoch === boardEpoch;
+}
+
+/** 把 sand_types 精简列表里的关系种类收成选择框用的形状，端点约束留着。 */
+export function listedRelationKind(item: {
+  kind?: string;
+  title?: string;
+  sourceTypes?: readonly string[];
+  targetTypes?: readonly string[];
+}): RelationKindChoice {
+  return {
+    kind: item.kind ?? "",
+    title: item.title || item.kind || "",
+    ...(item.sourceTypes?.length ? { sourceTypes: [...item.sourceTypes] } : {}),
+    ...(item.targetTypes?.length ? { targetTypes: [...item.targetTypes] } : {}),
+  };
+}
+
 function byId(a: { id: string }, b: { id: string }): number {
   if (a.id < b.id) return -1;
   if (a.id > b.id) return 1;

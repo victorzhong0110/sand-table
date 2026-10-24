@@ -24,10 +24,12 @@ import { dragIntent, editIntent, endEditSession } from "../edit-session.ts";
 import { RelationEdge, type RelationEdgeType } from "./edges.tsx";
 import {
   DEFAULT_VIEWPORT,
-  openingViewport,
+  enterBoard,
+  listedRelationKind,
   relationChoices,
   toFlowEdges,
   toFlowNodes,
+  viewWriteStillCurrent,
   type MapPresentation,
   type MapRelation,
   type RelationKindChoice,
@@ -161,6 +163,7 @@ function FlowSurface({
   const touched = useRef(false);
   const ignoreMove = useRef(false);
   const booted = useRef(false);
+  const boardEpoch = useRef(0);
   const selectTimer = useRef(0);
   const cameraTimer = useRef(0);
   const noticeTimer = useRef(0);
@@ -181,9 +184,19 @@ function FlowSurface({
     noticeTimer.current = window.setTimeout(() => setNotice(""), 3200);
   };
 
+  const dropBoardWrites = () => {
+    boardEpoch.current += 1;
+    clearTimeout(selectTimer.current);
+    clearTimeout(cameraTimer.current);
+    selectTimer.current = 0;
+    cameraTimer.current = 0;
+  };
+
   const scheduleCamera = (next: Viewport) => {
+    const epoch = boardEpoch.current;
     clearTimeout(cameraTimer.current);
     cameraTimer.current = window.setTimeout(() => {
+      if (!viewWriteStillCurrent(epoch, boardEpoch.current)) return;
       void operateRef.current({ kind: "camera", camera: next });
     }, 500);
   };
@@ -405,6 +418,11 @@ function FlowSurface({
   };
 
   const navigate = (spaceId: unknown) => {
+    dropBoardWrites();
+    touched.current = false;
+    selectionOverride.current = null;
+    stopAnimation(false);
+    stopEdge(false);
     clearFilters();
     return operate({ kind: "navigate", spaceId });
   };
@@ -511,21 +529,39 @@ function FlowSurface({
   useEffect(() => {
     if (!view) return;
     let cancelled = false;
+    const switching = booted.current;
+    if (switching) {
+      dropBoardWrites();
+      touched.current = false;
+      selectionOverride.current = null;
+      stopAnimation(false);
+      stopEdge(false);
+    }
     const count = onBoard.length;
     const space = b.spaces.find((item) => item.id === view.spaceId);
     const isHome = !space?.parentId;
     const apply = (camera: Viewport | null) => {
-      if (cancelled || touched.current) return;
-      const decision = openingViewport({
+      if (cancelled) return;
+      if (!switching && touched.current) return;
+      const entered = enterBoard({
+        touched: touched.current,
         camera,
         isHome,
         presentationCount: count,
       });
-      setViewport(decision.viewport);
-      if (!decision.fit) return;
+      touched.current = entered.touched;
+      setViewport(entered.viewport);
+      if (!entered.fit) {
+        if (switching) scheduleCamera(entered.viewport);
+        return;
+      }
       requestAnimationFrame(() => {
         void flow.fitView({ padding: 0.2, duration: 0 }).then((fitted) => {
-          if (fitted && !touched.current) setViewport(flow.getViewport());
+          if (!fitted || cancelled) return;
+          if (!switching && touched.current) return;
+          const next = flow.getViewport();
+          setViewport(next);
+          scheduleCamera(next);
         });
       });
     };
@@ -534,8 +570,7 @@ function FlowSurface({
       void call("app_view", { action: "get", viewId })
         .then((data) => apply(parseCamera(data?.camera)))
         .catch(() => apply(null));
-    } else if (!isUnsetViewport(view.camera)) apply(view.camera);
-    else apply(null);
+    } else apply(isUnsetViewport(view.camera) ? null : view.camera);
     return () => {
       cancelled = true;
     };
@@ -833,10 +868,12 @@ function FlowSurface({
       };
       const kinds = relationChoices(
         (catalog?.relationKinds ?? []).map(
-          (item: { kind?: string; title?: string }) => ({
-            kind: String(item.kind ?? ""),
-            title: String(item.title ?? item.kind ?? ""),
-          }),
+          (item: {
+            kind?: string;
+            title?: string;
+            sourceTypes?: string[];
+            targetTypes?: string[];
+          }) => listedRelationKind(item),
         ),
         sourceType,
         targetType,
@@ -984,8 +1021,10 @@ function FlowSurface({
               const ids = selectedNodes.map((node) => node.id);
               selectionOverride.current = ids;
               if (sameIds(ids, selectionServer.current)) return;
+              const epoch = boardEpoch.current;
               clearTimeout(selectTimer.current);
               selectTimer.current = window.setTimeout(() => {
+                if (!viewWriteStillCurrent(epoch, boardEpoch.current)) return;
                 void operateRef.current({ kind: "select", ids });
               }, 300);
             }}
@@ -993,20 +1032,18 @@ function FlowSurface({
               void openLinkDialog(connection);
             }}
             onNodesDelete={(deleted) => {
+              if (!deleted.length) return;
               const intentId = `remove:${Date.now()}:${++removalSeq}`;
-              void (async () => {
-                for (const node of deleted) {
-                  const result = await operateRef.current({
-                    kind: "remove",
-                    instanceId: node.id,
-                    intentId,
-                  });
-                  if (result === undefined) {
-                    showNotice("没有删掉这个组件。请看页面上方的说明。");
-                    break;
-                  }
-                }
-              })();
+              void operateRef
+                .current({
+                  kind: "remove",
+                  instanceIds: deleted.map((node) => node.id),
+                  intentId,
+                })
+                .then((result) => {
+                  if (result === undefined)
+                    showNotice("没有删掉这些组件。请看页面上方的说明。");
+                });
             }}
             connectionMode={ConnectionMode.Loose}
             deleteKeyCode={deleteEnabled ? ["Delete", "Backspace"] : null}

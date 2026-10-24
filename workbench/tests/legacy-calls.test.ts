@@ -104,6 +104,26 @@ test("人物姓名写到标题上，不把 name 交给内核", () => {
   ]);
 });
 
+test("一次移除多份展示合成一批删除", () => {
+  const presentations = new Map([
+    ["p1", { id: "p1" } as V3PresentationRow],
+    ["p2", { id: "p2" } as V3PresentationRow],
+    ["p3", { id: "p3" } as V3PresentationRow],
+  ]);
+  const commands = toCommands(
+    { kind: "remove", instanceIds: ["p1", "missing", "p3"] },
+    {
+      boardId: "overview",
+      objects: new Map(),
+      presentations,
+    },
+  );
+  assert.deepEqual(commands, [
+    { op: "presentation.delete", id: "p1" },
+    { op: "presentation.delete", id: "p3" },
+  ]);
+});
+
 test("视角选择转到 app_view", () => {
   const translated = translateLegacyTool("sand_edit_view", {
     viewId: "view-1",

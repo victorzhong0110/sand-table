@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  enterBoard,
+  listedRelationKind,
   openingViewport,
   pickEndpoint,
   relationChoices,
   renderSize,
   toFlowEdges,
   toFlowNodes,
+  viewWriteStillCurrent,
   type MapPresentation,
   type MapRelation,
 } from "../board/canvas/mapping.ts";
@@ -146,6 +149,39 @@ test("首页不 fitView，有内容的其他白板在没有镜头时 fitView", (
       presentationCount: 2,
     }),
     { viewport: { x: 12, y: 40, zoom: 0.8 }, fit: false },
+  );
+});
+
+test("进入新白板时丢掉上一张上的点击，改用这块白板的镜头", () => {
+  const entered = enterBoard({
+    touched: true,
+    camera: { x: 24, y: 24, zoom: 1 },
+    isHome: false,
+    presentationCount: 3,
+  });
+  assert.equal(entered.touched, false);
+  assert.deepEqual(entered.viewport, { x: 24, y: 24, zoom: 1 });
+  assert.equal(entered.fit, false);
+  assert.equal(viewWriteStillCurrent(1, 1), true);
+  assert.equal(viewWriteStillCurrent(1, 2), false);
+});
+
+test("限制了端点的关系不会出现在两张便签之间", () => {
+  const kinds = [
+    listedRelationKind({ kind: "base.related", title: "相关" }),
+    listedRelationKind({
+      kind: "research.supports",
+      title: "支持",
+      sourceTypes: ["research.evidence"],
+      targetTypes: ["research.hypothesis", "research.conclusion"],
+    }),
+  ];
+  assert.deepEqual(kinds[1]?.sourceTypes, ["research.evidence"]);
+  assert.deepEqual(
+    relationChoices(kinds, "base.note", "base.note", [], []).map(
+      (item) => item.kind,
+    ),
+    ["base.related"],
   );
 });
 
