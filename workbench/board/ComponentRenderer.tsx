@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Board } from "../core/model.ts";
 import type { ComponentInstance } from "../core/spaces.ts";
 import { findObjectType } from "../core/domains.ts";
@@ -11,12 +11,17 @@ export function ComponentRenderer({
   call,
   onNavigate,
   onOpenLink,
+  editor,
+  editingField,
 }: {
   instance: ComponentInstance;
   board: Board;
   call: (name: string, args?: Record<string, unknown>) => Promise<any>;
   onNavigate: (spaceId: string) => void;
   onOpenLink: (url: string) => void;
+  /** 就地编辑时，这块就是原来的那行字，不再另盖一个输入框。 */
+  editor?: ReactNode;
+  editingField?: "title" | "text";
 }) {
   // 绑定了内容对象的组件：内容来自对象，不是这张卡自己的副本。
   // 同一对象在别处的展示会同步更新（内容共享、布局独立）。
@@ -43,7 +48,11 @@ export function ComponentRenderer({
           {board.workspaces.find((w) => w.id === object?.workspaceId)?.label ||
             "未知工作区"}
         </span>
-        <strong>{c.title}</strong>
+        {editingField === "title" && editor ? (
+          editor
+        ) : (
+          <strong>{c.title}</strong>
+        )}
         <span className="path">
           {object?.source
             ? `${object.source.path}:${object.source.startLine}`
@@ -64,7 +73,11 @@ export function ComponentRenderer({
         <span className="card-type">
           {c.type === "board" ? "白板容器" : "白板入口"}
         </span>
-        <strong>{c.title}</strong>
+        {editingField === "title" && editor ? (
+          editor
+        ) : (
+          <strong>{c.title}</strong>
+        )}
         <p>
           {space
             ? `${board.instances.filter((i) => i.spaceId === space.id).length} 个组件`
@@ -87,19 +100,29 @@ export function ComponentRenderer({
       <span className="card-type">
         {findComponentSpec(c.type)?.title || "未知组件"}
       </span>
-      {!componentTypes.some((t) => t.title === title) && (
-        <strong>{title}</strong>
-      )}
+      {editingField === "title" && editor
+        ? editor
+        : !componentTypes.some((t) => t.title === title) && (
+            <strong>{title}</strong>
+          )}
     </>
   );
   switch (c.type) {
     case "heading":
-      return <h2 className="component-heading">{text(d.text) || title}</h2>;
+      return editingField === "text" && editor ? (
+        editor
+      ) : (
+        <h2 className="component-heading">{text(d.text) || title}</h2>
+      );
     case "text":
       return (
         <>
           {header}
-          <p className="component-text">{text(d.text) || "写点什么…"}</p>
+          {editingField === "text" && editor ? (
+            editor
+          ) : (
+            <p className="component-text">{text(d.text) || "写点什么…"}</p>
+          )}
         </>
       );
     case "code":
@@ -107,7 +130,11 @@ export function ComponentRenderer({
         <>
           {header}
           <small>{text(d.language)} · 展示片段</small>
-          <pre>{text(d.text) || "尚未提供代码片段"}</pre>
+          {editingField === "text" && editor ? (
+            editor
+          ) : (
+            <pre>{text(d.text) || "尚未提供代码片段"}</pre>
+          )}
         </>
       );
     case "resource": {

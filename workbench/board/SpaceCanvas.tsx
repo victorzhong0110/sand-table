@@ -1,5 +1,5 @@
 import { blocksCanvasShortcut } from "./keyboard.ts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Board } from "../core/model.ts";
 import { Icon } from "./Icon.tsx";
 import { componentTypes, displayRect, material } from "../core/spaces.ts";
@@ -30,6 +30,122 @@ type Props = {
 /* 同一次删除里的多个组件共用一个意图：撤销一次，全部回来。 */
 let removalSeq = 0;
 const removalIntent = () => `remove:${Date.now()}:${++removalSeq}`;
+/* 有正文的类型改正文，其余改标题。输入框要落在这行字上，不能另起一块。 */
+const editField = (type: string): "title" | "text" =>
+  ["text", "heading", "code"].includes(type) ? "text" : "title";
+const growsWithContent =
+  typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
+
+function editHost(card: HTMLElement, field: "title" | "text") {
+  if (!card.classList.contains("detail-full"))
+    return card.querySelector<HTMLElement>(".collapsed-title");
+  if (field === "text")
+    return card.querySelector<HTMLElement>(
+      ".component-text, .component-heading, pre",
+    );
+  return card.querySelector<HTMLElement>(":scope > strong");
+}
+function textOffset(root: HTMLElement, node: Node, offset: number) {
+  if (node !== root && !root.contains(node)) return null;
+  const range = document.createRange();
+  range.setStart(root, 0);
+  try {
+    range.setEnd(node, offset);
+  } catch {
+    return null;
+  }
+  return range.toString().length;
+}
+function caretFromPoint(x: number, y: number) {
+  const doc = document as Document & {
+    caretPositionFromPoint?: (
+      x: number,
+      y: number,
+    ) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  const position = doc.caretPositionFromPoint?.(x, y);
+  if (position) return { node: position.offsetNode, offset: position.offset };
+  const range = doc.caretRangeFromPoint?.(x, y);
+  if (range) return { node: range.startContainer, offset: range.startOffset };
+  return null;
+}
+/* 双击落在原文的哪个字上，编辑就从哪个字开始。对不上原文时回到末尾。 */
+function readCaret(host: HTMLElement, value: string, x: number, y: number) {
+  const shown = (host.textContent ?? "").replace(/\r\n/g, "\n");
+  const atEnd = { start: value.length, end: value.length };
+  if (shown !== value.replace(/\r\n/g, "\n")) return atEnd;
+  const selection = window.getSelection();
+  if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+    const range = selection.getRangeAt(0);
+    const start = textOffset(host, range.startContainer, range.startOffset);
+    const end = textOffset(host, range.endContainer, range.endOffset);
+    if (start !== null && end !== null)
+      return { start: Math.min(start, end), end: Math.max(start, end) };
+  }
+  const point = caretFromPoint(x, y);
+  if (point) {
+    const offset = textOffset(host, point.node, point.offset);
+    if (offset !== null) return { start: offset, end: offset };
+  }
+  return atEnd;
+}
+function inlineEditClass(
+  type: string,
+  field: "title" | "text",
+  detail: string | undefined,
+) {
+  if (detail && detail !== "full") return "inline-edit collapsed-title";
+  if (field === "title") return "inline-edit is-title";
+  if (type === "heading") return "inline-edit component-heading";
+  if (type === "code") return "inline-edit component-code";
+  return "inline-edit component-text";
+}
+function inlineEditPlaceholder(
+  type: string,
+  field: "title" | "text",
+  title: string,
+) {
+  if (field !== "text") return undefined;
+  if (type === "code") return "尚未提供代码片段";
+  if (type === "heading") return title;
+  if (type === "text") return "写点什么…";
+  return undefined;
+}
+/* 没有 field-sizing 的浏览器里，把高度收到文字那么高，避免空出一块输入框。 */
+function fitInlineEdit(el: HTMLTextAreaElement, keepCaret: boolean) {
+  if (el.classList.contains("collapsed-title")) return;
+  const start = el.selectionStart;
+  const end = el.selectionEnd;
+  const scroll = el.scrollTop;
+  el.style.overflow = "hidden";
+  el.style.height = "auto";
+  const content = el.scrollHeight;
+  const card = el.closest("article");
+  let height = content;
+  if (card instanceof HTMLElement) {
+    const pad = Number.parseFloat(getComputedStyle(card).paddingBottom) || 0;
+    const margin = Number.parseFloat(getComputedStyle(el).marginBottom) || 0;
+    let top = 0;
+    let node: HTMLElement | null = el;
+    let reached = false;
+    while (node && node !== card) {
+      top += node.offsetTop;
+      const parent: Element | null = node.offsetParent;
+      if (!(parent instanceof HTMLElement)) break;
+      node = parent;
+      if (node === card) reached = true;
+    }
+    const room = card.clientHeight - top - pad - margin;
+    if (reached && room > 0) height = Math.min(content, room);
+  }
+  el.style.height = `${height}px`;
+  el.style.overflow = content > height + 1 ? "auto" : "hidden";
+  if (keepCaret && start !== null && end !== null) {
+    el.setSelectionRange(start, end);
+    el.scrollTop = scroll;
+  }
+}
 
 export function SpaceCanvas({
   board: b,
@@ -70,6 +186,11 @@ export function SpaceCanvas({
     >(),
     /* Short-lived feedback about what just happened on the canvas. */
     [notice, setNotice] = useState("");
+  const editBox = useRef<HTMLTextAreaElement | null>(null);
+  const pendingCaret = useRef<{ start: number; end: number } | null>(null);
+  const composing = useRef(false);
+  /* 提交或取消之后，卸掉输入框触发的 blur 不能再写一次。 */
+  const ignoreBlur = useRef(false);
   const live = useRef({ camera, draft });
   live.current = { camera, draft };
   const setCamera = (next: Camera) => {
@@ -313,11 +434,10 @@ export function SpaceCanvas({
   };
   /* #9.3: edit a component where it sits, without going to the side panel.
      A component with a body (text/heading/code) edits the body; everything
-     else edits the title. */
+     else edits the title. The caret stays in that text. */
   const startEdit = (c: ComponentInstance) => {
-    const field = ["text", "heading", "code"].includes(c.type)
-      ? "text"
-      : "title";
+    ignoreBlur.current = false;
+    const field = editField(c.type);
     // 基线取自内容模型：绑定了内容对象的组件，标题与正文都在对象上。
     const resolved = peekContent(c, b.contentObjects);
     setEditing({
@@ -333,8 +453,10 @@ export function SpaceCanvas({
     if (!view?.selection.includes(c.id)) void changeSelection([c.id]);
   };
   const commitEdit = async () => {
+    if (ignoreBlur.current) return;
     const edit = editing;
     if (!edit) return;
+    ignoreBlur.current = true;
     const c = b.instances.find((i) => i.id === edit.id);
     setEditing(undefined);
     if (!c) return;
@@ -376,9 +498,23 @@ export function SpaceCanvas({
     else endEditSession(c.id);
   };
   const cancelEdit = () => {
+    ignoreBlur.current = true;
     if (editing) endEditSession(editing.id);
     setEditing(undefined);
   };
+  useLayoutEffect(() => {
+    const el = editBox.current;
+    if (!el) return;
+    if (!growsWithContent) fitInlineEdit(el, !composing.current);
+    const caret = pendingCaret.current;
+    if (!caret || composing.current) return;
+    pendingCaret.current = null;
+    const end = el.value.length;
+    const start = Math.min(Math.max(caret.start, 0), end);
+    const finish = Math.min(Math.max(caret.end, start), end);
+    el.focus({ preventScroll: true });
+    el.setSelectionRange(start, finish);
+  }, [editing?.id, editing?.field, editing?.value]);
   useEffect(() => {
     if (view) setCamera(view.camera);
   }, [view?.spaceId]);
@@ -840,6 +976,58 @@ export function SpaceCanvas({
             // 标题与正文一律从对象解析：改名后折叠态、提示与无障碍名称
             // 要和展开态一致（#19 的根因修复，决策 D4）。
             const resolved = peekContent(c, b.contentObjects);
+            const editingHere = editing?.id === c.id ? editing : undefined;
+            const detail = c.appearance?.detail;
+            const expanded = !detail || detail === "full";
+            const editor = editingHere ? (
+              <textarea
+                ref={editBox}
+                className={inlineEditClass(c.type, editingHere.field, detail)}
+                placeholder={inlineEditPlaceholder(
+                  c.type,
+                  editingHere.field,
+                  resolved.title,
+                )}
+                aria-label={
+                  editingHere.field === "title"
+                    ? "就地编辑标题"
+                    : "就地编辑内容"
+                }
+                value={editingHere.value}
+                rows={1}
+                spellCheck={false}
+                autoFocus
+                onCompositionStart={() => {
+                  composing.current = true;
+                }}
+                onCompositionEnd={() => {
+                  composing.current = false;
+                  if (editBox.current && !growsWithContent)
+                    fitInlineEdit(editBox.current, true);
+                }}
+                onChange={(e) =>
+                  setEditing({ ...editingHere, value: e.target.value })
+                }
+                onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing || e.key === "Process") return;
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void commitEdit();
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    cancelEdit();
+                  }
+                }}
+                onBlur={() => {
+                  if (ignoreBlur.current) return;
+                  void commitEdit();
+                }}
+                onDoubleClick={(e) => e.stopPropagation()}
+              />
+            ) : null;
             return (
               <article
                 key={c.id}
@@ -879,6 +1067,16 @@ export function SpaceCanvas({
                     return;
                   }
                   /* #9.3: a double click edits the component where it sits. */
+                  const field = editField(c.type);
+                  const content = peekContent(c, b.contentObjects);
+                  const value =
+                    field === "text"
+                      ? String(content.data.text ?? "")
+                      : content.title;
+                  const host = editHost(e.currentTarget, field);
+                  pendingCaret.current = host
+                    ? readCaret(host, value, e.clientX, e.clientY)
+                    : { start: value.length, end: value.length };
                   startEdit(c);
                 }}
                 onKeyDown={(e) => {
@@ -1026,13 +1224,13 @@ export function SpaceCanvas({
                       size={20}
                     />
                   </span>
-                  {c.appearance?.detail &&
-                    c.appearance.detail !== "full" &&
-                    c.appearance.detail !== "icon" && (
-                      <strong className="collapsed-title">
-                        {resolved.title}
-                      </strong>
-                    )}
+                  {!expanded &&
+                    (editor ??
+                      (detail !== "icon" && (
+                        <strong className="collapsed-title">
+                          {resolved.title}
+                        </strong>
+                      )))}
                   <button
                     className="detail-toggle"
                     aria-label={`切换 ${resolved.title} 展开层级`}
@@ -1056,44 +1254,15 @@ export function SpaceCanvas({
                     <Icon name="board" size={14} />
                   </button>
                 </div>
-                {(!c.appearance?.detail || c.appearance.detail === "full") && (
+                {expanded && (
                   <ComponentRenderer
                     instance={c}
                     board={b}
                     call={call}
                     onNavigate={(spaceId) => void navigate(spaceId)}
                     onOpenLink={onOpenLink}
-                  />
-                )}
-                {editing?.id === c.id && (
-                  <textarea
-                    className={
-                      "inline-edit" +
-                      (editing.field === "title" ? " is-title" : "")
-                    }
-                    aria-label={
-                      editing.field === "title"
-                        ? "就地编辑标题"
-                        : "就地编辑内容"
-                    }
-                    value={editing.value}
-                    autoFocus
-                    onChange={(e) =>
-                      setEditing({ ...editing, value: e.target.value })
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        void commitEdit();
-                      }
-                      if (e.key === "Escape") {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        cancelEdit();
-                      }
-                    }}
-                    onBlur={() => void commitEdit()}
+                    editor={editor ?? undefined}
+                    editingField={editingHere?.field}
                   />
                 )}
                 {(mode === "arrange" || view.selection.includes(c.id)) &&
