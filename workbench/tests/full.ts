@@ -113,6 +113,9 @@ try {
   };
   const status = await call("sand_status");
   assert.equal(typeof status.homeBoardId, "string");
+  await call("app_edit", {
+    commands: [{ op: "pack.enable", id: "code" }],
+  });
   const imported = await call("code_repo", { action: "import", path: repo });
   assert.equal(typeof imported.repositoryId, "string");
   const files = await call("sand_query", {

@@ -71,6 +71,9 @@ try {
     assert.ok(!result.isError, JSON.stringify(result));
     return resultData(result);
   };
+  await call("app_edit", {
+    commands: [{ op: "pack.enable", id: "code" }],
+  });
   const importStart = performance.now();
   const imported = await call("code_repo", { action: "import", path: repo });
   const importMs = performance.now() - importStart;

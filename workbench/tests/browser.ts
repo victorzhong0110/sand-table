@@ -59,7 +59,7 @@ try {
   const frame = page.frameLocator("iframe");
   await frame.getByRole("heading", { name: "从一块空白开始" }).waitFor();
   async function rpc(name: string, args: Record<string, unknown> = {}) {
-    return page.evaluate(
+    const body = await page.evaluate(
       async ({ name, args }) => {
         const w = window as any;
         const r = await fetch("/rpc", {
@@ -77,25 +77,32 @@ try {
       },
       { name, args },
     );
+    if (body?.isError) throw Error(JSON.stringify(body));
+    const data = resultData(body);
+    if (!data) throw Error(JSON.stringify(body));
+    return data;
   }
-  const imported = resultData(
-    await rpc("code_repo", { action: "import", path: external }),
-  );
+  await rpc("app_edit", {
+    commands: [{ op: "pack.enable", id: "code" }],
+  });
+  const imported = await rpc("code_repo", {
+    action: "import",
+    path: external,
+  });
   assert.equal(typeof imported.repositoryId, "string");
-  const found = resultData(
-    await rpc("sand_query", {
-      types: ["code.symbol"],
-      text: "clsx",
-      limit: 20,
-    }),
+  const found = await rpc("sand_query", {
+    types: ["code.file"],
+    text: "src/index.js",
+    limit: 20,
+  });
+  const file = (found.rows as { id: string; title: string }[]).find(
+    (row) => row.title === "src/index.js",
   );
-  const symbol = (found.rows as { id: string; title: string }[]).find(
-    (row) => row.title === "clsx",
-  );
-  assert.ok(symbol);
-  const source = resultData(
-    await rpc("code_repo", { action: "read_source", objectId: symbol.id }),
-  );
+  assert.ok(file, JSON.stringify(found.rows));
+  const source = await rpc("code_repo", {
+    action: "read_source",
+    objectId: file.id,
+  });
   assert.match(String(source.text), /toVal/);
   mkdirSync("artifacts", { recursive: true });
   await page.screenshot({ path: "artifacts/overview-paper.png" });
