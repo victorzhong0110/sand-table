@@ -312,7 +312,9 @@ function mapContentType(type, data) {
   return TYPE_MAP[type] || `legacy.${type}`;
 }
 
-/** 便签的旧字段 text 写成 v3 的 body。其他字段原样留下。 */
+const SHA256 = /^[0-9a-f]{64}$/;
+
+/** 便签的旧字段 text 写成 v3 的 body。媒体的 assetId / description 写成 blob / caption。 */
 function mapContentData(type, data) {
   const next =
     data && typeof data === "object" && !Array.isArray(data) ? { ...data } : {};
@@ -324,7 +326,43 @@ function mapContentData(type, data) {
     next.body = next.text;
     delete next.text;
   }
+  const media =
+    type === "base.media" ||
+    (type === "resource" &&
+      typeof next.assetId === "string" &&
+      next.assetId.length > 0);
+  if (media) {
+    if (!Object.prototype.hasOwnProperty.call(next, "blob")) {
+      if (typeof next.assetId !== "string" || !SHA256.test(next.assetId))
+        throw new Error(
+          "媒体附件要给出 64 位 sha256。旧的 assetId 不是内容指纹时，请先上传附件，用返回的 sha256 作为 blob。",
+        );
+      next.blob = next.assetId;
+    }
+    delete next.assetId;
+    if (
+      !Object.prototype.hasOwnProperty.call(next, "caption") &&
+      typeof next.description === "string"
+    )
+      next.caption = next.description;
+    delete next.description;
+    delete next.url;
+  }
   return next;
+}
+
+/** v2 的 appearance.detail 写在展示上，不写进对象数据。 */
+function presentationAppearance(appearance) {
+  if (!appearance || typeof appearance !== "object" || Array.isArray(appearance))
+    return undefined;
+  const next = {};
+  if (typeof appearance.detail === "string" && appearance.detail)
+    next.detail = appearance.detail;
+  if (typeof appearance.coverBlob === "string" && appearance.coverBlob)
+    next.coverBlob = appearance.coverBlob;
+  if (typeof appearance.accent === "string" && appearance.accent)
+    next.accent = appearance.accent;
+  return Object.keys(next).length ? next : undefined;
 }
 
 function mapRelationKind(kind) {
@@ -451,11 +489,20 @@ async function editOnV3(mcp, args, operation) {
     }
     if (typeof operation.expectedVersion === "number")
       command.expectedVersion = operation.expectedVersion;
-    if (!command.title && !command.set)
+    const commands = [];
+    if (command.title || command.set) commands.push(command);
+    const appearance = presentationAppearance(operation.appearance);
+    if (appearance)
+      commands.push({
+        op: "presentation.update",
+        id: operation.instanceId,
+        appearance,
+      });
+    if (!commands.length)
       throw new Error("内容和标题都没有变化。请改过后再提交。");
     return mcp.callTool("sand_edit", {
       ...editIntent(operation, "DSH 更新"),
-      commands: [command],
+      commands,
     });
   }
   if (kind === "place") {
@@ -492,11 +539,37 @@ async function editOnV3(mcp, args, operation) {
         },
       ],
     });
-  if (kind === "deleteObject")
+  if (kind === "deleteObject") {
+    const policy = operation.onReferenced || "refuse";
+    if (policy !== "refuse" && policy !== "detach")
+      throw new Error(
+        "删除被引用对象时，onReferenced 只能是 refuse 或 detach。",
+      );
+    if (policy === "refuse") {
+      const read = dataOf(
+        await mcp.callTool("sand_read", { ids: [operation.objectId] }),
+      );
+      const object = (Array.isArray(read?.objects) ? read.objects : []).find(
+        (item) => item.id === operation.objectId,
+      );
+      if (!object)
+        throw new Error("找不到要删除的对象。请先读取白板，再用对象编号重试。");
+      const presentations = object.presentations;
+      const relations = object.relations;
+      if (!Array.isArray(presentations) || !Array.isArray(relations))
+        throw new Error(
+          "读不到这个对象的展示和关系，已拒绝删除。请先读对象确认没有引用，或把 onReferenced 设为 detach。",
+        );
+      if (presentations.length || relations.length)
+        throw new Error(
+          "这个对象还被展示或关系引用，已拒绝删除。若要连展示和关系一起去掉，请把 onReferenced 设为 detach 后再提交。",
+        );
+    }
     return mcp.callTool("sand_edit", {
       ...editIntent(operation, "DSH 删除"),
       commands: [{ op: "object.delete", id: operation.objectId }],
     });
+  }
   if (kind === "duplicate" || kind === "copyObject") {
     const contents = await loadBoard(mcp, args.boardId);
     const presentation = presentationOf(contents, operation.instanceId);
@@ -704,7 +777,6 @@ function createV3Operations(mcp) {
 
   const editSpace = async (args) => {
     if (!args?.boardId) throw new Error("缺少 boardId");
-    if (!args?.viewId) throw new Error("缺少 viewId");
     if (typeof args.revision !== "number") throw new Error("缺少 revision");
     let operation;
     try {
@@ -714,6 +786,13 @@ function createV3Operations(mcp) {
     }
     if (!operation || typeof operation !== "object" || Array.isArray(operation))
       throw new Error("operation 必须是一个 JSON 对象。");
+    if (
+      ["select", "camera", "navigate"].includes(operation.kind) &&
+      !args.viewId
+    )
+      throw new Error(
+        "选择、镜头或进入白板要给出 viewId。创建和更新内容不需要视角编号。",
+      );
     const current = dataOf(await mcp.callTool("sand_status", {}));
     if (current?.workspace?.revision !== args.revision)
       throw new Error("白板已经变了。请重新读取 revision，再提交这一次修改。");
@@ -757,10 +836,13 @@ function toolDefinitions(operations) {
     {
       name: "sand_table_edit_space",
       description:
-        "按用户请求修改当前白板的组件、布局或关系，不修改真实文件。先 sand_table_read_board 读取 revision 及 spaces.views 中的 viewId；operation 为 sand_edit_space 操作的 JSON 字符串。冲突时重新读取，不盲目重试。",
+        "按用户请求修改当前白板的组件、布局或关系，不修改真实文件。revision 来自 sand_table_list_boards。创建和更新内容只需要 boardId 与 revision；选择、镜头或进入白板时才需要 viewId。operation 为 sand_edit_space 操作的 JSON 字符串。冲突时重新读取，不盲目重试。",
       parameters: {
         boardId: { type: "string", required: true },
-        viewId: { type: "string", required: true },
+        viewId: {
+          type: "string",
+          description: "只在选择、调整镜头或进入白板时需要。内容修改不用填。",
+        },
         revision: { type: "number", required: true },
         operation: { type: "string", required: true },
       },

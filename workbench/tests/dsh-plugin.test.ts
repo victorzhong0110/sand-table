@@ -445,6 +445,251 @@ test("SAND_KERNEL=v3 时四个操作转调 v3 工具", async () => {
   );
 });
 
+test("内容编辑不要求 viewId，删除默认拒绝引用，外观和媒体按 v3 字段写", async () => {
+  const plugin = await loadPlugin();
+  const ok = { structuredContent: { data: { ok: true } } };
+  const referenced = {
+    structuredContent: {
+      data: {
+        objects: [
+          {
+            id: "o1",
+            presentations: [{ id: "p1", boardId: "board-1" }],
+            relations: [],
+          },
+        ],
+      },
+    },
+  };
+  const free = {
+    structuredContent: {
+      data: {
+        objects: [{ id: "o1", presentations: [], relations: [] }],
+      },
+    },
+  };
+
+  const created = recorded(plugin, "v3", (name) =>
+    name === "sand_status" ? statusReply(4) : ok,
+  );
+  await created.ops.editSpace({
+    boardId: "board-1",
+    revision: 4,
+    operation: JSON.stringify({
+      kind: "create",
+      type: "text",
+      title: "便签",
+      data: { text: "不用视角" },
+    }),
+  });
+  assert.deepEqual(
+    created.calls.map((call) => call.name),
+    ["sand_status", "sand_edit"],
+  );
+  assert.equal(
+    (created.calls[1]?.args.commands as { type: string }[])[0]?.type,
+    "base.note",
+  );
+
+  const select = recorded(plugin, "v3", () => statusReply(4));
+  await assert.rejects(
+    () =>
+      select.ops.editSpace({
+        boardId: "board-1",
+        revision: 4,
+        operation: JSON.stringify({ kind: "select", ids: ["p1"] }),
+      }),
+    /viewId/,
+  );
+  assert.deepEqual(select.calls, []);
+
+  const refused = recorded(plugin, "v3", (name) => {
+    if (name === "sand_status") return statusReply(4);
+    if (name === "sand_read") return referenced;
+    return ok;
+  });
+  await assert.rejects(
+    () =>
+      refused.ops.editSpace({
+        boardId: "board-1",
+        revision: 4,
+        operation: JSON.stringify({ kind: "deleteObject", objectId: "o1" }),
+      }),
+    /拒绝删除/,
+  );
+  assert.deepEqual(
+    refused.calls.map((call) => call.name),
+    ["sand_status", "sand_read"],
+  );
+
+  const explicit = recorded(plugin, "v3", (name) => {
+    if (name === "sand_status") return statusReply(4);
+    if (name === "sand_read") return referenced;
+    return ok;
+  });
+  await assert.rejects(
+    () =>
+      explicit.ops.editSpace({
+        boardId: "board-1",
+        revision: 4,
+        operation: JSON.stringify({
+          kind: "deleteObject",
+          objectId: "o1",
+          onReferenced: "refuse",
+        }),
+      }),
+    /detach/,
+  );
+  assert.equal(
+    explicit.calls.some((call) => call.name === "sand_edit"),
+    false,
+  );
+
+  const detached = recorded(plugin, "v3", (name) =>
+    name === "sand_status" ? statusReply(4) : ok,
+  );
+  await detached.ops.editSpace({
+    boardId: "board-1",
+    revision: 4,
+    operation: JSON.stringify({
+      kind: "deleteObject",
+      objectId: "o1",
+      onReferenced: "detach",
+    }),
+  });
+  assert.deepEqual(
+    detached.calls.map((call) => call.name),
+    ["sand_status", "sand_edit"],
+  );
+  assert.deepEqual(detached.calls[1]?.args.commands, [
+    { op: "object.delete", id: "o1" },
+  ]);
+
+  const alone = recorded(plugin, "v3", (name) => {
+    if (name === "sand_status") return statusReply(4);
+    if (name === "sand_read") return free;
+    return ok;
+  });
+  await alone.ops.editSpace({
+    boardId: "board-1",
+    revision: 4,
+    operation: JSON.stringify({ kind: "deleteObject", objectId: "o1" }),
+  });
+  assert.deepEqual(
+    alone.calls.map((call) => call.name),
+    ["sand_status", "sand_read", "sand_edit"],
+  );
+
+  const appearance = recorded(plugin, "v3", (name) => {
+    if (name === "sand_status") return statusReply(4);
+    if (name === "app_board")
+      return {
+        structuredContent: { data: { revision: 4 } },
+        _meta: {
+          data: {
+            presentations: [{ id: "p1", objectId: "o1" }],
+            objects: [{ id: "o1", type: "base.note" }],
+          },
+        },
+      };
+    return ok;
+  });
+  await appearance.ops.editSpace({
+    boardId: "board-1",
+    revision: 4,
+    operation: JSON.stringify({
+      kind: "update",
+      instanceId: "p1",
+      appearance: { detail: "label" },
+    }),
+  });
+  assert.deepEqual(appearance.calls[2]?.args.commands, [
+    {
+      op: "presentation.update",
+      id: "p1",
+      appearance: { detail: "label" },
+    },
+  ]);
+
+  const mixed = recorded(plugin, "v3", (name) => {
+    if (name === "sand_status") return statusReply(4);
+    if (name === "app_board")
+      return {
+        structuredContent: { data: { revision: 4 } },
+        _meta: {
+          data: {
+            presentations: [{ id: "p1", objectId: "o1" }],
+            objects: [{ id: "o1", type: "base.note" }],
+          },
+        },
+      };
+    return ok;
+  });
+  await mixed.ops.editSpace({
+    boardId: "board-1",
+    revision: 4,
+    operation: JSON.stringify({
+      kind: "update",
+      instanceId: "p1",
+      title: "新标题",
+      appearance: { detail: "icon" },
+    }),
+  });
+  assert.deepEqual(mixed.calls[2]?.args.commands, [
+    { op: "object.update", id: "o1", title: "新标题" },
+    {
+      op: "presentation.update",
+      id: "p1",
+      appearance: { detail: "icon" },
+    },
+  ]);
+
+  const blob = "ab".repeat(32);
+  const media = recorded(plugin, "v3", (name) =>
+    name === "sand_status" ? statusReply(4) : ok,
+  );
+  await media.ops.editSpace({
+    boardId: "board-1",
+    revision: 4,
+    operation: JSON.stringify({
+      kind: "create",
+      type: "resource",
+      title: "封面",
+      data: { assetId: blob, description: "说明", url: "https://example.test" },
+    }),
+  });
+  const mediaCommand = (
+    media.calls[1]?.args.commands as {
+      type: string;
+      data: Record<string, unknown>;
+    }[]
+  )[0];
+  assert.equal(mediaCommand?.type, "base.media");
+  assert.deepEqual(mediaCommand?.data, { blob, caption: "说明" });
+
+  const badAsset = recorded(plugin, "v3", (name) =>
+    name === "sand_status" ? statusReply(4) : ok,
+  );
+  await assert.rejects(
+    () =>
+      badAsset.ops.editSpace({
+        boardId: "board-1",
+        revision: 4,
+        operation: JSON.stringify({
+          kind: "create",
+          type: "resource",
+          title: "封面",
+          data: { assetId: "asset-1", description: "说明" },
+        }),
+      }),
+    /sha256/,
+  );
+  assert.deepEqual(
+    badAsset.calls.map((call) => call.name),
+    ["sand_status"],
+  );
+});
+
 test("内核不是 v3 时仍调用 v2 工具", async () => {
   const plugin = await loadPlugin();
   let listed = 0;
