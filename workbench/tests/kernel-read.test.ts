@@ -598,7 +598,7 @@ test("白板内容只含这块板上的展示、对象，以及两端都在板�
         { op: "setting.set", key: "demo.theme", value: { mode: "夜" } },
       ],
     });
-    const contents = boardContents(db, made.created.a!);
+    const contents = boardContents(db, registry, made.created.a!);
     assert.equal(contents.revision, Number(getMeta(db, "revision")));
     assert.equal(contents.board.id, made.created.a);
     assert.equal(contents.board.title, "甲");
@@ -660,7 +660,7 @@ test("增量只含中间修订号之后的行和墓碑，地板抬高后要求�
       intentId: "drop",
       commands: [{ op: "object.delete", id: created.created.b! }],
     });
-    const delta = changesSince(db, middle);
+    const delta = changesSince(db, registry, middle);
     assert.equal("reset" in delta, false);
     if ("reset" in delta) return;
     assert.equal(delta.revision, Number(getMeta(db, "revision")));
@@ -685,7 +685,7 @@ test("增量只含中间修订号之后的行和墓碑，地板抬高后要求�
       ),
     );
     setMeta(db, "tombstone_floor", String(delta.revision + 1));
-    const reset = changesSince(db, middle);
+    const reset = changesSince(db, registry, middle);
     assert.deepEqual(reset, { reset: true, revision: delta.revision });
   } finally {
     close();
@@ -708,7 +708,7 @@ test("设置和组件包的全量读取与墓碑来自同一次修订号快照",
       intentId: "theme",
       commands: [{ op: "setting.set", key: "demo.flag", value: { on: true } }],
     });
-    const loaded = boardContents(db, boardId);
+    const loaded = boardContents(db, registry, boardId);
     assert.equal(loaded.revision, Number(getMeta(db, "revision")));
     assert.deepEqual(
       loaded.settings.find((item) => item.key === "demo.flag")?.value,
@@ -718,7 +718,7 @@ test("设置和组件包的全量读取与墓碑来自同一次修订号快照",
       loaded.packs.some((item) => item.id === "demo"),
       true,
     );
-    const sinceCreate = changesSince(db, 0);
+    const sinceCreate = changesSince(db, registry, 0);
     assert.equal("reset" in sinceCreate, false);
     if ("reset" in sinceCreate) return;
     assert.equal(
@@ -735,7 +735,7 @@ test("设置和组件包的全量读取与墓碑来自同一次修订号快照",
       sinceCreate.objects.every((item) => item.rev <= sinceCreate.revision),
     );
     undo(db, human);
-    const undone = changesSince(db, beforeSetting);
+    const undone = changesSince(db, registry, beforeSetting);
     assert.equal("reset" in undone, false);
     if ("reset" in undone) return;
     assert.equal(
@@ -743,7 +743,7 @@ test("设置和组件包的全量读取与墓碑来自同一次修订号快照",
       true,
     );
     assert.equal(
-      boardContents(db, boardId).settings.some(
+      boardContents(db, registry, boardId).settings.some(
         (item) => item.key === "demo.flag",
       ),
       false,
@@ -754,12 +754,14 @@ test("设置和组件包的全量读取与墓碑来自同一次修订号快照",
       intentId: "drop-pack",
       commands: [{ op: "pack.remove", id: "demo" }],
     });
-    const packs = changesSince(db, removedAt);
+    const packs = changesSince(db, registry, removedAt);
     assert.equal("reset" in packs, false);
     if ("reset" in packs) return;
     assert.equal(packs.packs.find((item) => item.id === "demo")?.deleted, true);
     assert.equal(
-      boardContents(db, boardId).packs.some((item) => item.id === "demo"),
+      boardContents(db, registry, boardId).packs.some(
+        (item) => item.id === "demo",
+      ),
       false,
     );
   } finally {
