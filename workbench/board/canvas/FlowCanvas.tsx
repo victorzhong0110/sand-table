@@ -476,6 +476,7 @@ function FlowSurface({
             ...previous,
             data: { objectId: node.data.objectId },
             draggable: node.draggable,
+            className: "nopan",
             selected: previous.selected,
           };
         return {
@@ -488,6 +489,8 @@ function FlowSurface({
           ...(node.parentId ? { parentId: node.parentId } : {}),
           zIndex: node.zIndex,
           draggable: node.draggable,
+          /* 锁住的卡片不能拖，但按下它也不该变成在拖画布，否则选区会被清掉。 */
+          className: "nopan",
           selectable: true,
           selected,
           data: { objectId: node.data.objectId },
@@ -1019,9 +1022,12 @@ function FlowSurface({
             onSelectionChange={({ nodes: selectedNodes }) => {
               const ids = selectedNodes.map((node) => node.id);
               selectionOverride.current = ids;
+              /* 先清掉上一次还没发出的选择。拖不动的卡片会先报一次空选区，
+                 紧接着又回到原来的选中；那次空选区不能再写出去。 */
+              clearTimeout(selectTimer.current);
+              selectTimer.current = 0;
               if (sameIds(ids, selectionServer.current)) return;
               const epoch = boardEpoch.current;
-              clearTimeout(selectTimer.current);
               selectTimer.current = window.setTimeout(() => {
                 if (!viewWriteStillCurrent(epoch, boardEpoch.current)) return;
                 void operateRef.current({ kind: "select", ids });
