@@ -23,6 +23,9 @@ const child = spawn(executable, [`--remote-debugging-port=${port}`], {
     /* 桌面主进程的日志默认被这个开关挡掉（main.cjs 的 log()）：
        打开它，失败时才能看到本地服务自己的 stderr 与就绪信息。 */
     SAND_DESKTOP_LOG: "1",
+    /* 打包后的 Electron 在 Windows 上没有控制台，console.log 落不到 stdout；
+       这个开关把主进程的日志转到 stderr，冒烟脚本才收得到。 */
+    ELECTRON_ENABLE_LOGGING: "1",
     SAND_DESKTOP_USER_DATA: join(output, "user"),
     SAND_WORKSPACE_DIR: join(output, "workspaces"),
   },
@@ -85,9 +88,11 @@ try {
     const pages = context
       .pages()
       .map((p) => `${p.url()}${p.url() ? "" : ""} | ${p.title?.() ?? ""}`);
-    const body = await context
-      .pages()
-      .map((p) => p.innerText().catch(() => ""))
+    const body = (
+      await Promise.all(
+        context.pages().map((p) => p.innerText().catch(() => "")),
+      )
+    )
       .join("\n---\n")
       .slice(0, 2000);
     console.error(
