@@ -246,6 +246,8 @@ test("缺少一步迁移：读出原数据并带原因，改数据被拒，改�
     assert.equal(card.typeVersion, 1);
     assert.ok(card.migrationError, "缺一步迁移要有原因");
     assert.match(card.migrationError!, /缺少从版本 2 升到 3 的迁移函数/);
+    assert.match(card.migrationError!, /仍是版本 1/);
+    assert.equal(/停在版本/.test(card.migrationError!), false);
     assert.equal(card.typeAvailable, true, "迁移失败不改类型是否可用");
     assert.throws(
       () =>
@@ -359,6 +361,12 @@ test("迁移函数抛错：原数据不变，改数据被拒，改标题成功",
     assert.deepEqual(card.data, { name: "甲" });
     assert.equal(card.typeVersion, 1);
     assert.match(card.migrationError!, /迁移函数抛错：转换炸了/);
+    assert.match(card.migrationError!, /仍是版本 1/);
+    assert.equal(
+      /停在版本/.test(card.migrationError!),
+      false,
+      "中间步骤失败时不能说数据停在那一版",
+    );
     assert.throws(
       () =>
         applyCommands(db, registry, {
@@ -408,7 +416,8 @@ test("迁移函数返回的不是对象：原数据不变", () => {
     const card = readObjects(db, registry, [id], {}).objects[0]!;
     assert.deepEqual(card.data, { name: "甲" });
     assert.equal(card.typeVersion, 1);
-    assert.match(card.migrationError!, /后结果不是对象/);
+    assert.match(card.migrationError!, /结果不是普通对象/);
+    assert.match(card.migrationError!, /仍是版本 1/);
     assert.throws(
       () =>
         applyCommands(db, registry, {
@@ -422,6 +431,114 @@ test("迁移函数返回的不是对象：原数据不变", () => {
         return true;
       },
     );
+    assert.deepEqual(stored(db, id).data, { name: "甲" });
+  } finally {
+    close();
+  }
+});
+
+test("迁移函数返回 Date：原数据不变", () => {
+  const { db, registry, close } = scene();
+  try {
+    const id = createCard(db, registry);
+    registry.registerPack(
+      demoPack({
+        cardVersion: 2,
+        cardSchema: V3_SCHEMA,
+        cardSummary: ["label"],
+        migrations: [
+          {
+            from: 1,
+            migrate: () => new Date(0) as unknown as Record<string, unknown>,
+          },
+        ],
+      }),
+      "builtin",
+    );
+    const card = readObjects(db, registry, [id], {}).objects[0]!;
+    assert.deepEqual(card.data, { name: "甲" });
+    assert.equal(card.typeVersion, 1);
+    assert.match(card.migrationError!, /结果不是普通对象/);
+    assert.deepEqual(stored(db, id).data, { name: "甲" });
+  } finally {
+    close();
+  }
+});
+
+test("迁移结果不能原样保存成 JSON：原数据不变", () => {
+  const { db, registry, close } = scene();
+  try {
+    const id = createCard(db, registry);
+    registry.registerPack(
+      demoPack({
+        cardVersion: 2,
+        cardSchema: V3_SCHEMA,
+        cardSummary: ["label"],
+        migrations: [
+          {
+            from: 1,
+            migrate: (data) =>
+              ({
+                label: data.name,
+                n: 0,
+                when: new Date(0),
+              }) as Record<string, unknown>,
+          },
+        ],
+      }),
+      "builtin",
+    );
+    const card = readObjects(db, registry, [id], {}).objects[0]!;
+    assert.deepEqual(card.data, { name: "甲" });
+    assert.equal(card.typeVersion, 1);
+    assert.match(card.migrationError!, /无法原样保存成 JSON/);
+    assert.throws(
+      () =>
+        applyCommands(db, registry, {
+          actor: agent,
+          intentId: "edit-card",
+          commands: [{ op: "object.update", id, set: { n: 7 } }],
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof CommandError);
+        assert.equal(error.code, "INVALID_DATA");
+        assert.match(error.message, /无法原样保存成 JSON/);
+        return true;
+      },
+    );
+    assert.deepEqual(stored(db, id).data, { name: "甲" });
+  } finally {
+    close();
+  }
+});
+
+test("迁移结果超过 1 MB：原数据不变", () => {
+  const { db, registry, close } = scene();
+  try {
+    const id = createCard(db, registry);
+    registry.registerPack(
+      demoPack({
+        cardVersion: 2,
+        cardSchema: V3_SCHEMA,
+        cardSummary: ["label"],
+        migrations: [
+          {
+            from: 1,
+            migrate: (data) => ({
+              label: data.name,
+              n: 0,
+              pad: "x".repeat(1024 * 1024),
+            }),
+          },
+        ],
+      }),
+      "builtin",
+    );
+    const card = readObjects(db, registry, [id], {}).objects[0]!;
+    assert.deepEqual(card.data, { name: "甲" });
+    assert.equal(card.typeVersion, 1);
+    assert.match(card.migrationError!, /超过 1 MB/);
+    assert.equal(/不符合/.test(card.migrationError!), false);
     assert.deepEqual(stored(db, id).data, { name: "甲" });
   } finally {
     close();
@@ -474,8 +591,10 @@ test("迁移函数拿到的是深拷贝", () => {
           from: 1,
           migrate: (data) => {
             input = data;
+            const meta = data.meta as { k: number };
+            meta.k = 9;
             data.name = "改坏了";
-            return data;
+            return { name: data.name };
           },
         },
       ],
@@ -487,7 +606,7 @@ test("迁移函数拿到的是深拷贝", () => {
     type: "demo.card",
     typeVersion: 1,
     title: "卡片",
-    data: { name: "甲" },
+    data: { name: "甲", meta: { k: 1 } },
     source: null,
     version: 1,
     createdAt: 0,
@@ -498,11 +617,16 @@ test("迁移函数拿到的是深拷贝", () => {
     deleted: false,
   };
   const result = migrateData(registry, row);
-  assert.deepEqual(row.data, { name: "甲" }, "内核手里的原数据没有被改");
+  assert.deepEqual(
+    row.data,
+    { name: "甲", meta: { k: 1 } },
+    "内核手里的原数据没有被改",
+  );
   assert.deepEqual(result.data, { name: "改坏了" });
   assert.equal(result.typeVersion, 2);
   assert.equal(result.error, undefined);
   assert.notEqual(input, row.data, "迁移函数拿到的不是内核那一份数据");
+  assert.notEqual(result.data, input, "返回的是保存用的副本");
 });
 
 test("未来版本不降级", () => {

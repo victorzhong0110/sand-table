@@ -27,8 +27,9 @@ export type MigratedObjectRow = ObjectRow & { migrationError?: string };
  * 把一行对象的数据换成当前类型版本的结构。
  *
  * 类型不存在、数据比当前版本还新（不降级）时原样返回。
- * 缺一步（包括类型升了版却整个没写迁移函数）、函数抛错、结果不是对象、
- * 或者迁完不符合当前 Schema 时，返回原来的数据与原来的版本，并带上原因。
+ * 缺一步（包括类型升了版却整个没写迁移函数）、函数抛错、结果不是普通对象、
+ * 存不成原来的 JSON、超过 1 MB，或者迁完不符合当前 Schema 时，
+ * 返回原来的数据与原来的版本，并带上原因。原因写卡住的那一步和实际保留的原版本。
  */
 export function migrateData(
   registry: Registry,
@@ -43,9 +44,9 @@ export function migrateData(
   // 这里必须带原因返回。静默原样返回会让读的人分不出「本来就在当前版本」和
   // 「卡在旧版本了」，写路径也拦不住——新数据会以旧结构落盘，type_version 永远不前进。
   if (steps.length === 0)
-    return failed(
+    return preserved(
       row,
-      `缺少从版本 ${row.typeVersion} 升到 ${row.typeVersion + 1} 的迁移函数，「${row.type}」的数据停在版本 ${row.typeVersion}。`,
+      `缺少从版本 ${row.typeVersion} 升到 ${row.typeVersion + 1} 的迁移函数。`,
     );
   const owner = registry
     .listPacks()
@@ -63,47 +64,44 @@ export function migrateData(
   while (version < spec.version) {
     const step = steps.find((item) => item.from === version);
     if (!step)
-      return failed(
+      return preserved(
         row,
-        `缺少从版本 ${version} 升到 ${version + 1} 的迁移函数，「${row.type}」的数据停在版本 ${version}。`,
+        `缺少从版本 ${version} 升到 ${version + 1} 的迁移函数。`,
       );
     if (typeof step.migrate !== "function")
-      return failed(
+      return preserved(
         row,
-        `从版本 ${version} 升到 ${version + 1} 的迁移函数不是函数，「${row.type}」的数据停在版本 ${version}。`,
+        `从版本 ${version} 升到 ${version + 1} 的迁移函数不是函数。`,
       );
     const migrate = step.migrate;
     let next: unknown;
     try {
       next = migrate(deepCopy(data));
     } catch (error) {
-      return failed(
+      return preserved(
         row,
-        `从版本 ${version} 升到 ${version + 1} 时迁移函数抛错：${describe(error)}。「${row.type}」的数据停在版本 ${version}。`,
+        `从版本 ${version} 升到 ${version + 1} 时迁移函数抛错：${describe(error)}。`,
       );
     }
-    if (!isPlainObject(next))
-      return failed(
+    const encoded = encodeObject(next);
+    if (!encoded.ok)
+      return preserved(
         row,
-        `从版本 ${version} 升到 ${version + 1} 后结果不是对象，「${row.type}」的数据停在版本 ${version}。`,
+        encoded.kind === "not-object"
+          ? `从版本 ${version} 升到 ${version + 1} 后结果不是普通对象。`
+          : `从版本 ${version} 升到 ${version + 1} 后的数据无法原样保存成 JSON。`,
       );
-    const size = byteSize(next);
-    if (size === null)
-      return failed(
+    if (encoded.bytes > DATA_LIMIT)
+      return preserved(
         row,
-        `从版本 ${version} 升到 ${version + 1} 后的数据无法保存成 JSON，「${row.type}」的数据停在版本 ${version}。`,
+        `从版本 ${version} 升到 ${version + 1} 后的数据超过 1 MB。`,
       );
-    if (size > DATA_LIMIT)
-      return failed(
-        row,
-        `从版本 ${version} 升到 ${version + 1} 后的数据超过 1 MB，「${row.type}」的数据停在版本 ${version}。`,
-      );
-    data = next;
+    data = encoded.data;
     version += 1;
   }
   const validated = registry.validateData(row.type, data);
   if (!validated.ok)
-    return failed(
+    return preserved(
       row,
       `迁移后的数据不符合「${row.type}」当前版本的要求：${validated.errors[0]?.message ?? "数据不合格"}。`,
     );
@@ -129,6 +127,14 @@ function failed(row: ObjectRow, error: string): MigrationResult {
   return { data: row.data, typeVersion: row.typeVersion, error };
 }
 
+/** 失败时写明保留的是原版本。中间步骤成功也不会留下来。 */
+function preserved(row: ObjectRow, reason: string): MigrationResult {
+  return failed(
+    row,
+    `${reason}「${row.type}」仍是版本 ${row.typeVersion}，数据没有改。`,
+  );
+}
+
 /** 深拷贝：迁移函数改坏了入参也不影响原来的数据。 */
 function deepCopy<T>(value: T): T {
   if (Array.isArray(value)) return value.map(deepCopy) as T;
@@ -141,18 +147,59 @@ function deepCopy<T>(value: T): T {
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
 }
 
-/** 数据的字节数；存不成 JSON 时没有字节数。 */
-function byteSize(value: unknown): number | null {
+/**
+ * 迁出来的数据必须能原样存成 JSON。
+ * Date、类实例、toJSON、NaN、循环引用都会在保存时变成别的值，这里直接拒绝。
+ * 成功时返回解析后的副本，调用方改结果不会改到迁移函数手里的那份。
+ */
+function encodeObject(
+  value: unknown,
+):
+  | { ok: true; data: Record<string, unknown>; bytes: number }
+  | { ok: false; kind: "not-object" | "invalid" } {
+  if (!isPlainObject(value)) return { ok: false, kind: "not-object" };
+  let json: string;
   try {
-    const json = JSON.stringify(value);
-    if (typeof json !== "string") return null;
-    return Buffer.byteLength(json);
+    const encoded = JSON.stringify(value);
+    if (typeof encoded !== "string") return { ok: false, kind: "invalid" };
+    json = encoded;
   } catch {
-    return null;
+    return { ok: false, kind: "invalid" };
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return { ok: false, kind: "invalid" };
+  }
+  if (!isPlainObject(parsed) || !sameTree(value, parsed))
+    return { ok: false, kind: "invalid" };
+  return { ok: true, data: parsed, bytes: Buffer.byteLength(json) };
+}
+
+function sameTree(value: unknown, parsed: unknown): boolean {
+  if (value === parsed) return true;
+  if (Array.isArray(value) || Array.isArray(parsed)) {
+    if (!Array.isArray(value) || !Array.isArray(parsed)) return false;
+    if (value.length !== parsed.length) return false;
+    return value.every((item, index) => sameTree(item, parsed[index]));
+  }
+  if (isPlainObject(value) && isPlainObject(parsed)) {
+    const keys = Object.keys(value);
+    if (keys.length !== Object.keys(parsed).length) return false;
+    return keys.every(
+      (key) =>
+        Object.prototype.hasOwnProperty.call(parsed, key) &&
+        sameTree(value[key], parsed[key]),
+    );
+  }
+  return false;
 }
 
 function describe(error: unknown) {
