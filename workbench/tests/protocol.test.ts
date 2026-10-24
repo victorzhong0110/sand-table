@@ -52,16 +52,16 @@ test(
       });
       assert.equal(typeof imported.repositoryId, "string");
       const found = await call("sand_query", {
-        types: ["code.symbol"],
-        text: "clsx",
+        types: ["code.file"],
+        text: "src/index.js",
         limit: 20,
       });
       const rows = found.rows as { id: string; title: string }[];
-      const symbol = rows.find((row) => row.title === "clsx");
-      assert.ok(symbol, JSON.stringify(rows.map((row) => row.title)));
+      const file = rows.find((row) => row.title === "src/index.js");
+      assert.ok(file, JSON.stringify(rows.map((row) => row.title)));
       const source = await call("code_repo", {
         action: "read_source",
-        objectId: symbol.id,
+        objectId: file.id,
       });
       assert.match(String(source.text), /toVal/);
       const resource = await client.readResource({
