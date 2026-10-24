@@ -295,11 +295,10 @@ function FlowSurface({
     const items = moved.flatMap((node) => {
       const instance = b.instances.find((item) => item.id === node.id);
       if (!instance || instance.rect.pinned) return [];
-      if (
-        Math.abs(node.position.x - instance.rect.x) < 0.5 &&
-        Math.abs(node.position.y - instance.rect.y) < 0.5
-      )
-        return [];
+      const dx = node.position.x - instance.rect.x;
+      const dy = node.position.y - instance.rect.y;
+      /* 按下和松开几乎没动，是点击，不是拖动。 */
+      if (Math.hypot(dx, dy) < 3) return [];
       return [
         {
           id: node.id,
@@ -1046,6 +1045,8 @@ function FlowSurface({
                 });
             }}
             connectionMode={ConnectionMode.Loose}
+            nodeDragThreshold={0}
+            autoPanOnNodeDrag={false}
             deleteKeyCode={deleteEnabled ? ["Delete", "Backspace"] : null}
             minZoom={0.05}
             maxZoom={3}
