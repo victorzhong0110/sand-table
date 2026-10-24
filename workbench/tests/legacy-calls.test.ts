@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { toCommands } from "../board/data-client/adapter.ts";
 import { translateLegacyTool } from "../board/data-client/legacy-calls.ts";
+import type {
+  V3ObjectRow,
+  V3PresentationRow,
+} from "../board/data-client/store.ts";
 
 test("导入仓库转到 code_repo，并先启用代码包", () => {
   const translated = translateLegacyTool("sand_import_repository", {
@@ -63,6 +68,40 @@ test("备注和讲解还没有对应工具，不假装能保存", () => {
   });
   assert.ok(guide && "unsupported" in guide);
   assert.match(guide.unsupported, /讲解/);
+});
+
+test("人物姓名写到标题上，不把 name 交给内核", () => {
+  const object = {
+    id: "o1",
+    type: "novel.character",
+    title: "人物",
+  } as V3ObjectRow;
+  const presentation = {
+    id: "p1",
+    objectId: "o1",
+    boardId: "overview",
+  } as V3PresentationRow;
+  const commands = toCommands(
+    {
+      kind: "update",
+      instanceId: "p1",
+      data: { name: "林澈", role: "主角" },
+      baseData: {},
+    },
+    {
+      boardId: "overview",
+      objects: new Map([["o1", object]]),
+      presentations: new Map([["p1", presentation]]),
+    },
+  );
+  assert.deepEqual(commands, [
+    {
+      op: "object.update",
+      id: "o1",
+      title: "林澈",
+      set: { role: "主角" },
+    },
+  ]);
 });
 
 test("视角选择转到 app_view", () => {
