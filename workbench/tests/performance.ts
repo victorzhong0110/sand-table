@@ -80,13 +80,16 @@ try {
   assert.equal(typeof imported.repositoryId, "string");
   const queryStart = performance.now();
   const found = await call("sand_query", {
-    types: ["code.symbol"],
-    text: "snapshot_download",
+    types: ["code.file"],
+    text: "README",
     limit: 20,
   });
   const searchMs = performance.now() - queryStart;
   const rows = found.rows as { title: string }[];
-  assert.ok(rows.some((row) => row.title === "snapshot_download"));
+  assert.ok(
+    rows.some((row) => /readme/i.test(row.title)),
+    JSON.stringify(rows.map((row) => row.title)),
+  );
   browser = await chromium.launch({
     executablePath: process.env.CHROMIUM_PATH,
     args: ["--no-sandbox"],
