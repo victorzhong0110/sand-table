@@ -21,6 +21,10 @@ const workbench = join(repoRoot, "workbench");
 const stage = join(desktopRoot, ".stage", "workbench");
 
 // 运行期需要的目录。board/ 是前端源码，已经构建进 dist/，留一份便于排查。
+// packs/ 是内核的领域包：server/v3/server.ts 会 import 它，
+// 少拷这一个目录，打包出来的桌面版起不了本地工作台
+// （报 ERR_MODULE_NOT_FOUND，窗口一直停在加载页）。
+// desktop/tests/stage-layout.test.cjs 会核对这份清单跟运行期真正 import 到的目录一致。
 const runtimeDirs = [
   "board",
   "connectors",
@@ -29,6 +33,7 @@ const runtimeDirs = [
   "dsh-plugin",
   "kernel",
   "local",
+  "packs",
   "server",
   "dist",
 ];

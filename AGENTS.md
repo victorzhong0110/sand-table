@@ -6,13 +6,13 @@
 
 1. 读完本页。
 2. 读你的任务卡 `docs/kernel-v3/tasks/Txx-*.md`。**只做卡片上写的事。**
-3. 只读卡片“先读”里列出的文档和文件。
+3. 读卡片“先读”及 `docs/kernel-v3/05-delivery-contracts.md`。允许沿 import、测试和调用点追踪直接依赖；不得从历史文档补猜新设计。
 4. 不要从下列文档推断设计，它们是历史记录，很多决定已被推翻：`docs/DEVELOPMENT_PLAN.zh-CN.md`、`docs/architecture/`、`docs/reviews/`、`workbench/docs/ARCHITECTURE-HANDOVER.md`、`workbench/docs/ISSUES-CLEARANCE-PLAN.md`、`workbench/docs/ISSUE-RESOLUTIONS.md`。
-5. 任务卡与 `docs/kernel-v3/` 的设计文档冲突，或者你拿不准时：**停下来**，在 PR 描述里写“需要架构确认：……”，不要自己猜。
+5. 任务卡与正式契约存在实质语义冲突时，暂停受影响部分并写明证据；路径移动、同义 API 更名和卡片授权范围内的实现细节按 `05` §1 处理，继续完成不受影响部分。
 
 ## 硬规则
 
-- 只改任务卡“可改文件”里列出的文件。确实需要改别的文件，先停下来问。
+- 修改范围为任务卡“可改文件”加 `05` §1 的公共集成范围。新增产品能力或放宽核心约束不属于公共集成。
 - 不重构任务以外的代码；不顺手改格式、改名、挪文件。
 - 只引入卡片点名的依赖，版本号写死（不写 `^`、`~`）。
 - 一张卡一个分支一个 PR。分支名 `task/Txx-简短英文`，PR 标题 `Txx: 中文标题`，描述按 `.github/pull_request_template.md` 填写。
@@ -21,10 +21,11 @@
 - 代码注释只写代码本身表达不了的约束。不要写“根据任务卡”“这次修改是为了……”这类给审查者看的话。
 - 界面和错误信息用中文，具体到能指导用户下一步怎么做。
 - PR 描述如实写没做到的部分。issue 和 PR 描述要短，写现象、做法、结果；不要写“未宣称”“关闭不等于修复”之类的固定段落。
+- 每次提交都在说明最后一行署名。grok 写 `G`，minimax 写 `M`，chatgpt 写 `C`。作者字段仍用下面的账号，不要改成模型名。
 
 ## 提交身份
 
-所有提交的作者和提交者都必须是 `victorzhong0110 <victorzhong0110@gmail.com>`。用本次命令的环境变量设置，**不要修改 git config**：
+所有提交的作者和提交者都必须是 `victorzhong0110 <victorzhong0110@gmail.com>`。GitHub 上只能看到这个账号，不能靠作者名区分是谁写的。用本次命令的环境变量设置，**不要修改 git config**：
 
 ```bash
 GIT_AUTHOR_NAME=victorzhong0110 GIT_AUTHOR_EMAIL=victorzhong0110@gmail.com \
@@ -32,7 +33,21 @@ GIT_COMMITTER_NAME=victorzhong0110 GIT_COMMITTER_EMAIL=victorzhong0110@gmail.com
 git commit -m "说明"
 ```
 
-提交说明里不能有 `Co-authored-by`。推送前运行 `git log -1 --format=%B` 检查；如果工具或钩子自动加上了，用 `git commit --amend` 删掉（同样带上面的环境变量）再推送。
+提交说明的最后一行单独写署名，前后不要加别的字：
+
+| 谁写的 | 署名 |
+|---|---|
+| grok | `G` |
+| minimax | `M` |
+| chatgpt | `C` |
+
+```text
+fix: 说明改了什么
+
+G
+```
+
+提交说明里不能有 `Co-authored-by`。推送前运行 `git log -1 --format=%B` 检查：最后一行是上表里的一个字母；如果工具或钩子自动加上了 `Co-authored-by`，用 `git commit --amend` 删掉（同样带上面的环境变量，并保留署名）再推送。
 
 ## 常用命令
 

@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 执行 | grok |
+| 执行 | minimax |
 | 依赖 | T15、T17 |
 | 分支 | `task/T20-tools-v3` |
 
@@ -13,6 +13,7 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/kernel-v3/02-commands-and-tools.md`（全文）
 - `workbench/server/server.ts`（v2 的 `tool()` 注册方式、`appOnly`、模型 / 界面两份输出的做法、`Forwarder`）
 - `workbench/server/main.ts`、`workbench/local/bridge.ts`、`workbench/local/service.ts`（启动与转发）
@@ -76,3 +77,7 @@
 `workbench/tests/architecture.test.ts` 新增规则：只启用 `base` 时模型可见工具数为 8；启用全部内置包并绑定文件夹时不超过 8 + 2 × 3 + 1。
 
 命令：`npm run format:check`、`npm run typecheck`、`npm test`、`SAND_KERNEL=v3 npm test` 全部通过。
+
+## 交接与边界验收
+
+运行状态遵守 05 §3：提供内核 views/activity/workspace 管理接口，工具不写 SQL。允许新增对应 kernel 模块/导出及测试。app_view get 返回导航栈；app_activity list 读取活动不更新 agent_reads。只读 app 工具不计入模型 8 工具。sand_types 精简项还返回 icon、capabilities、presets 所需元数据，03/02 同步。跨进程包启停通过 revision 轮询刷新工具句柄，不仅监听本进程命令。

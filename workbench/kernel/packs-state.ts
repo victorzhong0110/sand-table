@@ -74,6 +74,43 @@ export function isPackEnabled(db: Db, packId: string): boolean {
   return row?.enabled === 1;
 }
 
+/** 一个包在库里的当前状态。 */
+export type PackState = {
+  id: string;
+  kind: "builtin" | "data";
+  enabled: boolean;
+  version: number;
+  /** 这一行最后一次变动的修订号。跨进程看包有没有变，就看它。 */
+  rev: number;
+};
+
+/**
+ * 库里所有还活着的包的状态。
+ *
+ * 另一个进程改了包的启停，这一行的 rev 就会变；
+ * 靠它就能知道本进程的工具句柄该刷新了，不必依赖本进程的写入回调。
+ */
+export function packStates(db: Db): PackState[] {
+  const rows = db
+    .prepare(
+      "SELECT id, kind, enabled, version, rev FROM packs WHERE deleted_rev IS NULL ORDER BY id ASC",
+    )
+    .all() as {
+    id: string;
+    kind: string;
+    enabled: number;
+    version: number;
+    rev: number;
+  }[];
+  return rows.map((row) => ({
+    id: String(row.id),
+    kind: row.kind === "data" ? "data" : "builtin",
+    enabled: Number(row.enabled) === 1,
+    version: Number(row.version),
+    rev: Number(row.rev),
+  }));
+}
+
 function needsSync(db: Db, id: string, version: number) {
   const row = db
     .prepare(

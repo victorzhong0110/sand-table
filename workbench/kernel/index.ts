@@ -43,30 +43,44 @@ export {
   boardContents,
   changesSince,
   context,
+  listActivities,
   listTypes,
   query,
   readObjects,
+  readView,
   setActivity,
   setView,
   status,
 } from "./read.ts";
 export type {
   ActivityInput,
+  ActivityListResult,
+  ActivityRow,
   BoardContents,
   ChangesResult,
   ChangesSinceResult,
   ContextResult,
+  PresetSummary,
   QueryFilter,
   QueryRow,
   ReadOptions,
   ReadResult,
   ResetResult,
   StatusResult,
+  TypeSummary,
   TypesResult,
   ViewInput,
+  ViewState,
 } from "./read.ts";
 export { summarize } from "./text.ts";
-export { syncPacks, isPackEnabled } from "./packs-state.ts";
+export {
+  auditFrameCoordinates,
+  markFrameCoords,
+  FRAME_COORDS_MARKER,
+} from "./frame-coords.ts";
+export type { FrameCoordAudit, FrameCoordItem } from "./frame-coords.ts";
+export { syncPacks, isPackEnabled, packStates } from "./packs-state.ts";
+export type { PackState } from "./packs-state.ts";
 export { createRegistry, PackSpecError } from "./registry.ts";
 export type { Registry } from "./registry.ts";
 export { openWorkspace } from "./workspace.ts";

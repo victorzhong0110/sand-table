@@ -8,6 +8,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
@@ -25,7 +26,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   applyCommands,
+  auditFrameCoordinates,
   createRegistry,
+  FRAME_COORDS_MARKER,
   getMeta,
   importV2,
   openWorkspace,
@@ -487,7 +490,8 @@ test("分组内展示的坐标是相对框左上角的，换算回绝对坐标�
     assert.equal(frame!.x, 88, "框的左上角是组员外接矩形加留白");
     assert.equal(frame!.y, 172);
     assert.equal(frame!.width, 604);
-    assert.equal(frame!.height, 296);
+    // 留白与 v2 画布一致：左右 12、上 28、下 12
+    assert.equal(frame!.height, 280);
     // 相对坐标
     assert.equal(member!.x, 12);
     assert.equal(member!.y, 28);
@@ -510,7 +514,7 @@ test("坐标换算只在一个地方：换算函数自己也是对的", () => {
     { x: 420, y: 260, width: 260, height: 180 },
   ];
   const frame = groupFrameBox(members);
-  assert.deepEqual(frame, { x: 88, y: 172, width: 604, height: 296 });
+  assert.deepEqual(frame, { x: 88, y: 172, width: 604, height: 280 });
   for (const member of members) {
     const relative = toFrameRelative(frame, member);
     assert.equal(frame.x + relative.x, member.x);
@@ -945,6 +949,12 @@ test("附件路径限制在 attachments 目录内", () => {
     );
     assert.ok(
       reasons.some(
+        (line) => line.includes("etc/passwd") && line.includes("越界"),
+      ),
+      "报告里写明附件名越界",
+    );
+    assert.ok(
+      reasons.some(
         (line) => line.includes("escape") && line.includes("超出了"),
       ),
       "指向目录外的符号链接被拒绝",
@@ -960,6 +970,11 @@ test("附件路径限制在 attachments 目录内", () => {
       texts.some((text) => text.includes("SECRET_OUTSIDE")),
       false,
       "目录外的文件没有被复制进 blobs",
+    );
+    assert.equal(
+      texts.some((text) => text.includes("root:")),
+      false,
+      "越界读到的系统文件没有被复制进 blobs",
     );
     const media = objectsOf(db, "base.media");
     assert.deepEqual(
@@ -1053,6 +1068,14 @@ test("引用附件的 resource 写成 base.media 的 blob", () => {
     assert.equal(pic!.data.blob, asset!.data.blob, "blob 指向已导入的附件");
     assert.equal(pic!.data.mime, "image/png");
     assert.match(String(pic!.data.blob), /^[0-9a-f]{64}$/);
+    assert.ok(
+      existsSync(join(s.dir, "blobs", String(pic!.data.blob))),
+      "blob 的字节文件真的写进了 blobs 目录",
+    );
+    const blobRow = db
+      .prepare("SELECT * FROM blobs WHERE sha256 = ?")
+      .get(String(pic!.data.blob)) as { mime: string } | undefined;
+    assert.equal(blobRow?.mime, "image/png", "blobs 表里登记了这个附件");
     const shown = presentationsOf(db).find((item) => item.id === "p-pic");
     assert.equal(shown!.objectId, "obj-pic", "展示仍绑在原来的对象上");
 
@@ -1152,5 +1175,760 @@ test("分组的展示 id 全部失效时改用对象 id", () => {
     db.close();
   } finally {
     s.close();
+  }
+});
+
+test("组件包清单不合格：不写库、记进报告，工作空间照样打得开", () => {
+  const s = scene("bad-pack.json");
+  try {
+    const { db, imported } = openWorkspace(s.root, "demo", s.registry);
+    assert.ok(imported, "这次是从旧版文件导入的");
+    const entries = [
+      ...imported!.skipped.map((item) => `${item.what} ${item.reason}`),
+      ...imported!.warnings.map((item) => `${item.what} ${item.reason}`),
+    ];
+    assert.ok(
+      entries.some(
+        (line) => line.includes("大包") && line.includes("清单不合格"),
+      ),
+      "不合格的组件包进了报告",
+    );
+    const pack = db
+      .prepare("SELECT * FROM packs WHERE id = ?")
+      .get("big-pack") as unknown;
+    assert.equal(pack, undefined, "不合格的包没有写进 packs 表");
+    assert.ok(
+      objectsOf(db).some((o) => o.id === "obj-ok"),
+      "其余数据照常导入",
+    );
+    assert.ok(
+      presentationsOf(db).some((p) => p.id === "p-ok"),
+      "其余展示照常导入",
+    );
+    db.close();
+
+    // 关键：这个工作空间以后还能打开。
+    const again = openWorkspace(s.root, "demo", s.registry);
+    assert.equal(again.imported, null, "第二次不再导入");
+    assert.ok(
+      objectsOf(again.db).some((o) => o.id === "obj-ok"),
+      "数据还在",
+    );
+    again.db.close();
+  } finally {
+    s.close();
+  }
+});
+
+test("库里已经有不合格的组件包：跳过它并给出提示，工作空间照样打得开", () => {
+  const s = scene("full.json");
+  try {
+    const first = openWorkspace(s.root, "demo", s.registry);
+    assert.ok(first.imported, "第一次是导入");
+    first.db.prepare("UPDATE packs SET manifest = ? WHERE id = ?").run(
+      JSON.stringify({
+        format: "sand-table-pack",
+        formatVersion: 2,
+        id: "my-pack",
+        version: 1,
+      }),
+      "my-pack",
+    );
+    first.db.close();
+
+    // 换一个干净的注册表，模拟重新打开这个工作空间。
+    const registry = createRegistry();
+    for (const pack of builtinPacks) registry.registerPack(pack, "builtin");
+    const second = openWorkspace(s.root, "demo", registry);
+    assert.equal(second.imported, null, "库在就不再导入");
+    assert.ok(second.skippedPacks.length, "跳过的包有交代");
+    assert.equal(second.skippedPacks[0]!.id, "my-pack");
+    assert.match(second.skippedPacks[0]!.reason, /清单不合格/);
+    assert.match(
+      second.skippedPacks[0]!.reason,
+      /删掉 workspace\.db 后重新导入/,
+      "提示说清下一步怎么做",
+    );
+    assert.ok(
+      objectsOf(second.db).some((o) => o.id === "obj-text-1"),
+      "数据没有丢",
+    );
+    second.db.close();
+  } finally {
+    s.close();
+  }
+});
+
+test("软删除坏包用新修订号：墓碑和 meta.revision 一起推进，没有坏包时修订号不动", () => {
+  const s = scene("full.json");
+  const saved = process.env.SAND_KERNEL;
+  // 这条修复不在 SAND_KERNEL=v3 开关后面：不设它行为也一样。
+  delete process.env.SAND_KERNEL;
+  try {
+    const first = openWorkspace(s.root, "demo", s.registry);
+    assert.ok(first.imported, "第一次是导入");
+    const before = Number(getMeta(first.db, "revision"));
+    assert.equal(before, 2, "导入算一次修订，内置包同步再算一次");
+    first.db.prepare("UPDATE packs SET manifest = ? WHERE id = ?").run(
+      JSON.stringify({
+        format: "sand-table-pack",
+        formatVersion: 2,
+        id: "my-pack",
+        version: 1,
+      }),
+      "my-pack",
+    );
+    first.db.close();
+
+    // 换一个干净的注册表，模拟重新打开这个工作空间。
+    const registry = createRegistry();
+    for (const pack of builtinPacks) registry.registerPack(pack, "builtin");
+    const second = openWorkspace(s.root, "demo", registry);
+    assert.equal(second.imported, null, "库在就不再导入");
+    assert.equal(second.skippedPacks.length, 1, "坏包被跳过了");
+
+    // (a) 墓碑的修订号 = 打开前的修订号 + 1
+    const row = second.db
+      .prepare("SELECT deleted_rev, rev FROM packs WHERE id = ?")
+      .get("my-pack") as
+      { deleted_rev: number | null; rev: number } | undefined;
+    assert.ok(row, "坏包这一行还留在库里");
+    assert.equal(
+      row!.deleted_rev,
+      before + 1,
+      "墓碑用的是新修订号，停在旧修订号的客户端才看得到这次删除",
+    );
+    assert.equal(row!.rev, before + 1, "这一行的修订号也是新修订号");
+    const live = second.db
+      .prepare("SELECT id FROM packs WHERE id = ? AND deleted_rev IS NULL")
+      .get("my-pack");
+    assert.equal(live, undefined, "坏包已经软删除，syncPacks 不会装入它");
+
+    // (b) meta.revision 同步推进到同一个值
+    assert.equal(
+      Number(getMeta(second.db, "revision")),
+      before + 1,
+      "修订号和墓碑一起推进",
+    );
+
+    // 没有坏包时不该涨修订号：再打开一次，修订号不动。
+    second.db.close();
+    const third = openWorkspace(s.root, "demo", registry);
+    assert.equal(third.skippedPacks.length, 0, "没有坏包了");
+    assert.equal(
+      Number(getMeta(third.db, "revision")),
+      before + 1,
+      "打开工作空间不会每次都涨修订号",
+    );
+    third.db.close();
+  } finally {
+    if (saved === undefined) delete process.env.SAND_KERNEL;
+    else process.env.SAND_KERNEL = saved;
+    s.close();
+  }
+});
+
+test("修订号损坏时不软删坏包，也不把修订号改小", () => {
+  const s = scene("full.json");
+  try {
+    const first = openWorkspace(s.root, "demo", s.registry);
+    assert.ok(first.imported, "第一次是导入");
+    first.db.prepare("UPDATE packs SET manifest = ? WHERE id = ?").run(
+      JSON.stringify({
+        format: "sand-table-pack",
+        formatVersion: 2,
+        id: "my-pack",
+        version: 1,
+      }),
+      "my-pack",
+    );
+    first.db
+      .prepare("UPDATE meta SET value = ? WHERE key = 'revision'")
+      .run("不是数字");
+    first.db.close();
+
+    const registry = createRegistry();
+    for (const pack of builtinPacks) registry.registerPack(pack, "builtin");
+    assert.throws(
+      () => openWorkspace(s.root, "demo", registry),
+      (error: Error) => {
+        assert.match(error.message, /修订号/);
+        assert.match(error.message, /无法识别/);
+        assert.match(error.message, /请保留 workspace\.db/);
+        return true;
+      },
+    );
+
+    const db = openWorkspaceDb(join(s.dir, "workspace.db"), { create: false });
+    const row = db
+      .prepare("SELECT deleted_rev FROM packs WHERE id = ?")
+      .get("my-pack") as { deleted_rev: number | null };
+    assert.equal(row.deleted_rev, null, "坏包没有被软删除");
+    assert.equal(getMeta(db, "revision"), "不是数字", "修订号没有被改写");
+    db.close();
+  } finally {
+    s.close();
+  }
+});
+
+test("内容对象的 id 和分区 id 撞车：对象照常导入，报告写清冲突，展示不被改绑", () => {
+  const s = sceneFrom({
+    schemaVersion: 2,
+    id: "collide",
+    title: "撞车",
+    revision: 1,
+    boards: [
+      {
+        id: "board-1",
+        title: "板",
+        spaces: [{ id: "overview", title: "总览" }],
+        presentations: [
+          presentation("p-collide", "overview", { x: 10, y: 10 }),
+        ],
+        groups: [],
+        spaceLinks: [],
+        assets: [],
+        guides: [],
+        intents: [],
+        proposals: [],
+        validations: [],
+      },
+    ],
+    objects: [
+      {
+        id: "overview",
+        kind: "native",
+        type: "text",
+        title: "正文",
+        data: { text: "这是正文，不是分区" },
+        version: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        author: "lin",
+      },
+    ],
+    relations: [],
+  });
+  try {
+    const { db, imported } = openWorkspace(s.root, "mini", s.registry);
+    const object = objectsOf(db).find((o) => o.id === "overview");
+    assert.ok(object, "内容对象没有被静默丢弃");
+    assert.equal(object!.type, "base.note");
+    assert.equal(object!.data.body, "这是正文，不是分区");
+
+    const boards = objectsOf(db, "base.board");
+    assert.equal(boards.length, 1);
+    assert.equal(
+      boards[0]!.id,
+      "board-1:overview",
+      "分区让出 id，改用带白板前缀的 id",
+    );
+    assert.equal(getMeta(db, "home_board_id"), "board-1:overview");
+
+    const shown = presentationsOf(db).find((p) => p.id === "p-collide");
+    assert.ok(shown, "展示导进来了");
+    assert.equal(
+      shown!.objectId,
+      "overview",
+      "展示仍然绑在它原来的内容对象上，没有被改绑到分区",
+    );
+    assert.equal(shown!.boardId, "board-1:overview");
+
+    assert.ok(
+      imported!.warnings.some(
+        (item) =>
+          item.what.includes("分区") &&
+          item.reason.includes("overview") &&
+          item.reason.includes("重名"),
+      ),
+      "报告里写清了 id 冲突",
+    );
+    db.close();
+  } finally {
+    s.close();
+  }
+});
+
+test("内容对象的 id 同时占了分区 id 和它的备用名：分区另起 id，首页和分区入口都指着分区自己", () => {
+  const s = sceneFrom({
+    schemaVersion: 2,
+    id: "collide-twice",
+    title: "撞两次",
+    revision: 1,
+    boards: [
+      {
+        id: "board-1",
+        title: "板",
+        spaces: [
+          { id: "overview", title: "总览" },
+          { id: "child", title: "子分区", parentId: "overview" },
+        ],
+        presentations: [
+          {
+            id: "p-to-overview",
+            spaceId: "child",
+            type: "board",
+            title: "回总览",
+            data: { spaceId: "overview" },
+            rect: { x: 10, y: 10, width: 200, height: 120, pinned: false },
+            updatedAt: 1,
+            author: "lin",
+          },
+          {
+            id: "p-text",
+            spaceId: "child",
+            type: "text",
+            binding: { kind: "object", objectId: "overview" },
+            objectId: "overview",
+            title: "正文",
+            data: {},
+            rect: { x: 300, y: 10, width: 200, height: 120, pinned: false },
+            updatedAt: 1,
+            author: "lin",
+          },
+        ],
+        groups: [],
+        spaceLinks: [],
+        assets: [],
+        guides: [],
+        intents: [],
+        proposals: [],
+        validations: [],
+      },
+    ],
+    objects: [
+      {
+        id: "overview",
+        kind: "native",
+        type: "text",
+        title: "正文",
+        data: { text: "这是正文，不是分区" },
+        version: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        author: "lin",
+      },
+      {
+        id: "board-1:overview",
+        kind: "native",
+        type: "text",
+        title: "占备用名的正文",
+        data: { text: "这个正文占了分区改名的备用名" },
+        version: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        author: "lin",
+      },
+    ],
+    relations: [],
+  });
+  try {
+    const { db, imported } = openWorkspace(s.root, "mini", s.registry);
+
+    // —— 分区对象：两个 id 都被占了，只能另起一个 ——
+    const boards = objectsOf(db, "base.board");
+    assert.equal(boards.length, 2, "两个分区都导进来了");
+    const root = boards.find((b) => b.title === "总览");
+    assert.ok(root, "总览分区导进来了");
+    assert.notEqual(root!.id, "overview", "分区没有占着内容对象的 id");
+    assert.notEqual(
+      root!.id,
+      "board-1:overview",
+      "备用名也被内容对象占了，分区不能用它",
+    );
+    assert.match(
+      root!.id,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      "分区用的是新生成的 id",
+    );
+
+    // —— 首页指着分区自己，不是内容对象 ——
+    assert.equal(
+      getMeta(db, "home_board_id"),
+      root!.id,
+      "首页是分区对象，不是占着 id 的内容对象",
+    );
+    assert.notEqual(getMeta(db, "home_board_id"), "overview");
+    assert.notEqual(getMeta(db, "home_board_id"), "board-1:overview");
+
+    // —— 内容对象照常导入，没有被丢弃 ——
+    const text = objectsOf(db).find((o) => o.id === "overview");
+    assert.ok(text, "占着分区 id 的内容对象没有被丢弃");
+    assert.equal(text!.type, "base.note");
+    assert.equal(text!.data.body, "这是正文，不是分区");
+    const holder = objectsOf(db).find((o) => o.id === "board-1:overview");
+    assert.ok(holder, "占着备用名的内容对象也没有被丢弃");
+    assert.equal(holder!.data.body, "这个正文占了分区改名的备用名");
+
+    // —— 分区自己的展示绑在分区对象上 ——
+    const link = presentationsOf(db).find((p) => p.id === "p-to-overview");
+    assert.ok(link, "分区入口的展示导进来了");
+    assert.equal(link!.objectId, root!.id, "展示绑在分区对象上");
+    assert.notEqual(link!.objectId, "overview", "没有绑到占着 id 的内容对象上");
+    assert.notEqual(link!.objectId, "board-1:overview");
+    assert.equal(link!.boardId, "child", "展示仍挂在它原来所在的分区上");
+
+    // —— 绑在内容对象上的展示没有被改绑 ——
+    const bound = presentationsOf(db).find((p) => p.id === "p-text");
+    assert.ok(bound, "绑内容对象的展示也导进来了");
+    assert.equal(
+      bound!.objectId,
+      "overview",
+      "绑内容对象的展示没有被改绑到分区上",
+    );
+
+    // —— 报告里看得见这次冲突与改名 ——
+    const warnings = imported!.warnings.map((w) => `${w.what} ${w.reason}`);
+    assert.ok(
+      warnings.some(
+        (line) =>
+          line.includes("分区") &&
+          line.includes("overview") &&
+          line.includes("重名") &&
+          line.includes(root!.id),
+      ),
+      "报告里写清分区改用了哪个 id",
+    );
+    assert.ok(
+      warnings.some((line) => line.includes("重复") && line.includes(root!.id)),
+      "报告里写清备用名被占了这件事",
+    );
+    db.close();
+  } finally {
+    s.close();
+  }
+});
+
+test("导入失败时不留孤儿附件文件", () => {
+  const first = createHash("sha256").update("hello").digest("hex");
+  const second = createHash("sha256").update("world").digest("hex");
+  const s = sceneFrom(
+    {
+      schemaVersion: 2,
+      id: "blob-fail",
+      title: "附件",
+      revision: 1,
+      boards: [
+        {
+          id: "board-1",
+          title: "板",
+          spaces: [{ id: "overview", title: "总览" }],
+          presentations: [],
+          assets: [
+            {
+              id: "asset-1",
+              name: "a.txt",
+              mime: "text/plain",
+              dataUrl: "data:text/plain;base64,aGVsbG8=",
+              bytes: 5,
+            },
+            {
+              id: "asset-2",
+              name: "b.txt",
+              mime: "text/plain",
+              dataUrl: "data:text/plain;base64,d29ybGQ=",
+              bytes: 5,
+            },
+          ],
+          groups: [],
+          spaceLinks: [],
+          guides: [],
+          intents: [],
+          proposals: [],
+          validations: [],
+        },
+      ],
+      objects: [],
+      relations: [],
+    },
+    (dir) => {
+      const blobs = join(dir, "blobs");
+      mkdirSync(blobs);
+      // 第二个附件写不下去：它的位置是一个指向不存在路径的符号链接。
+      symlinkSync(join(dir, "no-such-dir", "b.txt"), join(blobs, second));
+    },
+  );
+  try {
+    assert.throws(
+      () => openWorkspace(s.root, "mini", s.registry),
+      /附件写不进/,
+      "附件写不下去时导入失败",
+    );
+    assert.equal(
+      existsSync(join(s.dir, "workspace.db")),
+      false,
+      "半成品数据库删掉了",
+    );
+    const blobs = join(s.dir, "blobs");
+    const files = existsSync(blobs) ? readdirSync(blobs) : [];
+    assert.equal(
+      files.includes(first),
+      false,
+      "已经写出去的附件文件也删掉了，不留孤儿",
+    );
+  } finally {
+    s.close();
+  }
+});
+
+test("坏数据的错误信息写明是哪个文件、缺什么、下一步怎么做", () => {
+  const s = sceneFrom({
+    schemaVersion: 2,
+    id: "broken-presentation",
+    title: "坏数据",
+    revision: 1,
+    boards: [
+      {
+        id: "board-1",
+        title: "板",
+        spaces: [{ id: "overview", title: "总览" }],
+        presentations: [
+          {
+            spaceId: "overview",
+            type: "text",
+            title: "缺 id 的展示",
+            data: {},
+            rect: { x: 0, y: 0, width: 10, height: 10, pinned: false },
+            updatedAt: 1,
+            author: "lin",
+          },
+        ],
+      },
+    ],
+    objects: [],
+    relations: [],
+  });
+  try {
+    assert.throws(
+      () => openWorkspace(s.root, "mini", s.registry),
+      (error: Error) => {
+        assert.match(error.message, /第 1 条展示实例/);
+        assert.ok(
+          error.message.includes(join(s.dir, "workspace.json")),
+          `错误信息里有文件路径：${error.message}`,
+        );
+        assert.match(error.message, /另存一份/);
+        assert.match(error.message, /缺 id/);
+        return true;
+      },
+    );
+  } finally {
+    s.close();
+  }
+});
+
+test("重复的对象 id：错误信息写明是哪个文件", () => {
+  const s = sceneFrom({
+    schemaVersion: 2,
+    id: "dup",
+    title: "重复 id",
+    revision: 1,
+    boards: [],
+    objects: [
+      { id: "same", type: "text", title: "甲", data: {} },
+      { id: "same", type: "text", title: "乙", data: {} },
+    ],
+    relations: [],
+  });
+  try {
+    assert.throws(
+      () => openWorkspace(s.root, "mini", s.registry),
+      (error: Error) => {
+        assert.ok(
+          error.message.includes(join(s.dir, "workspace.json")),
+          `错误信息里有文件路径：${error.message}`,
+        );
+        assert.match(error.message, /重复的对象 id/);
+        assert.match(error.message, /另存一份/);
+        return true;
+      },
+    );
+  } finally {
+    s.close();
+  }
+});
+
+test("openWorkspace 之后修订号是 2：导入算一次，内置包同步再算一次", () => {
+  const s = scene("full.json");
+  try {
+    const { db } = openWorkspace(s.root, "demo", s.registry);
+    assert.equal(getMeta(db, "revision"), "2");
+    db.close();
+  } finally {
+    s.close();
+  }
+});
+
+test("v1 的文件先升到 v2 的形状再导入", () => {
+  const s = scene("v1.json");
+  try {
+    const { db, imported } = openWorkspace(s.root, "demo", s.registry);
+    assert.ok(imported, "v1 的文件也导入了");
+    const note = objectsOf(db, "base.note").find((o) => o.id === "obj-v1");
+    assert.ok(note, "v1 文件里的对象导进来了");
+    assert.equal(note!.data.body, "v1 时代写的");
+    const shown = presentationsOf(db).find((p) => p.id === "p-v1");
+    assert.ok(shown, "v1 文件里的展示也导进来了");
+    assert.equal(shown!.boardId, "overview");
+    assert.equal(getMeta(db, "home_board_id"), "overview");
+    db.close();
+  } finally {
+    s.close();
+  }
+});
+
+// —— T74：嵌套框的坐标往返、坐标版本标记与人工确认通道 ——
+
+test("嵌套框：导入后框内坐标换算回绝对坐标与 v2 一致，旧文件字节不变", () => {
+  const s = scene("nested-frames.json");
+  const original = readFileSync(join(s.dir, "workspace.json"));
+  try {
+    const { db } = openWorkspace(s.root, "demo", s.registry);
+    const presentations = presentationsOf(db);
+
+    // 外框在首页上，框里有一张便签和一块可以进入的子白板。
+    const outer = presentations.find((p) => p.id === "group-outer:frame");
+    assert.ok(outer, "外框的展示");
+    assert.equal(outer!.boardId, "overview");
+    const outerText = presentations.find((p) => p.id === "p-outer-text");
+    const nestedBoard = presentations.find((p) => p.id === "p-nested-board");
+    assert.equal(outerText!.parentId, outer!.id, "便签挂在外框里");
+    assert.equal(nestedBoard!.parentId, outer!.id, "子白板挂在框里");
+
+    // v2 里的绝对坐标：便签 (100,200)，子白板 (460,200)。
+    assert.equal(outer!.x + outerText!.x, 100);
+    assert.equal(outer!.y + outerText!.y, 200);
+    assert.equal(outer!.x + nestedBoard!.x, 460);
+    assert.equal(outer!.y + nestedBoard!.y, 200);
+
+    // 内框在子白板上：换算回绝对坐标仍然是 v2 里的 (40,90)。
+    const inner = presentations.find((p) => p.id === "group-inner:frame");
+    assert.ok(inner, "内框的展示");
+    assert.equal(inner!.boardId, "space-child", "内框在自己的白板上");
+    const innerText = presentations.find((p) => p.id === "p-inner-text");
+    assert.equal(innerText!.parentId, inner!.id);
+    assert.equal(inner!.x + innerText!.x, 40);
+    assert.equal(inner!.y + innerText!.y, 90);
+
+    // 不在框里的展示坐标不动：它没有父框，坐标还是白板上的绝对坐标。
+    const free = presentations.find((p) => p.id === "p-free");
+    assert.equal(free!.parentId, null);
+    assert.equal(free!.x, 600);
+    assert.equal(free!.y, 500);
+
+    db.close();
+    // 旧文件一个字节都没动。
+    assert.ok(original.equals(readFileSync(join(s.dir, "workspace.json"))));
+  } finally {
+    s.close();
+  }
+});
+
+test("导入的库记下坐标版本标记，体检说不用迁移", () => {
+  const s = scene("nested-frames.json");
+  try {
+    const { db, frameCoords } = openWorkspace(s.root, "demo", s.registry);
+    assert.equal(getMeta(db, "frame_coords"), FRAME_COORDS_MARKER);
+    assert.equal(frameCoords.state, "ok");
+    assert.equal(frameCoords.items.length, 0);
+    assert.match(frameCoords.message, /不用迁移/);
+    assert.doesNotMatch(frameCoords.message, /导入器/);
+    assert.equal(auditFrameCoordinates(db).state, "ok");
+    db.close();
+  } finally {
+    s.close();
+  }
+});
+
+test("说不准坐标口径的库只报给人确认，数据一个字节都不改", () => {
+  const s = scene("nested-frames.json");
+  try {
+    const { db } = openWorkspace(s.root, "demo", s.registry);
+    // 造一个「有框内展示却没有坐标标记」的库：坐标说不准是相对还是绝对。
+    db.prepare("DELETE FROM meta WHERE key = 'frame_coords'").run();
+    const before = presentationsOf(db);
+    const audit = auditFrameCoordinates(db);
+    assert.equal(audit.state, "needs-review");
+    assert.equal(audit.items.length, 3, "三个框内展示都要人确认");
+    assert.ok(audit.message.includes("没有改动"), "说清没有改动数据");
+    assert.deepEqual(presentationsOf(db), before, "数据一个字节都没改");
+
+    // 再打开一次：同一批展示不重复记审计。
+    db.close();
+    const again = openWorkspace(s.root, "demo", s.registry);
+    const rows = again.db
+      .prepare("SELECT detail FROM audit WHERE action = 'frame_coords'")
+      .all();
+    assert.equal(rows.length, 1, "同一批展示只记一次审计");
+    assert.equal(again.frameCoords.state, "needs-review");
+    again.db.close();
+  } finally {
+    s.close();
+  }
+});
+
+test("新建的工作空间就带坐标标记：建了框内展示再重开，不用人确认", () => {
+  const root = mkdtempSync(join(tmpdir(), "sand-new-ws-"));
+  try {
+    const registry = createRegistry();
+    for (const pack of builtinPacks) registry.registerPack(pack, "builtin");
+    const opened = openWorkspace(root, "fresh", registry);
+    assert.equal(
+      getMeta(opened.db, "frame_coords"),
+      FRAME_COORDS_MARKER,
+      "新建的库就记下坐标口径",
+    );
+    const home = getMeta(opened.db, "home_board_id")!;
+
+    // 建一个框内的展示：外框 + 挂在框里的那一件。
+    const written = applyCommands(opened.db, registry, {
+      actor,
+      commands: [
+        {
+          op: "object.create",
+          ref: "outer",
+          type: "base.note",
+          title: "外框",
+        },
+        {
+          op: "object.create",
+          ref: "inner",
+          type: "base.note",
+          title: "框里的",
+        },
+        {
+          op: "presentation.create",
+          ref: "outerView",
+          boardId: home,
+          objectId: "@outer",
+        },
+        {
+          op: "presentation.create",
+          boardId: home,
+          objectId: "@inner",
+          parentId: "@outerView",
+        },
+      ],
+    });
+    assert.equal(written.warnings.length, 0);
+    opened.db.close();
+
+    // 重开：坐标是 v3 自己写的相对坐标，不用人去确认。
+    const again = openWorkspace(root, "fresh", registry);
+    assert.equal(again.frameCoords.state, "ok", "新建的库不该要人确认");
+    assert.equal(again.frameCoords.items.length, 0);
+    assert.match(again.frameCoords.message, /相对父框/);
+    assert.doesNotMatch(
+      again.frameCoords.message,
+      /导入器/,
+      "新建的库不是导入器写的",
+    );
+    const rows = again.db
+      .prepare("SELECT detail FROM audit WHERE action = 'frame_coords'")
+      .all();
+    assert.equal(rows.length, 0, "健康的库不记「要人确认」的审计");
+    again.db.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

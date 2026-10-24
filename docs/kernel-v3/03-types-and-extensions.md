@@ -33,7 +33,7 @@ export type TypeSpec = {
     view?: string; // 自定义视图名，只有内置包能用；缺省用通用视图（§5）
   };
   relationSlots?: RelationSlot[]; // 见 §4
-  migrations?: { from: number; migrate: (data: Record<string, unknown>) => Record<string, unknown> }[]; // 只有内置包能用
+  migrations?: { from: number; migrate: (data: Record<string, unknown>) => Record<string, unknown> }[]; // 只有内置包能用；何时执行见 T26
 };
 
 export type RelationKindSpec = {
@@ -77,7 +77,7 @@ export type PackSpec = {
 
 1. 顶层是 `{"type": "object", "properties": {...}, "additionalProperties": false}`。
 2. **内容字段不写 `default`。** 没填就是字段不存在。只有配置类枚举可以有默认值（例如图表的 `kind`），写在 `x-sand-default` 里，由界面在新建时填入，校验器不使用它。
-3. **不在数据里存其他对象的 id。** 指向对象的语义一律用关系槽（§4）。
+3. **不在数据里存其他对象的 id。** 指向对象的语义一律用关系槽（§4）。正文允许 `sand://object/<编码后的 id>` 导航链接；链接是文字内容，不是关系槽，不产生 `base.mentions` 或其他持久关系。生成时对完整 id 做一次 `encodeURIComponent`，解析时解码一次。UI 与 AI 均只写正文，目标不存在时原文保留并显示失效。内部锚点不保存对象 id，也不保存含对象 id 的 URI（§10）。见 `05-delivery-contracts.md` §2。
 4. 能用 `required` 的地方慎用：创作草稿允许缺项。只把“没有它这个对象就没有意义”的字段设为必填（例如人物的 `name` 也**不**必填，标题已经承担名字的作用）。
 5. 数字字段写明 `type: "number"` 或 `"integer"`，需要时加 `minimum`；不要用字符串存数字。
 6. 长文本用 `{"type": "string", "x-sand-widget": "markdown"}`，存 Markdown。
@@ -169,7 +169,7 @@ export type ViewProps = {
 };
 ```
 
-自定义视图通过 dispatch 写入，通过下述受控绑定读取关联数据，不能直接调用工具、SQL 或任意网络。
+自定义视图通过 dispatch 只更新自身对象；跨对象用户操作由 05 §4 的外壳动作服务处理，通过下述受控绑定读取关联数据，不能直接调用工具、SQL 或任意网络。
 
 ## 6. 数据包（一级扩展）
 
@@ -293,3 +293,26 @@ subscribeBindings 提供可取消订阅，源对象/关系变化、删除、包�
 ### 派生身份策略
 
 PackSpec.derivedIdPrefix 只允许内置包声明，非空、以冒号结尾、不能与其他内置包前缀重叠；Registry.getPack 返回它。代码包声明 code:。内部 object.upsert_derived 命令携带 packId：注册表必须存在且为 builtin，对象类型属于同包，新建ID匹配该前缀。更新只允许同包原有derived对象；旧导入ID可不匹配新前缀，但必须核实稳定 external URI/fragment 与原对象一致，不覆盖其他来源或其他目标。T17必须为旧派生对象保留外部定位，T22刷新通过定位复用原ID。
+
+## 10. 锚点格式
+
+内部锚点放在关系的 `attributes.anchor` 里，形状是 `{ fragment, version?, fingerprint? }`。对象只由关系端点表示。锚点保存对象内部的位置、必要时的版本和指纹，不写 `uri`，不写对象 id，也不是 `ExternalLocator`。
+
+`ExternalLocator`（`01-data-model.md` §5）只描述外部资源。kind 保持 `file | git | pdf | url | dataset | symbol`，不新增 `object`。
+
+`fragment` 格式固定如下。多个键用 `;` 分隔，值里的 `;` 和 `=` 用百分号编码。
+
+| 资源 | `fragment` 格式 | 说明 |
+|---|---|---|
+| 文字（Markdown 正文、代码、纯文本） | `quote=<原文>;prefix=<前 32 字>;suffix=<后 32 字>` | 按原文和上下文重新定位，不依赖字符偏移 |
+| PDF | `page=<页码>` 或 `page=<页码>;rect=<x>,<y>,<w>,<h>` | `rect` 是相对页面宽高的 0–1 小数 |
+| 图片 | `rect=<x>,<y>,<w>,<h>` | 相对图片宽高的 0–1 小数 |
+| 音频、视频 | `t=<开始秒>` 或 `t=<开始秒>,<结束秒>` | 与 Media Fragments 的写法一致 |
+| 表格 | `rows=<行 key 列表>;cols=<列 key 列表>` | 用行、列的 key，不用下标 |
+| 代码文件 | `lines=<起始行>-<结束行>` | 配合 `version`（提交号）和 `fingerprint` |
+
+`fingerprint` 记录建锚时源内容的指纹。源内容变了，先按 `quote`、`prefix`、`suffix` 重新定位；找不到就把引用标为失效并给出原因，不悄悄挂到别处（T53）。
+
+## 后续阶段契约补充
+
+新增评论/引用、运行、时间/分支/观察者及组件接口的正式约束见 [05-delivery-contracts.md](05-delivery-contracts.md)。各责任卡实现时同步本文件的具体类型/表/工具签名；不能仅根据旧的基础清单拒绝已经授权的扩展。

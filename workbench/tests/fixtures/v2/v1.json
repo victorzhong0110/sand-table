@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "id": "v1-workspace",
+  "title": "v1 的工作空间",
+  "createdAt": 1695000000000,
+  "updatedAt": 1695000005000,
+  "revision": 5,
+  "contentRevision": 2,
+  "boards": [
+    {
+      "id": "board-v1",
+      "title": "v1 白板",
+      "revision": 5,
+      "contentRevision": 2,
+      "spaces": [{ "id": "overview", "title": "总览" }],
+      "presentations": [
+        {
+          "id": "p-v1",
+          "spaceId": "overview",
+          "type": "text",
+          "binding": { "kind": "object", "objectId": "obj-v1" },
+          "objectId": "obj-v1",
+          "title": "v1 便签",
+          "data": {},
+          "rect": { "x": 30, "y": 60, "width": 280, "height": 180, "pinned": false },
+          "updatedAt": 1695000005000,
+          "author": "v1"
+        }
+      ],
+      "views": {},
+      "selection": [],
+      "placements": {},
+      "notes": {},
+      "groups": [],
+      "spaceLinks": [],
+      "assets": [],
+      "activities": [],
+      "guides": [],
+      "intents": [],
+      "proposals": [],
+      "validations": []
+    }
+  ],
+  "objects": [
+    {
+      "id": "obj-v1",
+      "kind": "native",
+      "type": "text",
+      "typeVersion": 1,
+      "title": "v1 便签",
+      "data": { "text": "v1 时代写的" },
+      "source": { "origin": "human", "author": "v1" },
+      "version": 1,
+      "createdAt": 1695000000000,
+      "updatedAt": 1695000005000,
+      "author": "v1"
+    }
+  ],
+  "relations": [],
+  "audit": []
+}

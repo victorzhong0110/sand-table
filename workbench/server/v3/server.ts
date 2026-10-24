@@ -21,6 +21,7 @@ import {
   createRegistry,
   isPackEnabled,
   openWorkspace,
+  packStates,
   type Actor,
   type CommandResult,
   type PackSpec,
@@ -155,6 +156,35 @@ export function createServerV3(options: ServerOptions) {
       if (change.table === "packs") syncPackTools(change.id);
   }
 
+  /* 别的进程改了包的启停，这一边也要跟着改。
+     靠库里的 packs 修订号发现变化，每秒看一次；
+     本进程的写入回调只是让它更快，不承担这个责任。 */
+  const appliedPacks = new Map<string, string>();
+
+  function packMarks(): Map<string, string> {
+    const marks = new Map<string, string>();
+    if (!session) return marks;
+    for (const state of packStates(session.db))
+      marks.set(
+        state.id,
+        `${state.enabled ? "1" : "0"}@${state.version}#${state.rev}`,
+      );
+    return marks;
+  }
+
+  function refreshPackTools(): void {
+    if (!session) return;
+    const marks = packMarks();
+    const dirty: string[] = [];
+    for (const [packId, mark] of marks)
+      if (appliedPacks.get(packId) !== mark) dirty.push(packId);
+    for (const packId of appliedPacks.keys())
+      if (!marks.has(packId)) dirty.push(packId);
+    appliedPacks.clear();
+    for (const [packId, mark] of marks) appliedPacks.set(packId, mark);
+    for (const packId of dirty) syncPackTools(packId);
+  }
+
   /* 历史导航不知道哪条记录动了哪个包，整体同步一遍。
      转发模式没有包状态，一律列出来，由真正的服务端裁决。 */
   function syncAllPackTools() {
@@ -192,6 +222,20 @@ export function createServerV3(options: ServerOptions) {
     syncPackTools(spec.id);
   }
 
+  /* 记下现在的包状态：这一秒之后的变动才算变化。 */
+  for (const [packId, mark] of packMarks()) appliedPacks.set(packId, mark);
+
+  /* 每秒看一次别的进程有没有改包。
+     计时器不拦着进程退出，服务收尾时也会清掉它。 */
+  const packWatcher = setInterval(() => {
+    try {
+      refreshPackTools();
+    } catch {
+      /* 这一轮读库失败就等下一秒，不让计时器停下来 */
+    }
+  }, 1000);
+  packWatcher.unref();
+
   registerAppResource(server, "Sand Table overview", UI_URI, {}, async () =>
     options.forward
       ? options.forward.resource()
@@ -217,7 +261,14 @@ export function createServerV3(options: ServerOptions) {
     registry,
     /** 当前打开的工作空间。 */
     workspace: () => session,
+    /**
+     * 看包的计时器。
+     *
+     * 留着是为了能问「它还在吗」：服务收尾时它必须被清掉。
+     */
+    packWatcher: () => packWatcher,
     dispose: () => {
+      clearInterval(packWatcher);
       session?.db.close();
     },
   };

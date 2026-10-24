@@ -12,11 +12,12 @@ import {
   boardContents,
   changesSince,
   CommandError,
-  context,
   getMeta,
   historyList,
   jump,
+  listActivities,
   parsePublicCommands,
+  readView,
   redo,
   setView,
   undo,
@@ -57,18 +58,24 @@ export function registerAppTools(
   registrar.tool(
     "app_board",
     "Read the full contents of one board for the canvas to render: the board, its presentations, objects, relations, settings and packs.",
-    { boardId: z.string().min(1) },
+    {
+      boardId: z.string().min(1),
+      workspaceId: z.string().min(1).optional(),
+    },
     (args, ctx) => {
+      const session = host.session();
+      assertSameWorkspace(session.workspaceId, args.workspaceId);
       const contents = boardContents(ctx.db, args.boardId);
       return toolValue(
         {
+          workspaceId: session.workspaceId,
           revision: contents.revision,
           board: { id: contents.board.id, title: contents.board.title },
           presentations: contents.presentations.length,
           objects: contents.objects.length,
           relations: contents.relations.length,
         },
-        contents,
+        { workspaceId: session.workspaceId, ...contents },
       );
     },
     { appOnly: true },
@@ -77,13 +84,26 @@ export function registerAppTools(
   registrar.tool(
     "app_changes",
     "Read everything that changed after a revision number. The canvas calls this once a second.",
-    { since: z.number().int().min(0) },
+    {
+      since: z.number().int().min(0),
+      workspaceId: z.string().min(1).optional(),
+    },
     (args, ctx) => {
+      const session = host.session();
+      assertSameWorkspace(session.workspaceId, args.workspaceId);
       const changes = changesSince(ctx.db, args.since);
       if ("reset" in changes)
-        return toolValue({ reset: true, revision: changes.revision }, changes);
+        return toolValue(
+          {
+            workspaceId: session.workspaceId,
+            reset: true,
+            revision: changes.revision,
+          },
+          { workspaceId: session.workspaceId, ...changes },
+        );
       return toolValue(
         {
+          workspaceId: session.workspaceId,
           revision: changes.revision,
           objects: changes.objects.length,
           presentations: changes.presentations.length,
@@ -91,7 +111,7 @@ export function registerAppTools(
           settings: changes.settings.length,
           packs: changes.packs.length,
         },
-        changes,
+        { workspaceId: session.workspaceId, ...changes },
       );
     },
     { appOnly: true },
@@ -169,11 +189,16 @@ export function registerAppTools(
       navStack: z.array(z.unknown()).optional(),
     },
     (args, ctx) => {
+      const session = host.session();
       if (args.action === "get") {
-        const view = context(ctx.db, ctx.actor, args.viewId);
+        const view = readView(ctx.db, args.viewId);
         return {
+          workspaceId: session.workspaceId,
+          viewId: view.viewId,
           board: view.board,
           selection: view.selection,
+          camera: view.camera,
+          navStack: view.navStack,
           revision: view.revision,
         };
       }
@@ -186,10 +211,18 @@ export function registerAppTools(
           );
         setView(
           ctx.db,
-          { viewId: args.viewId, selection: args.selection },
+          {
+            viewId: args.viewId,
+            ...(args.boardId ? { boardId: args.boardId } : {}),
+            selection: args.selection,
+          },
           Date.now(),
         );
-        return { ok: true, viewId: args.viewId };
+        return {
+          ok: true,
+          viewId: args.viewId,
+          workspaceId: session.workspaceId,
+        };
       }
       if (args.action === "camera") {
         if (args.camera === undefined)
@@ -200,10 +233,18 @@ export function registerAppTools(
           );
         setView(
           ctx.db,
-          { viewId: args.viewId, camera: args.camera },
+          {
+            viewId: args.viewId,
+            ...(args.boardId ? { boardId: args.boardId } : {}),
+            camera: args.camera,
+          },
           Date.now(),
         );
-        return { ok: true, viewId: args.viewId };
+        return {
+          ok: true,
+          viewId: args.viewId,
+          workspaceId: session.workspaceId,
+        };
       }
       if (!args.boardId && !args.navStack)
         throw new CommandError(
@@ -220,7 +261,34 @@ export function registerAppTools(
         },
         Date.now(),
       );
-      return { ok: true, viewId: args.viewId };
+      return {
+        ok: true,
+        viewId: args.viewId,
+        workspaceId: session.workspaceId,
+      };
+    },
+    { appOnly: true },
+  );
+
+  registrar.tool(
+    "app_activity",
+    "List what the agents are working on right now. It only reads: it never moves anyone's read cursor.",
+    {
+      action: z.literal("list"),
+      limit: z.number().int().min(1).max(100).optional(),
+    },
+    (args, ctx) => {
+      const session = host.session();
+      const listed = listActivities(
+        ctx.db,
+        args.limit === undefined ? undefined : { limit: args.limit },
+      );
+      return {
+        workspaceId: session.workspaceId,
+        revision: listed.revision,
+        activities: listed.activities,
+        truncated: listed.truncated,
+      };
     },
     { appOnly: true },
   );
@@ -310,6 +378,7 @@ export function registerAppTools(
       const session = host.session();
       if (args.action === "list")
         return {
+          workspaceId: session.workspaceId,
           activeId: session.workspaceId,
           ...listWorkspaces(session.root, session.workspaceId),
         };
@@ -379,4 +448,19 @@ export function registerAppTools(
 
 function workspaceTitle(session: WorkspaceSession) {
   return getMeta(session.db, "title") ?? session.workspaceId;
+}
+
+/**
+ * 界面带着它以为自己在的工作空间来读数据。
+ *
+ * 对不上就报错，不给数据：切换工作空间前那一次读到的旧白板，
+ * 混进新工作空间里，比读不到更糟。
+ */
+function assertSameWorkspace(current: string, expected?: string): void {
+  if (expected === undefined || expected === current) return;
+  throw new CommandError(
+    "INVALID_DATA",
+    `这次请求说的是工作空间「${expected}」，现在打开的是「${current}」。请重新加载当前工作空间，不要把旧工作空间的数据合进来。`,
+    null,
+  );
 }

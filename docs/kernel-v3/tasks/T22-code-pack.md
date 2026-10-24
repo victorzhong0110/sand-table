@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 执行 | grok |
+| 执行 | minimax |
 | 依赖 | T20 |
 | 分支 | `task/T22-code-pack` |
 
@@ -13,6 +13,7 @@
 ## 先读
 
 - `AGENTS.md`
+- `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/kernel-v3/02-commands-and-tools.md` §3.3、§3.4、§4（代码相关的行）
 - `docs/kernel-v3/03-types-and-extensions.md` §8.4
 - `docs/kernel-v3/01-data-model.md` §5（`derived`）、§7.4

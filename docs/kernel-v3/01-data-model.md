@@ -107,7 +107,7 @@ CREATE TABLE presentations (
   id          TEXT PRIMARY KEY,
   board_id    TEXT NOT NULL REFERENCES objects(id),
   object_id   TEXT NOT NULL REFERENCES objects(id),
-  parent_id   TEXT REFERENCES presentations(id),   -- 所在框（base.frame 的展示）；NULL 表示直接在白板上
+  parent_id   TEXT REFERENCES presentations(id),   -- 所在框（base.frame 的展示）；NULL 表示直接在白板上。非 NULL 时 x、y 是相对父框左上角的坐标
   x           REAL NOT NULL,
   y           REAL NOT NULL,
   width       REAL NOT NULL CHECK (width  > 0),
@@ -361,7 +361,7 @@ type Change = {
 - `source.origin = "derived"` 的对象，以及只涉及这些对象的展示和关系。
 - `applyCommands` 带 `record: false` 的写入（只有包初始化和代码索引能用，工具层不暴露）。
 - v2 导入器的写入（它在 `kernel/` 内部直接写行，见 §10）。
-- `views`、`activities`、`agent_reads` 表。
+- `views`、`activities`、`agent_reads`、`runs` 表；T25 在新临时库的恢复写入。边界见 05 §3。
 
 ### 7.5 容量
 
@@ -386,7 +386,7 @@ type Change = {
 | V5 | 对象数据必须通过类型的 JSON Schema 校验 | Ajv，违反返回 `INVALID_DATA` 和字段路径 |
 | V6 | 带 `expectedVersion` 的写入，版本不符就拒绝 | `applyCommands`，返回 `VERSION_CONFLICT` 和当前版本 |
 | V7 | 一次 `applyCommands` 全部成功或全部失败 | 单个 `BEGIN IMMEDIATE` 事务 |
-| V8 | 所有写入只经过 `applyCommands`（唯一例外：`kernel/legacy/import-v2.ts`） | 架构测试：`kernel/` 以外不得出现 SQL 写语句 |
+| V8 | 对象、展示、关系、设置和包的在线编辑统一经过命令事务（含共享同一实现的受信任命令）；仅 v2 导入器与 T25 的新库导入可直接构建内容行。运行状态和维护写入边界见 `05-delivery-contracts.md` §3 | 架构测试：`kernel/` 以外不得出现 SQL 写语句 |
 | V9 | 撤销栈只包含白板内容；外部效果（发布、运行、写文件）不进历史 | 外部效果不走 `applyCommands`；代码包的写文件流程只写 `code.*` 对象的状态字段 |
 | V10 | 推测关系（`inferred`）必须有 `basis` | `applyCommands` 检查 |
 | V11 | 停用的包，其对象和关系保留，可读不可改数据 | `applyCommands` 检查；读接口照常返回并标 `typeAvailable: false` |
@@ -408,7 +408,7 @@ type Change = {
 | `presentations[]` 代码投影（`objectId` 指向代码条目） | 建 `code.file` 或 `code.symbol` 占位对象，id 保持原代码条目 id，`source.origin = "derived"`；代码包下次刷新时按同一 id 更新 |
 | `spaceLinks[]` | `relations`，两端是展示所绑定的对象；`related`→`base.related`，`depends-on`→`base.depends_on`，`supports`→`base.supports`，`compares`→`base.compares`，`belongs-to`→`base.belongs_to`；`description` 存进 `basis` |
 | `relations[]`（v2 对象关系） | `relations`，`kind` 按 §10.1 改名 |
-| `groups[]` | 每个组一个 `base.frame` 对象 + 一个包住组内展示的框展示，组内展示的 `parent_id` 指向它 |
+| `groups[]` | 每个组一个 `base.frame` 对象 + 一个包住组内展示的框展示，组内展示的 `parent_id` 指向它，`x`、`y` 换算成相对框左上角的坐标 |
 | `notes{}` | 每条备注一个 `base.note` 对象，放在目标旁边，并建 `base.about` 关系 |
 | `assets[]` | 字节写入 `blobs/`，每个附件一个 `base.media` 对象 |
 | `intents` / `proposals` / `validations` | `code.intent` / `code.proposal` / `code.validation` 对象，原数据放进 `data`；超过 1 MB 的基线文件内容写入 `blobs/` 并以 sha256 引用 |
@@ -438,3 +438,7 @@ type Change = {
 - 不迁移旧撤销历史的决定不变，但原 workspace.json 保留。不能将升级成功当作允许丢正文、值、关联或附件。
 
 之后仅对本次编辑字段严格校验，其他遗留问题作为警告，不阻止保存。
+
+## 后续阶段契约补充
+
+新增评论/引用、运行、时间/分支/观察者及组件接口的正式约束见 [05-delivery-contracts.md](05-delivery-contracts.md)。各责任卡实现时同步本文件的具体类型/表/工具签名；不能仅根据旧的基础清单拒绝已经授权的扩展。

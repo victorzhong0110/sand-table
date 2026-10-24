@@ -1,5 +1,6 @@
 import { getMeta, transaction, type Db } from "./db.ts";
 import { CommandError } from "./errors.ts";
+import { auditFrameCoordinates } from "./frame-coords.ts";
 import { isPackEnabled } from "./packs-state.ts";
 import type { Registry } from "./registry.ts";
 import { toObjectRow, toPresentationRow, toRelationRow } from "./rows.ts";
@@ -27,6 +28,8 @@ const TYPE_FILTER_MAX = 20;
 const HUMAN_EDIT_LIMIT = 20;
 const OBJECT_ID_LIMIT = 10;
 const ACTIVITY_OBJECT_LIMIT = 30;
+/** 一次最多返回多少条活动。 */
+const ACTIVITY_LIST_MAX = 100;
 const TASK_LIMIT = 300;
 const ACTION_LIMIT = 200;
 const DONE_TTL_MS = 2 * 60 * 1000;
@@ -39,17 +42,39 @@ export type StatusResult = {
   boards: { id: string; title: string; presentations: number }[];
   packs: { id: string; title: string; enabled: boolean }[];
   tips: string[];
+  /**
+   * 框内坐标的体检结论。
+   *
+   * state 是 needs-review 时，库里有说不准是相对还是绝对的框内坐标，
+   * 要人来确认。数据本身没被动过。
+   */
+  frameCoords: { state: "ok" | "needs-review"; count: number; message: string };
+};
+
+/** 工具箱里的一个预填条目。 */
+export type PresetSummary = {
+  key: string;
+  title: string;
+  width?: number;
+  height?: number;
+  data?: Record<string, unknown>;
+};
+
+/** 精简列表里的一个类型：工具箱要用的元数据都在这里。 */
+export type TypeSummary = {
+  type: string;
+  title: string;
+  description: string;
+  pack: string;
+  container: boolean;
+  icon: string;
+  capabilities: { container?: boolean; cover?: boolean };
+  presets: PresetSummary[];
 };
 
 export type TypesResult =
   | {
-      types: {
-        type: string;
-        title: string;
-        description: string;
-        pack: string;
-        container: boolean;
-      }[];
+      types: TypeSummary[];
       relationKinds: {
         kind: string;
         title: string;
@@ -210,6 +235,9 @@ export function status(db: Db, registry: Registry): StatusResult {
       title: String(row.title),
       presentations: Number(row.presentations),
     }));
+    /* 框内坐标说不准时要人来确认：这是已有的状态出口，
+       人和模型一调 sand_status 就看得见，不用另开一个工具。 */
+    const frameCoords = auditFrameCoordinates(db);
     return {
       workspace: {
         id: requiredMeta(db, "workspace_id", "工作空间编号"),
@@ -223,7 +251,15 @@ export function status(db: Db, registry: Registry): StatusResult {
         title: pack.title,
         enabled: pack.enabled,
       })),
-      tips: [...TIPS],
+      tips:
+        frameCoords.state === "needs-review"
+          ? [...TIPS, frameCoords.message]
+          : [...TIPS],
+      frameCoords: {
+        state: frameCoords.state,
+        count: frameCoords.items.length,
+        message: frameCoords.message,
+      },
     };
   });
 }
@@ -265,6 +301,9 @@ export function listTypes(
         description: spec.description,
         pack: registry.packIdOf(spec.type),
         container: spec.capabilities?.container === true,
+        icon: spec.icon,
+        capabilities: capabilitiesOf(spec),
+        presets: presetsOf(enabledPacks(registry, enabled), spec.type),
       })),
       relationKinds: enabledPacks(registry, enabled).flatMap((pack) =>
         (pack.spec.relationKinds ?? []).map((kind) => ({
@@ -649,6 +688,123 @@ export function setActivity(
   });
 }
 
+/** 活动列表里的一行。 */
+export type ActivityRow = {
+  actor: string;
+  state: "running" | "waiting" | "done" | "unknown";
+  task: string;
+  action: string;
+  boardId: string | null;
+  objectIds: string[];
+  reportedAt: number;
+  expiresAt: number;
+};
+
+export type ActivityListResult = {
+  activities: ActivityRow[];
+  /** 没过期的活动比这次返回的多时为真。 */
+  truncated: boolean;
+  revision: number;
+};
+
+/**
+ * 列出还没有过期的活动。
+ *
+ * 只读：不碰 agent_reads。界面上每隔几秒读一次活动，
+ * 不能因此推进 Agent 的读取游标——那会让模型漏掉人改过的东西。
+ * 过期的活动不返回：活动本来就该随时间消失。
+ */
+export function listActivities(
+  db: Db,
+  options?: { limit?: number },
+): ActivityListResult {
+  return readOnly(db, () => {
+    const limit = Math.min(
+      Math.max(options?.limit ?? ACTIVITY_LIST_MAX, 1),
+      ACTIVITY_LIST_MAX,
+    );
+    const now = Date.now();
+    const total = Number(
+      (
+        db
+          .prepare("SELECT COUNT(*) AS n FROM activities WHERE expires_at > ?")
+          .get(now) as { n: number }
+      ).n,
+    );
+    const rows = db
+      .prepare(
+        `SELECT actor, state, task, action, board_id, object_ids, reported_at, expires_at
+           FROM activities
+           WHERE expires_at > ?
+           ORDER BY reported_at DESC, actor ASC
+           LIMIT ?`,
+      )
+      .all(now, limit) as {
+      actor: string;
+      state: string;
+      task: string;
+      action: string;
+      board_id: string | null;
+      object_ids: string;
+      reported_at: number;
+      expires_at: number;
+    }[];
+    return {
+      activities: rows.map((row) => ({
+        actor: String(row.actor),
+        state: activityState(row.state),
+        task: String(row.task),
+        action: String(row.action),
+        boardId: row.board_id == null ? null : String(row.board_id),
+        objectIds: activityObjectIds(row.object_ids, row.actor),
+        reportedAt: Number(row.reported_at),
+        expiresAt: Number(row.expires_at),
+      })),
+      truncated: total > rows.length,
+      revision: revisionOf(db),
+    };
+  });
+}
+
+/** 视角的当前状态：界面渲染画布要用的都在这里。 */
+export type ViewState = {
+  viewId: string;
+  board: { id: string; title: string } | null;
+  selection: ContextResult["selection"];
+  camera: unknown;
+  /** 进入子白板的路径；界面用它画面包屑。 */
+  navStack: unknown[];
+  revision: number;
+};
+
+/**
+ * 读一个视角的当前状态。
+ *
+ * 只读：不碰 agent_reads，也不改视角。sand_context 会推进 Agent 的读取游标，
+ * 界面读视角不能顺带推进——那是两回事。
+ */
+export function readView(db: Db, viewId: string): ViewState {
+  return readOnly(db, () => {
+    const view = db.prepare("SELECT * FROM views WHERE id = ?").get(viewId) as
+      Record<string, unknown> | undefined;
+    if (!view)
+      throw new CommandError(
+        "NOT_FOUND",
+        "找不到这个视角。请先打开白板，再查看当前内容。",
+        null,
+      );
+    const board = liveObject(db, String(view.board_id));
+    return {
+      viewId,
+      board: board ? { id: board.id, title: board.title } : null,
+      selection: selectionOf(db, view.selection),
+      camera: parseJson(view.camera, "views", viewId, "camera"),
+      navStack: navStackOf(view.nav_stack, viewId),
+      revision: revisionOf(db),
+    };
+  });
+}
+
 export function setView(db: Db, input: ViewInput, now: number): void {
   if (!input.viewId)
     throw new CommandError(
@@ -730,10 +886,7 @@ export function setView(db: Db, input: ViewInput, now: number): void {
 }
 
 function fullType(spec: TypeSpec) {
-  const capabilities = {
-    ...(spec.capabilities?.container ? { container: true } : {}),
-    ...(spec.capabilities?.cover ? { cover: true } : {}),
-  };
+  const capabilities = capabilitiesOf(spec);
   return {
     type: spec.type,
     title: spec.title,
@@ -753,6 +906,38 @@ function fullType(spec: TypeSpec) {
       ...(slot.targetTypes ? { targetTypes: [...slot.targetTypes] } : {}),
     })),
   };
+}
+
+/** 类型的两个能力：能进入、能设封面。没声明的就不出现。 */
+function capabilitiesOf(spec: TypeSpec) {
+  return {
+    ...(spec.capabilities?.container ? { container: true } : {}),
+    ...(spec.capabilities?.cover ? { cover: true } : {}),
+  };
+}
+
+/**
+ * 这个类型在工具箱里的预填条目。
+ *
+ * 预设挂在包上，靠预设自己的 type 找到属于哪个类型。
+ */
+function presetsOf(
+  packs: ReturnType<typeof enabledPacks>,
+  type: string,
+): PresetSummary[] {
+  const presets: PresetSummary[] = [];
+  for (const pack of packs)
+    for (const preset of pack.spec.presets ?? []) {
+      if (preset.type !== type) continue;
+      presets.push({
+        key: preset.key,
+        title: preset.title,
+        ...(preset.width === undefined ? {} : { width: preset.width }),
+        ...(preset.height === undefined ? {} : { height: preset.height }),
+        ...(preset.data === undefined ? {} : { data: { ...preset.data } }),
+      });
+    }
+  return presets;
 }
 
 function objectFilter(filter: QueryFilter) {
@@ -1171,6 +1356,20 @@ function metaText(db: Db, key: string) {
 function activityState(value: string): ActivityInput["state"] {
   if (ACTIVITY_STATES.has(value)) return value as ActivityInput["state"];
   return "unknown";
+}
+
+/** 活动里标出的对象列表。坏数据当作空列表，不让整次读取失败。 */
+function activityObjectIds(raw: unknown, actor: string): string[] {
+  const parsed = parseJson(raw, "activities", actor, "object_ids");
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((item): item is string => typeof item === "string");
+}
+
+/** 进入路径。坏数据当作空路径。 */
+function navStackOf(raw: unknown, viewId: string): unknown[] {
+  const parsed = parseJson(raw, "views", viewId, "nav_stack");
+  if (!Array.isArray(parsed)) return [];
+  return parsed;
 }
 
 function stringList(value: string[], label: string) {
