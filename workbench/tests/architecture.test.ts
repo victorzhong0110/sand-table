@@ -386,7 +386,8 @@ function listSourceFiles(
   out: SourceFile[] = [],
 ): SourceFile[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (["node_modules", "dist", "artifacts"].includes(entry.name)) continue;
+    if (["node_modules", "dist", "artifacts", "spikes"].includes(entry.name))
+      continue;
     if (entry.name.startsWith(".")) continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) listSourceFiles(full, root, out);

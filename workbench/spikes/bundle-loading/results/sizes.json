@@ -1,0 +1,109 @@
+{
+  "commit": "34462b471bf7dbb733eb0cf2ba8e15df48a36ab7",
+  "node": "v22.23.4",
+  "gzip": "node:zlib gzipSync 默认级别 6",
+  "versions": {
+    "react": {
+      "name": "react",
+      "version": "19.3.0",
+      "license": "MIT"
+    },
+    "vite": {
+      "name": "vite",
+      "version": "7.3.6",
+      "license": "MIT"
+    },
+    "vitePluginSinglefile": {
+      "name": "vite-plugin-singlefile",
+      "version": "2.3.0",
+      "license": "MIT"
+    },
+    "xyflow": {
+      "name": "@xyflow/react",
+      "version": "12.12.0",
+      "license": "MIT"
+    },
+    "pdfjs": {
+      "name": "pdfjs-dist",
+      "version": "6.4.299",
+      "license": "Apache-2.0"
+    },
+    "extApps": {
+      "name": "@modelcontextprotocol/ext-apps",
+      "version": "2.0.3",
+      "license": "MIT"
+    },
+    "esbuild": "0.28.2",
+    "playwright": "1.62.1"
+  },
+  "board": {
+    "current": {
+      "file": "workbench/dist/board.html",
+      "raw": 636536,
+      "gzip": 186263
+    },
+    "withReactFlow": {
+      "file": "with-flow.html",
+      "raw": 835669,
+      "gzip": 248449
+    },
+    "delta": {
+      "raw": 199133,
+      "gzip": 62186
+    },
+    "note": "with-flow 是在当前白板入口上额外引用下列符号后，用同一套 vite-plugin-singlefile 打出的文件。T30 尚未进入 main，这不是那条分支的产物。"
+  },
+  "isolated": {
+    "reactShell": {
+      "file": "react-shell.html",
+      "raw": 222217,
+      "gzip": 69247
+    },
+    "flowSurface": {
+      "file": "flow-only.html",
+      "raw": 210532,
+      "gzip": 66648
+    },
+    "flowNamespace": {
+      "file": "flow-namespace.html",
+      "raw": 218847,
+      "gzip": 69272
+    },
+    "note": "这三份是单独入口，不是主包增量。它们摇掉的 React 代码不一样，不能相减。"
+  },
+  "pdf": {
+    "publishedApi": {
+      "file": "workbench/node_modules/pdfjs-dist/build/pdf.min.mjs",
+      "raw": 458904,
+      "gzip": 132544
+    },
+    "publishedWorker": {
+      "file": "workbench/node_modules/pdfjs-dist/build/pdf.worker.min.mjs",
+      "raw": 1264342,
+      "gzip": 376488
+    },
+    "chunkApi": {
+      "file": "pdf-runner.js",
+      "raw": 429251,
+      "gzip": 129662
+    },
+    "chunkWorker": {
+      "file": "pdf-worker.js",
+      "raw": 1188656,
+      "gzip": 375070
+    },
+    "nodeText": "Hello"
+  },
+  "imports": [
+    "ReactFlow",
+    "ReactFlowProvider",
+    "Handle",
+    "NodeResizer",
+    "addEdge",
+    "applyNodeChanges",
+    "applyEdgeChanges",
+    "useNodesState",
+    "useEdgesState",
+    "@xyflow/react/dist/style.css"
+  ]
+}

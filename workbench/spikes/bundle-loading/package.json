@@ -1,0 +1,13 @@
+{
+  "name": "@sand-table/bundle-loading-spike",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "probe": "node run.mjs"
+  },
+  "dependencies": {
+    "@xyflow/react": "12.12.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  }
+}

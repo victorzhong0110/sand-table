@@ -1,0 +1,70 @@
+{
+  "sdk": {
+    "registeredMime": "text/html;profile=mcp-app",
+    "listed": [
+      {
+        "uri": "ui://sand-table/overview.html",
+        "mimeType": "text/html;profile=mcp-app"
+      },
+      {
+        "uri": "ui://sand-table/chunks/probe.js",
+        "mimeType": "text/javascript"
+      },
+      {
+        "uri": "sand-table://chunks/probe.js",
+        "mimeType": "text/javascript"
+      }
+    ],
+    "overview": {
+      "ok": true,
+      "resource": {
+        "uri": "ui://sand-table/overview.html",
+        "mimeType": "text/html;profile=mcp-app",
+        "bytes": 38,
+        "textIsChunk": false
+      }
+    },
+    "uiChunk": {
+      "ok": true,
+      "resource": {
+        "uri": "ui://sand-table/chunks/probe.js",
+        "mimeType": "text/javascript",
+        "bytes": 20,
+        "textIsChunk": true
+      }
+    },
+    "plainChunk": {
+      "ok": true,
+      "resource": {
+        "uri": "sand-table://chunks/probe.js",
+        "mimeType": "text/javascript",
+        "bytes": 20,
+        "textIsChunk": true
+      }
+    }
+  },
+  "localHost": {
+    "origin": "http://127.0.0.1:46523",
+    "boardRendered": true,
+    "csp": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; connect-src 'none'",
+    "viewBridge": {
+      "timeout": false,
+      "error": {
+        "code": -32601,
+        "message": "Method not found"
+      },
+      "hasResult": false
+    },
+    "overview": {
+      "status": 200,
+      "ok": true,
+      "mimeType": "text/html;profile=mcp-app",
+      "bytes": 636536,
+      "hasRoot": true
+    },
+    "chunk": {
+      "status": 400,
+      "body": "{\"error\":\"Resource not found: ui://sand-table/chunks/probe.js\"}"
+    }
+  }
+}
