@@ -1831,6 +1831,8 @@ test("导入的库记下坐标版本标记，体检说不用迁移", () => {
     assert.equal(getMeta(db, "frame_coords"), FRAME_COORDS_MARKER);
     assert.equal(frameCoords.state, "ok");
     assert.equal(frameCoords.items.length, 0);
+    assert.match(frameCoords.message, /不用迁移/);
+    assert.doesNotMatch(frameCoords.message, /导入器/);
     assert.equal(auditFrameCoordinates(db).state, "ok");
     db.close();
   } finally {
@@ -1915,6 +1917,12 @@ test("新建的工作空间就带坐标标记：建了框内展示再重开，�
     const again = openWorkspace(root, "fresh", registry);
     assert.equal(again.frameCoords.state, "ok", "新建的库不该要人确认");
     assert.equal(again.frameCoords.items.length, 0);
+    assert.match(again.frameCoords.message, /相对父框/);
+    assert.doesNotMatch(
+      again.frameCoords.message,
+      /导入器/,
+      "新建的库不是导入器写的",
+    );
     const rows = again.db
       .prepare("SELECT detail FROM audit WHERE action = 'frame_coords'")
       .all();

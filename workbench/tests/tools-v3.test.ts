@@ -27,6 +27,7 @@ const CORE_TOOLS = [
 ];
 
 const APP_TOOLS = [
+  "app_activity",
   "app_asset",
   "app_board",
   "app_changes",
@@ -837,6 +838,8 @@ test("框内坐标说不准：sand_status 里带着要人工确认的提示；�
     };
     assert.equal(clean.state, "ok", "新建的工作空间是健康的");
     assert.equal(clean.count, 0);
+    assert.match(clean.message, /相对父框/);
+    assert.doesNotMatch(clean.message, /导入器/, "新建的库不是导入器写的");
     assert.equal(
       (healthy.data.tips as string[]).some((tip) => tip.includes("人工确认")),
       false,

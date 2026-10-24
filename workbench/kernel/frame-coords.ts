@@ -4,14 +4,14 @@
 // 没有父框的是白板上的绝对坐标，有父框的是相对父框左上角的坐标。
 // 旧版导入器把白板上的绝对坐标换算成框内相对坐标再写库。
 //
-// 换算是有版本的：以后要判断一个库里的框内坐标是谁写的，靠这里的标记。
+// 换算是有版本的：以后要判断一个库里的框内坐标是不是相对坐标，靠这里的标记。
 // 没有标记的库不能盲目当成相对坐标迁移——说不准是相对还是绝对，
 // 改坏了就是改坏用户的作品。这种库只报给人确认，不动它。
 
 import { getMeta, setMeta, type Db } from "./db.ts";
 
 /**
- * 导入器写坐标的版本。
+ * 框内坐标的版本。导入的库和 v3 新建的库都写这个标记。
  *
  * relative-1：框内展示的 x、y 是相对父框左上角的。
  */
@@ -35,7 +35,7 @@ export type FrameCoordAudit = {
   message: string;
 };
 
-/** 记下这个库的框内坐标是相对坐标。导入时写一次。 */
+/** 记下这个库的框内坐标是相对坐标。导入和新建时写。 */
 export function markFrameCoords(db: Db, marker = FRAME_COORDS_MARKER): void {
   setMeta(db, "frame_coords", marker);
 }
@@ -60,7 +60,7 @@ export function auditFrameCoordinates(db: Db): FrameCoordAudit {
       state: "ok",
       marker,
       items: [],
-      message: "框内坐标是导入器写的相对坐标，不用迁移。",
+      message: "框内坐标是相对父框左上角的，不用迁移。",
     };
   if (!rows.length)
     return {

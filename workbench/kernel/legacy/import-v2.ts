@@ -1225,7 +1225,7 @@ function finalize(ctx: Ctx, workspace: V2Workspace): void {
   setMeta(ctx.db, "revision", String(IMPORT_REV));
   setMeta(ctx.db, "imported_from", `workspace.json@${workspace.revision}`);
   /* 记下坐标口径：框内展示写的是相对父框左上角的坐标。
-     以后要迁移或核对坐标，靠这个标记认得出是这一版导入器写的。 */
+     新建的库也写同一个标记。没有这个标记的旧库不能靠猜来迁移。 */
   markFrameCoords(ctx.db);
   ctx.db
     .prepare(
