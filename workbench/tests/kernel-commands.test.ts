@@ -1173,7 +1173,7 @@ test("相同意图会合并，内容回到原样就删掉这条历史", () => {
   }
 });
 
-test("不记录历史的写入和派生对象都不进历史", () => {
+test("不记录历史的写入不进历史，公开命令不能创建派生对象", () => {
   const { db, registry, close } = scene();
   try {
     const beforeHistory = history(db).length;
@@ -1190,21 +1190,24 @@ test("不记录历史的写入和派生对象都不进历史", () => {
     assert.equal(revision(db), beforeRev + 1);
     assert.equal(JSON.parse(audits(db).at(-1)!.detail).revision, beforeRev + 1);
 
-    const derived = applyCommands(db, registry, {
-      actor,
-      commands: [
-        {
-          ...card("派生"),
-          source: {
-            origin: "derived",
-            external: { kind: "file", uri: "file:///a" },
-          },
-        },
-      ],
-    });
-    assert.equal(derived.historyId, null);
+    expectError(
+      () =>
+        applyCommands(db, registry, {
+          actor,
+          commands: [
+            {
+              ...card("派生"),
+              source: {
+                origin: "derived",
+                external: { kind: "file", uri: "file:///a" },
+              },
+            },
+          ],
+        }),
+      "FORBIDDEN",
+      0,
+    );
     assert.equal(history(db).length, beforeHistory);
-    assert.ok(objectOf(db, derived.created["0"]!));
   } finally {
     close();
   }

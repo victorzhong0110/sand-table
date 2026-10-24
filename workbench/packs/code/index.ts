@@ -10,6 +10,7 @@
 // 字段限制从 v2 的 workbench/domains/code/index.ts 搬来；v2 的占位值不留。
 
 import type { PackSpec } from "../../kernel/index.ts";
+import { registerCodeTools } from "./tools.ts";
 
 /** 源文件路径：允许空字符串；禁止绝对路径、反斜杠，以及单独的 . / .. 段。 */
 const SOURCE_PATH =
@@ -233,6 +234,13 @@ export const codePack: PackSpec = {
             "x-sand-label": "摘要",
             "x-sand-widget": "text",
           },
+          contentVersion: {
+            type: "integer",
+            minimum: 1,
+            "x-sand-label": "内容版本",
+            "x-sand-widget": "integer",
+            "x-sand-hidden": true,
+          },
           intentVersion: {
             type: "integer",
             minimum: 1,
@@ -299,16 +307,58 @@ export const codePack: PackSpec = {
                   "x-sand-widget": "text",
                 },
                 before: {
-                  type: ["string", "null"],
-                  maxLength: 200000,
                   "x-sand-label": "改前内容",
                   "x-sand-widget": "longtext",
+                  anyOf: [
+                    { type: "string", maxLength: 200000 },
+                    { type: "null" },
+                    {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["blob", "bytes"],
+                      properties: {
+                        blob: {
+                          type: "string",
+                          pattern: "^[0-9a-f]{64}$",
+                          "x-sand-label": "附件",
+                          "x-sand-widget": "blob",
+                        },
+                        bytes: {
+                          type: "integer",
+                          minimum: 0,
+                          "x-sand-label": "字节数",
+                          "x-sand-widget": "integer",
+                        },
+                      },
+                    },
+                  ],
                 },
                 after: {
-                  type: ["string", "null"],
-                  maxLength: 200000,
                   "x-sand-label": "改后内容",
                   "x-sand-widget": "longtext",
+                  anyOf: [
+                    { type: "string", maxLength: 200000 },
+                    { type: "null" },
+                    {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["blob", "bytes"],
+                      properties: {
+                        blob: {
+                          type: "string",
+                          pattern: "^[0-9a-f]{64}$",
+                          "x-sand-label": "附件",
+                          "x-sand-widget": "blob",
+                        },
+                        bytes: {
+                          type: "integer",
+                          minimum: 0,
+                          "x-sand-label": "字节数",
+                          "x-sand-widget": "integer",
+                        },
+                      },
+                    },
+                  ],
                 },
               },
             },
@@ -573,4 +623,5 @@ export const codePack: PackSpec = {
       ],
     },
   ],
+  registerTools: registerCodeTools,
 };
