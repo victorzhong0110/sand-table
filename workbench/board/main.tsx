@@ -577,11 +577,17 @@ function Workbench() {
         Error("这一版内核还没有这个操作。请重新载入白板后再试。"),
       );
     }
-    return action("sand_edit_view", {
-      revision: boardRef.current?.revision,
-      viewId,
-      ...data,
-    });
+    /* 跟画布上的选中、拖动排成一队：备注若和它们同时写，
+       会拿着旧的修订号，后到的那一笔把板面顶掉。 */
+    const next = operations.current.then(() =>
+      action("sand_edit_view", {
+        revision: boardRef.current?.revision,
+        viewId,
+        ...data,
+      }),
+    );
+    operations.current = next.catch(() => undefined);
+    return next;
   }
   const operate = (operation: any) => {
     if (kernel === "v3") {
