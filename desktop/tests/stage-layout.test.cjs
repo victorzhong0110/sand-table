@@ -91,6 +91,20 @@ function looksLikePackage(spec) {
   );
 }
 
+/**
+ * 从 import 规格取出包名。子路径也算同一个包：
+ * `@modelcontextprotocol/ext-apps/server` 少了，本地工作台起不来；
+ * `pdfjs-dist/legacy/build/pdf.mjs` 少了，打开 PDF 才会失败。
+ * 这两段都对不上「整段就是包名」，不能因此跳过。
+ */
+function packageName(spec) {
+  if (spec.startsWith(".") || spec.startsWith("node:")) return;
+  const name = spec.startsWith("@")
+    ? spec.split("/").slice(0, 2).join("/")
+    : spec.split("/")[0];
+  return looksLikePackage(name) ? name : undefined;
+}
+
 /** 相对 import 指向的文件：补上可能的扩展名。 */
 function resolveRelative(fromFile, spec) {
   const base = path.resolve(path.dirname(fromFile), spec);
@@ -140,13 +154,8 @@ function runtimePackages() {
     const file = path.join(workbench, relative);
     if (!existsSync(file)) continue;
     for (const spec of importSpecifiers(readFileSync(file, "utf8"))) {
-      if (spec.startsWith(".") || spec.startsWith("node:")) continue;
-      if (!looksLikePackage(spec)) continue;
-      used.add(
-        spec.startsWith("@")
-          ? spec.split("/").slice(0, 2).join("/")
-          : spec.split("/")[0],
-      );
+      const name = packageName(spec);
+      if (name) used.add(name);
     }
   }
   return used;
@@ -190,6 +199,38 @@ test("v3 的工具面要能进包（packs/ 是内核的领域包）", () => {
   assert.ok(
     files.has(path.join("packs", "index.ts")),
     "运行期闭包里没有 packs/index.ts，核对用的入口可能变了",
+  );
+});
+
+test("子路径 import 也要算到包名上", () => {
+  const used = runtimePackages();
+  const subpaths = [];
+  for (const relative of runtimeClosure().files) {
+    const file = path.join(workbench, relative);
+    if (!existsSync(file)) continue;
+    for (const spec of importSpecifiers(readFileSync(file, "utf8"))) {
+      if (spec.startsWith(".") || spec.startsWith("node:")) continue;
+      const nested = spec.startsWith("@")
+        ? spec.split("/").length > 2
+        : spec.includes("/");
+      if (nested) subpaths.push(spec);
+    }
+  }
+  assert.ok(
+    subpaths.length > 0,
+    "运行期没有子路径 import，这条守护没在守东西",
+  );
+  const missing = [];
+  for (const spec of subpaths) {
+    const name = spec.startsWith("@")
+      ? spec.split("/").slice(0, 2).join("/")
+      : spec.split("/")[0];
+    if (!used.has(name)) missing.push(`${spec} → ${name}`);
+  }
+  assert.deepEqual(
+    missing,
+    [],
+    `这些子路径 import 没有算进包名：${missing.join(", ")}`,
   );
 });
 
