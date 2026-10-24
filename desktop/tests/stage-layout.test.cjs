@@ -1,18 +1,19 @@
-// 打包清单要盖住运行期真正用到的目录。
+// 打包清单要盖住运行期真正用到的目录与依赖。
 //
-// 背景：desktop/scripts/prepare-assets.mjs 按一份手写的目录清单把工作台
+// 背景：desktop/scripts/prepare-assets.mjs 按一份手写的清单把工作台
 // 拷进 .stage/workbench，electron-builder 再把它整体搬进 resources/workbench。
-// 这份清单和代码里的 import 是两处独立的东西，少拷一个目录，
-// 打包出来的桌面版起不来本地工作台，而且报错只在子进程的 stderr 里，
-// 冒烟脚本看不到（桌面主进程的日志在 Windows 上没有控制台，落不到 stdout）。
+// 这份清单和代码里的 import 是两处独立的东西，少拷一个目录、
+// 或者少装一个包，打包出来的桌面版就起不来本地工作台。
+// 而且报错只在子进程的 stderr 里，冒烟脚本看不到
+// （桌面主进程的日志在打包后的 Windows GUI 程序里没有控制台，落不到 stdout），
+// 表现只是「窗口停在加载页」。
 //
 // 2026-10-24 实测：kernel v3 的工具面（PR #76）让 server/main.ts 与
 // local/bridge.ts 开始 import server/v3/server.ts，而它 import packs/index.ts；
-// 清单里没有 packs/，于是便携冒烟从「窗口停在加载页」开始红，
-// 一直红到今天。
+// 清单里没有 packs/，于是便携冒烟从「窗口停在加载页」开始红，一直红到今天。
 //
-// 做法：按相对 import 把运行期入口的文件闭包算出来，
-// 再核对这份闭包涉及的每个顶层目录都在清单里。
+// 做法：按相对 import 把运行期入口的文件闭包算出来，再核对这份闭包涉及的
+// 每个顶层目录都在清单里、每个裸包都在 dependencies 里。
 // 清单改了就重新算一次——不用等人去踩。
 
 const { test } = require("node:test");
@@ -55,6 +56,41 @@ function readLayout() {
   return { dirs: read("runtimeDirs"), files: read("runtimeFiles") };
 }
 
+/**
+ * 把文件里真正的 import / export-from 规格取出来。
+ *
+ * 不能用「哪里出现 from / import 就抓一处」的粗办法：源码里有
+ * `className="pack-import"`、`operation, "human-import"` 这种把关键字
+ * 藏在标识符里的字符串，还有注释里的 “... from "..."”。
+ * 粗办法会把它们当成依赖名，把守护自己弄红。
+ *
+ * 做法：先去注释，再要求关键字出现在语句开头（行首或 ; { } ( 之后），
+ * 最后还要看规格本身像不像一个包名。
+ */
+function importSpecifiers(source) {
+  const withoutComments = source
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+  const patterns = [
+    /(?:^|[;{}()\n])\s*import\s+(?:type\s+)?[\s\S]{0,400}?\bfrom\s*["']([^"'\n]+)["']/g,
+    /(?:^|[;{}()\n])\s*import\s*["']([^"'\n]+)["']/g,
+    /(?:^|[;{}()\n])\s*export\s+[\s\S]{0,400}?\bfrom\s*["']([^"'\n]+)["']/g,
+    /\bimport\s*\(\s*["']([^"'\n]+)["']\s*\)/g,
+  ];
+  const found = [];
+  for (const pattern of patterns)
+    for (const match of withoutComments.matchAll(pattern))
+      found.push(match[1]);
+  return found;
+}
+
+/** 像不像一个包名（而不是一段源码）。 */
+function looksLikePackage(spec) {
+  return /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i.test(
+    spec,
+  );
+}
+
 /** 相对 import 指向的文件：补上可能的扩展名。 */
 function resolveRelative(fromFile, spec) {
   const base = path.resolve(path.dirname(fromFile), spec);
@@ -71,8 +107,6 @@ function resolveRelative(fromFile, spec) {
 
 /** 运行期入口的相对 import 闭包（只跟工作台内部的相对 import）。 */
 function runtimeClosure() {
-  const importPattern =
-    /(?:from|import|import\()\s*["'](\.[^"']+)["']/g;
   const seen = new Set();
   const unresolved = [];
   const stack = RUNTIME_ENTRIES.slice();
@@ -86,16 +120,36 @@ function runtimeClosure() {
       continue;
     }
     const source = readFileSync(file, "utf8");
-    for (const match of source.matchAll(importPattern)) {
-      const target = resolveRelative(file, match[1]);
+    for (const spec of importSpecifiers(source)) {
+      if (!spec.startsWith(".")) continue;
+      const target = resolveRelative(file, spec);
       if (!target) {
-        unresolved.push(`${relative} -> ${match[1]}`);
+        unresolved.push(`${relative} -> ${spec}`);
         continue;
       }
       stack.push(path.relative(workbench, target));
     }
   }
   return { files: seen, unresolved };
+}
+
+/** 运行期闭包里用到的裸包（不是相对路径，也不是 node: 内置）。 */
+function runtimePackages() {
+  const used = new Set();
+  for (const relative of runtimeClosure().files) {
+    const file = path.join(workbench, relative);
+    if (!existsSync(file)) continue;
+    for (const spec of importSpecifiers(readFileSync(file, "utf8"))) {
+      if (spec.startsWith(".") || spec.startsWith("node:")) continue;
+      if (!looksLikePackage(spec)) continue;
+      used.add(
+        spec.startsWith("@")
+          ? spec.split("/").slice(0, 2).join("/")
+          : spec.split("/")[0],
+      );
+    }
+  }
+  return used;
 }
 
 test("打包清单盖住了运行期 import 到的每个目录", () => {
@@ -109,7 +163,7 @@ test("打包清单盖住了运行期 import 到的每个目录", () => {
   );
   assert.ok(
     files.size > 20,
-    `运行期闭包只算出 ${files.size} 个文件，正则多半没匹配上`,
+    `运行期闭包只算出 ${files.size} 个文件，解析多半没匹配上`,
   );
 
   const dirs = new Set();
@@ -144,30 +198,16 @@ test("运行期用到的包都得在 dependencies 里（打包时 --omit=dev）"
     readFileSync(path.join(workbench, "package.json"), "utf8"),
   );
   const dependencies = new Set(Object.keys(manifest.dependencies ?? {}));
-  const devDependencies = new Set(Object.keys(manifest.devDependencies ?? {}));
-  const importPattern = /(?:from|import|import\()\s*["']([^"']+)["']/g;
-
-  const used = new Set();
-  for (const relative of runtimeClosure().files) {
-    const file = path.join(workbench, relative);
-    if (!existsSync(file)) continue;
-    for (const match of readFileSync(file, "utf8").matchAll(importPattern)) {
-      const spec = match[1];
-      if (spec.startsWith(".") || spec.startsWith("node:")) continue;
-      const name = spec.startsWith("@")
-        ? spec.split("/").slice(0, 2).join("/")
-        : spec.split("/")[0];
-      used.add(name);
-    }
-  }
+  const used = runtimePackages();
 
   assert.ok(used.size > 0, "一个包都没解析出来，正则多半没匹配上");
-  const dropped = [...used].filter(
-    (name) => !dependencies.has(name) && devDependencies.has(name),
-  );
+  // 不在 dependencies 里的都要挡住：既包括只在 devDependencies 里的
+  //（--omit=dev 会把它从包里去掉），也包括两个清单里都没有的
+  //（那只是碰巧被某个传递依赖带进来，干净的 npm ci 不保证装它）。
+  const missing = [...used].filter((name) => !dependencies.has(name));
   assert.deepEqual(
-    dropped,
+    missing,
     [],
-    `这些包运行期要 import，但只在 devDependencies 里：${dropped.join(", ")}（--omit=dev 会把它们从包里去掉）`,
+    `这些包运行期要 import，但不在 dependencies 里：${missing.join(", ")}（打包时 npm ci --omit=dev 不保证装得上）`,
   );
 });
