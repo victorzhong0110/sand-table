@@ -285,7 +285,10 @@ function checkPackImports(files: SourceFile[]): Violation[] {
     const isList = segments.length === 2;
     for (const { spec, line } of importSpecifiers(file)) {
       if (!spec.startsWith(".")) {
-        if (!spec.startsWith("node:") && !PACK_DEPENDENCIES.has(spec))
+        if (
+          !spec.startsWith("node:") &&
+          !(pack === "code" && PACK_DEPENDENCIES.has(spec))
+        )
           violations.push({
             file: file.path,
             line,
@@ -690,6 +693,17 @@ test("路径归一化及真实 import 的补充边界", () => {
   );
   assert.ok(
     checkPackImports([f("packs/demo/index.ts", 'import "unapproved";')]).length,
+  );
+  assert.ok(
+    checkPackImports([f("packs/novel/index.ts", 'import { z } from "zod";')])
+      .length,
+    "只有代码包可以依赖 zod",
+  );
+  assert.equal(
+    checkPackImports([
+      f("packs/code/indexer.ts", 'import ts from "typescript";'),
+    ]).length,
+    0,
   );
   assert.ok(
     checkSqlWrites([

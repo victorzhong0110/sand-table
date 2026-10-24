@@ -328,6 +328,12 @@ function createObject(
   const validated = ctx.staged.validateData(command.type, data);
   if (!validated.ok) throwData(validated.errors, index);
   if (command.source) assertSource(command.source, index);
+  if (command.source?.origin === "derived")
+    throw new CommandError(
+      "FORBIDDEN",
+      "派生内容不能从这里创建。请用组件自己的导入或刷新。",
+      index,
+    );
   const id = newId();
   ctx.db
     .prepare(
@@ -359,6 +365,12 @@ function updateObject(
   index: number,
 ) {
   const row = objectById(ctx, command.id, index);
+  if (row.source?.origin === "derived" || command.source?.origin === "derived")
+    throw new CommandError(
+      "FORBIDDEN",
+      "这是从外部重新算出来的内容，不能直接修改。",
+      index,
+    );
   assertVersion(row.version, command.expectedVersion, row.title, index);
   if (command.title !== undefined) {
     if (typeof command.title !== "string")
@@ -481,6 +493,8 @@ function cloneObject(
   createdKey: string,
 ) {
   const row = objectById(ctx, command.id, index);
+  if (row.source?.origin === "derived")
+    throw new CommandError("FORBIDDEN", "派生内容不能复制。", index);
   requireType(ctx, row.type, index);
   // 副本跟原对象一起迁到当前版本：旧结构的数据过不了当前 Schema 的校验。
   const migrated = migrateData(ctx.staged, row);

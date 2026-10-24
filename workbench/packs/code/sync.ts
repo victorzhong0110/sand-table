@@ -65,11 +65,27 @@ function runPublic(
   actor: Actor,
   commands: Command[],
 ) {
+  // 索引维护不进撤销历史。record 必须关掉，否则删掉派生对象时，
+  // 连带的展示和关系会被记成一步撤销，撤销后又把已经消失的文件恢复出来。
   for (let index = 0; index < commands.length; index += BATCH)
     applyCommands(db, registry, {
       actor,
+      record: false,
       commands: commands.slice(index, index + BATCH),
     });
+}
+
+/** 这一轮没能读进索引、但并不是从 Git 里消失的路径。 */
+function omittedFilePaths(omitted: string[]): Set<string> {
+  const paths = new Set<string>();
+  for (const entry of omitted) {
+    const splitAt = entry.indexOf(": ");
+    if (splitAt <= 0) continue;
+    const filePath = entry.slice(0, splitAt);
+    if (!filePath || filePath === "symbols") continue;
+    paths.add(filePath);
+  }
+  return paths;
 }
 
 function ensureCodePack(db: Db, registry: Registry, actor: Actor) {
@@ -362,8 +378,30 @@ export function syncBinding(
   }
   runSystem(db, registry, actor, commands);
 
+  const retained = omittedFilePaths(workspace.omitted);
+  const indexedPaths = new Set(
+    files
+      .filter((file) => fileIds.has(file.id))
+      .map((file) => file.source.path),
+  );
+  const symbolCap = workspace.omitted.some((entry) =>
+    entry.startsWith("symbols:"),
+  );
+  const keptDespiteScan = (row: ObjectRow) => {
+    if (row.type !== "code.file" && row.type !== "code.symbol") return false;
+    const filePath = objectPath(row, binding.id);
+    if (!filePath) return false;
+    if (retained.has(filePath)) return true;
+    return (
+      row.type === "code.symbol" && symbolCap && indexedPaths.has(filePath)
+    );
+  };
   const stale = rows.filter(
-    (row) => inRepo(row, binding) && !keep.has(row.id) && !row.deleted,
+    (row) =>
+      inRepo(row, binding) &&
+      !keep.has(row.id) &&
+      !row.deleted &&
+      !keptDespiteScan(row),
   );
   runPublic(
     db,
@@ -453,6 +491,7 @@ export function syncBinding(
       continue;
     const key = `${relation.kind}\0${relation.sourceId}\0${relation.targetId}`;
     present.add(key);
+    if (keptDespiteScan(source) || keptDespiteScan(target)) continue;
     if (relation.attributes.origin === "index" && !desired.has(key))
       removals.push({ op: "relation.delete", id: relation.id });
   }
@@ -481,9 +520,21 @@ export function syncBinding(
   };
 }
 
+function objectPath(row: ObjectRow, bindingId: string): string {
+  if (row.type === "code.file") return String(row.data.path ?? "");
+  if (row.type === "code.symbol") return symbolPath(row, bindingId);
+  return "";
+}
+
 function repoBinding(row: ObjectRow): Binding | undefined {
-  const root = row.source?.external?.uri;
-  if (!root || row.source?.external?.kind !== "git") return undefined;
+  const external = row.source?.external;
+  if (
+    row.source?.origin !== "derived" ||
+    !external?.uri ||
+    external.kind !== "git"
+  )
+    return undefined;
+  const root = external.uri;
   try {
     const label =
       typeof row.data.label === "string" && row.data.label

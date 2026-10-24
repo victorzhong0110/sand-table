@@ -10,6 +10,7 @@ import {
   getMeta,
   newId,
   readView,
+  setMeta,
   toObjectRow,
   type Actor,
   type Command,
@@ -28,6 +29,7 @@ import {
   currentFile,
   digest,
   observeWorktree,
+  openRepo,
   validatePath,
   worktreeState,
   type Binding,
@@ -102,17 +104,53 @@ function linkedIds(
 }
 
 function apply(db: Db, registry: Registry, actor: Actor, commands: Command[]) {
-  let last = {
-    revision: Number(getMeta(db, "revision") ?? "0"),
-    created: {} as Record<string, string>,
-  };
-  for (let index = 0; index < commands.length; index += BATCH) {
-    last = applyCommands(db, registry, {
-      actor,
-      commands: commands.slice(index, index + BATCH),
-    });
+  if (commands.length > BATCH)
+    fail(
+      "LIMIT",
+      "一次最多提交 200 条命令。请减少涉及的对象后再提交，不能拆成多次。",
+    );
+  if (!commands.length)
+    return {
+      revision: Number(getMeta(db, "revision") ?? "0"),
+      created: {} as Record<string, string>,
+    };
+  return applyCommands(db, registry, { actor, commands });
+}
+
+function approvalKey(proposalId: string) {
+  return `code.approval:${proposalId}`;
+}
+
+type Approval = { decision: "accepted" | "rejected"; digest: string };
+
+function readApproval(db: Db, proposalId: string): Approval | null {
+  const raw = getMeta(db, approvalKey(proposalId));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Approval;
+    if (parsed.decision !== "accepted" && parsed.decision !== "rejected")
+      return null;
+    if (typeof parsed.digest !== "string") return null;
+    return parsed;
+  } catch {
+    return null;
   }
-  return last;
+}
+
+function writeApproval(db: Db, proposalId: string, approval: Approval) {
+  setMeta(db, approvalKey(proposalId), JSON.stringify(approval));
+}
+
+function clearApproval(db: Db, proposalId: string) {
+  setMeta(db, approvalKey(proposalId), "");
+}
+
+function approvedNow(db: Db, row: ObjectRow, intentId: string) {
+  const approval = readApproval(db, row.id);
+  return (
+    approval?.decision === "accepted" &&
+    approval.digest === currentDigest(db, row, intentId)
+  );
 }
 
 function asFiles(value: unknown): FileRef[] {
@@ -160,11 +198,19 @@ function bindingsOf(db: Db, ids: string[]): Binding[] {
   const bindings: Binding[] = [];
   for (const row of repoRows(db)) {
     if (!wanted.has(row.id)) continue;
-    const root = row.source?.external?.uri;
-    if (!root || row.source?.external?.kind !== "git")
+    if (row.source?.origin !== "derived" || row.source.external?.kind !== "git")
+      fail(
+        "NOT_FOUND",
+        "这个编号不是已导入的代码仓库。请先用 code_repo 导入，不要手写仓库地址。",
+      );
+    const root = row.source.external.uri;
+    if (!root)
       fail("NOT_FOUND", "这个代码仓库没有可用的本地路径。请重新导入。");
-    const label = typeof row.data.label === "string" ? row.data.label : row.id;
-    bindings.push({ id: row.id, label, root });
+    const label =
+      typeof row.data.label === "string" ? row.data.label : "project";
+    // 每次读文件前重新确认这是 Git 根目录，不信任对象里保存的原始字符串。
+    const opened = openRepo(label, root);
+    bindings.push({ id: row.id, label: opened.label, root: opened.root });
   }
   if (bindings.length !== wanted.size)
     fail("NOT_FOUND", "找不到提案里的代码仓库。请先导入仓库后再试。");
@@ -536,25 +582,8 @@ export function createIntent(
       });
     }
   }
-  let id = existing?.id;
-  if (!existing) {
-    const head = commands.slice(0, 1);
-    const tail = commands.slice(1);
-    const first = [...head, ...tail.slice(0, BATCH - 1)];
-    const written = applyCommands(db, registry, { actor, commands: first });
-    id = written.created.intent;
-    if (!id) fail("INTERNAL", "意图没有写成。请再提交一次。");
-    const rest = tail
-      .slice(BATCH - 1)
-      .map((command) =>
-        command.op === "relation.create" && command.sourceId === "@intent"
-          ? { ...command, sourceId: id! }
-          : command,
-      );
-    if (rest.length) apply(db, registry, actor, rest);
-  } else {
-    apply(db, registry, actor, commands);
-  }
+  const written = apply(db, registry, actor, commands);
+  const id = existing?.id ?? written.created.intent;
   if (!id) fail("INTERNAL", "意图没有写成。请再提交一次。");
   const saved = loadObject(db, id);
   return {
@@ -823,6 +852,7 @@ export function publishProposal(
     ]);
   }
   const saved = loadObject(db, id);
+  clearApproval(db, saved.id);
   return summaryOf(db, saved, intent.id);
 }
 
@@ -880,6 +910,7 @@ export function decideProposal(
           set: { decision: "stale", verification: observation },
         },
       ]);
+      clearApproval(db, row.id);
       fail("INVALID_DATA", "实际工作树已经变了。请重新查看提案后再决定。");
     }
   }
@@ -892,6 +923,8 @@ export function decideProposal(
       set: { decision, decidedAt: Date.now() },
     },
   ]);
+  // 批准记在 meta 里。sand_edit 改得到提案数据，改不到这里。
+  writeApproval(db, row.id, { decision, digest: input.digest });
   return summaryOf(db, loadObject(db, row.id), intentId);
 }
 
@@ -929,8 +962,11 @@ export function prepareApply(
     input.version,
     input.digest,
   );
-  if (row.data.decision !== "accepted")
-    fail("FORBIDDEN", "这个提案还没有被批准。请先在界面上批准这一版。");
+  if (!approvedNow(db, row, intentId))
+    fail(
+      "FORBIDDEN",
+      "这个提案还没有被批准，或批准之后内容又变了。请在界面上重新批准这一版。",
+    );
   const verification = observe(db, row);
   apply(db, registry, actor, [
     {
@@ -965,14 +1001,17 @@ export function readApprovedFile(
     fileIndex: number;
   },
 ) {
-  const { row } = requireExact(
+  const { row, intentId } = requireExact(
     db,
     input.proposalId,
     input.version,
     input.digest,
   );
-  if (row.data.decision !== "accepted")
-    fail("FORBIDDEN", "这个提案还没有被批准。请先在界面上批准这一版。");
+  if (!approvedNow(db, row, intentId))
+    fail(
+      "FORBIDDEN",
+      "这个提案还没有被批准，或批准之后内容又变了。请在界面上重新批准这一版。",
+    );
   const verification = observe(db, row);
   apply(db, registry, actor, [
     {

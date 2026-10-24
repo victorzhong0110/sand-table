@@ -215,7 +215,52 @@ test("导入和刷新代码索引：稳定编号、删除消失、不进历史",
     });
     assert.equal(stale.isError, true, stale.text);
     assert.match(stale.text, /刷新索引/);
-    unlinkSync(join(repo.root, "b.ts"));
+    writeFileSync(join(repo.root, "wide.ts"), "export const wide = 1;\n");
+    repo.git("add", "wide.ts");
+    repo.git("commit", "-m", "wide");
+    const indexedWide = await call(session.client, "code_repo", {
+      action: "refresh",
+    });
+    assert.equal(indexedWide.isError, false, indexedWide.text);
+    const wideListed = await call(session.client, "sand_query", {
+      types: ["code.file"],
+      limit: 50,
+    });
+    const wideId = (
+      wideListed.data.rows as { id: string; title: string }[]
+    ).find((row) => row.title === "wide.ts")?.id;
+    assert.ok(wideId);
+    writeFileSync(join(repo.root, "wide.ts"), "x".repeat(200_001));
+    const keptWide = await call(session.client, "code_repo", {
+      action: "refresh",
+    });
+    assert.equal(keptWide.isError, false, keptWide.text);
+    const wideStill = await call(session.client, "sand_query", {
+      types: ["code.file"],
+      limit: 50,
+    });
+    assert.equal(
+      (wideStill.data.rows as { id: string; title: string }[]).find(
+        (row) => row.title === "wide.ts",
+      )?.id,
+      wideId,
+      "超出索引大小的文件还在，不能当成删除",
+    );
+    const placed = await call(session.client, "app_edit", {
+      commands: [
+        {
+          op: "presentation.create",
+          boardId: (await call(session.client, "sand_status")).data.homeBoardId,
+          objectId: rows.find((row) => row.title === "b.ts")?.id,
+        },
+      ],
+    });
+    assert.equal(placed.isError, false, placed.text);
+    const historyBeforeDelete = await call(session.client, "sand_history", {
+      action: "list",
+    });
+    repo.git("rm", "b.ts");
+    repo.git("commit", "-m", "remove b");
     const refreshed = await call(session.client, "code_repo", {
       action: "refresh",
     });
@@ -225,8 +270,8 @@ test("导入和刷新代码索引：稳定编号、删除消失、不进历史",
     });
     assert.equal(
       historyCount(afterRefresh.data.entries),
-      historyCount(before.data.entries),
-      "刷新索引不能产生历史",
+      historyCount(historyBeforeDelete.data.entries),
+      "删掉已确认消失的索引对象不能产生历史",
     );
     const left = await call(session.client, "sand_query", {
       types: ["code.file"],
@@ -301,6 +346,67 @@ test("导入和刷新代码索引：稳定编号、删除消失、不进历史",
     });
     assert.equal(linked.isError, true);
     assert.match(linked.text, /符号链接/);
+    const forged = await call(session.client, "sand_edit", {
+      commands: [
+        {
+          op: "object.create",
+          type: "code.repository",
+          title: "假仓库",
+          source: {
+            origin: "derived",
+            external: { kind: "git", uri: "/" },
+          },
+        },
+      ],
+    });
+    assert.equal(forged.isError, true);
+    assert.match(forged.text, /FORBIDDEN/);
+    const planted = await call(session.client, "sand_edit", {
+      commands: [
+        {
+          op: "object.create",
+          ref: "fake",
+          type: "code.repository",
+          title: "假仓库",
+          data: { label: "fake" },
+          source: {
+            origin: "human",
+            external: { kind: "git", uri: "/" },
+          },
+        },
+      ],
+    });
+    assert.equal(planted.isError, false, planted.text);
+    const fakeId = (planted.data.created as Record<string, string>).fake;
+    const attackStatus = await call(session.client, "sand_status");
+    const attack = await call(session.client, "code_change", {
+      action: "create_intent",
+      boardId: attackStatus.data.homeBoardId,
+      revision: (attackStatus.data.workspace as { revision: number }).revision,
+      request: "读取系统文件",
+      allowedFiles: [{ workspaceId: fakeId, path: "etc/passwd" }],
+    });
+    assert.equal(attack.isError, true);
+    assert.match(attack.text, /导入/);
+    const repoRead = await call(session.client, "sand_read", {
+      ids: [repositoryId],
+    });
+    const retarget = await call(session.client, "sand_edit", {
+      commands: [
+        {
+          op: "object.update",
+          id: repositoryId,
+          expectedVersion: (repoRead.data.objects as { version: number }[])[0]
+            ?.version,
+          source: {
+            origin: "derived",
+            external: { kind: "git", uri: "/" },
+          },
+        },
+      ],
+    });
+    assert.equal(retarget.isError, true);
+    assert.match(retarget.text, /FORBIDDEN/);
     repo.git("worktree", "add", "-b", "other", other);
     const otherRepo = await call(session.client, "code_repo", {
       action: "import",
@@ -391,6 +497,29 @@ test("改动链路：人批准、模型不能批准、摘要被改后失效、�
     const proposalId = published.data.id as string;
     const version = published.data.version as number;
     const proposalDigest = published.data.digest as string;
+    const looked = await call(session.client, "sand_read", {
+      ids: [proposalId],
+    });
+    const forged = await call(session.client, "sand_edit", {
+      commands: [
+        {
+          op: "object.update",
+          id: proposalId,
+          expectedVersion: (looked.data.objects as { version: number }[])[0]
+            ?.version,
+          set: { decision: "accepted" },
+        },
+      ],
+    });
+    assert.equal(forged.isError, false, forged.text);
+    const blocked = await call(session.client, "code_change", {
+      action: "prepare_apply",
+      proposalId,
+      version,
+      digest: proposalDigest,
+    });
+    assert.equal(blocked.isError, true);
+    assert.match(blocked.text, /批准/);
     assert.throws(
       () =>
         decideProposal(session.db, session.registry, AGENT, {
@@ -481,6 +610,55 @@ test("改动链路：人批准、模型不能批准、摘要被改后失效、�
       (error: unknown) =>
         error instanceof CommandError && error.code === "INVALID_DATA",
     );
+    const reread = await call(session.client, "code_change", {
+      action: "read_proposal",
+      proposalId,
+    });
+    assert.equal(reread.isError, false, reread.text);
+    const changedDigest = await call(session.client, "code_change", {
+      action: "prepare_apply",
+      proposalId,
+      version: reread.data.version,
+      digest: reread.data.digest,
+    });
+    assert.equal(changedDigest.isError, true);
+    assert.match(changedDigest.text, /批准/);
+    const fileBody = await call(session.client, "sand_read", {
+      ids: [proposalId],
+    });
+    const proposalObject = (
+      fileBody.data.objects as {
+        version: number;
+        data: { files: { after: string | null }[] };
+      }[]
+    )[0];
+    assert.ok(proposalObject);
+    const files = proposalObject.data.files.map((file, index) =>
+      index === 0 ? { ...file, after: "export const a = 9;\n" } : file,
+    );
+    const rewritten = await call(session.client, "sand_edit", {
+      commands: [
+        {
+          op: "object.update",
+          id: proposalId,
+          expectedVersion: proposalObject.version,
+          set: { files },
+        },
+      ],
+    });
+    assert.equal(rewritten.isError, false, rewritten.text);
+    const afterRewrite = await call(session.client, "code_change", {
+      action: "read_proposal",
+      proposalId,
+    });
+    const rewrittenApply = await call(session.client, "code_change", {
+      action: "prepare_apply",
+      proposalId,
+      version: afterRewrite.data.version,
+      digest: afterRewrite.data.digest,
+    });
+    assert.equal(rewrittenApply.isError, true);
+    assert.match(rewrittenApply.text, /批准/);
     chmodSync(join(repo.root, "a.ts"), 0o755);
     const mode = await call(session.client, "code_change", {
       action: "verify",
@@ -525,6 +703,63 @@ test("启用代码包后模型多两个工具，停用后恢复", async () => {
     assert.deepEqual(restored, before);
   } finally {
     await session.close();
+  }
+});
+
+test("意图一次关联太多对象时整批拒绝", async () => {
+  const session = await open();
+  const repo = gitRepo("sand-code-limit-");
+  try {
+    writeFileSync(join(repo.root, "a.ts"), "export const a = 1;\n");
+    repo.git("add", ".");
+    repo.git("commit", "-m", "fixture");
+    const enabled = await call(session.client, "app_edit", {
+      commands: [{ op: "pack.enable", id: "code" }],
+    });
+    assert.equal(enabled.isError, false, enabled.text);
+    const imported = await call(session.client, "code_repo", {
+      action: "import",
+      path: repo.root,
+    });
+    assert.equal(imported.isError, false, imported.text);
+    const made = await call(session.client, "sand_edit", {
+      commands: Array.from({ length: 200 }, (_, index) => ({
+        op: "object.create",
+        ref: `n${index}`,
+        type: "base.note",
+        title: `便签${index}`,
+      })),
+    });
+    assert.equal(made.isError, false, made.text);
+    const ids = Array.from(
+      { length: 200 },
+      (_, index) => (made.data.created as Record<string, string>)[`n${index}`],
+    );
+    const status = await call(session.client, "sand_status");
+    const before = await call(session.client, "sand_history", {
+      action: "list",
+    });
+    const rejected = await call(session.client, "code_change", {
+      action: "create_intent",
+      boardId: status.data.homeBoardId,
+      revision: (status.data.workspace as { revision: number }).revision,
+      request: "一次连太多",
+      objectIds: ids,
+      allowedFiles: [{ workspaceId: imported.data.repositoryId, path: "a.ts" }],
+    });
+    assert.equal(rejected.isError, true);
+    assert.match(rejected.text, /200/);
+    const after = await call(session.client, "sand_history", {
+      action: "list",
+    });
+    assert.equal(
+      historyCount(after.data.entries),
+      historyCount(before.data.entries),
+      "超限的意图不能留下半成品",
+    );
+  } finally {
+    await session.close();
+    rmSync(repo.root, { recursive: true, force: true });
   }
 });
 
