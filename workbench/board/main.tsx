@@ -863,6 +863,7 @@ function Workbench() {
    * 本地桥接下界面与别的调用共用一个身份，界面就看不到自己那条。
    */
   useEffect(() => {
+    if (!isConnected) return;
     const readActivities = async () => {
       const data: any = await callTool("app_activity", { action: "list" });
       const reported = toReportedActivities(
@@ -879,7 +880,7 @@ function Workbench() {
     }, 5000);
     void readActivities().catch(() => {});
     return () => clearInterval(timer);
-  }, []);
+  }, [isConnected]);
   /* 连上服务端后读一次工作空间列表。 */
   useEffect(() => {
     if (!isConnected) return;
