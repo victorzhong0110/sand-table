@@ -1,0 +1,444 @@
+{
+  "cases": [
+    {
+      "name": "local-pdf-without-worker",
+      "sandbox": "allow-scripts",
+      "mode": "pdf-without-worker",
+      "origin": "null",
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+      "csp": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; connect-src 'none'",
+      "violations": [
+        {
+          "directive": "script-src-elem",
+          "blocked": "blob"
+        },
+        {
+          "directive": "script-src-elem",
+          "blocked": "data"
+        },
+        {
+          "directive": "script-src-elem",
+          "blocked": "https://example.com/spike.js"
+        },
+        {
+          "directive": "script-src",
+          "blocked": "eval"
+        },
+        {
+          "directive": "script-src",
+          "blocked": "eval"
+        },
+        {
+          "directive": "script-src-elem",
+          "blocked": "blob"
+        },
+        {
+          "directive": "connect-src",
+          "blocked": "https://example.com/"
+        },
+        {
+          "directive": "worker-src",
+          "blocked": "blob"
+        },
+        {
+          "directive": "worker-src",
+          "blocked": "blob"
+        }
+      ],
+      "errors": [],
+      "classicInline": {
+        "ok": true
+      },
+      "moduleInline": {
+        "ok": true
+      },
+      "blobScript": {
+        "ok": false,
+        "error": "Error: script error event"
+      },
+      "dataScript": {
+        "ok": false,
+        "error": "Error: script error event"
+      },
+      "httpsScript": {
+        "ok": false,
+        "error": "Error: script error event"
+      },
+      "newFunction": {
+        "ok": false,
+        "error": "EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'unsafe-inline'\".\n"
+      },
+      "evalScript": {
+        "ok": false,
+        "error": "EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'unsafe-inline'\".\n"
+      },
+      "dynamicImportBlob": {
+        "ok": false,
+        "error": "TypeError: Failed to fetch dynamically imported module: blob:null/0a85363a-341d-4a29-bf25-b6272ebfd5c5"
+      },
+      "fetchHttps": {
+        "ok": false,
+        "error": "TypeError: Failed to fetch"
+      },
+      "workerClassic": {
+        "ok": false,
+        "error": "Error: worker error event"
+      },
+      "workerModule": {
+        "ok": false,
+        "error": "Error: worker error event"
+      },
+      "pdf": {
+        "ok": false,
+        "error": "Error: No \"GlobalWorkerOptions.workerSrc\" specified.",
+        "errors": []
+      },
+      "parentOrigin": "Failed to read a named property 'origin' from 'Location': Blocked a frame with origin \"http://127.0.0.1:44001\" from accessing a cross-origin frame.",
+      "sandboxAttr": "allow-scripts"
+    },
+    {
+      "name": "local-pdf",
+      "sandbox": "allow-scripts",
+      "mode": "pdf",
+      "origin": "null",
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+      "csp": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; connect-src 'none'",
+      "violations": [
+        {
+          "directive": "script-src-elem",
+          "blocked": "blob"
+        },
+        {
+          "directive": "script-src-elem",
+          "blocked": "data"
+        },
+        {
+          "directive": "script-src-elem",
+          "blocked": "https://example.com/spike.js"
+        },
+        {
+          "directive": "script-src",
+          "blocked": "eval"
+        },
+        {
+          "directive": "script-src",
+          "blocked": "eval"
+        },
+        {
+          "directive": "script-src-elem",
+          "blocked": "blob"
+        },
+        {
+          "directive": "connect-src",
+          "blocked": "https://example.com/"
+        },
+        {
+          "directive": "worker-src",
+          "blocked": "blob"
+        },
+        {
+          "directive": "worker-src",
+          "blocked": "blob"
+        }
+      ],
+      "errors": [],
+      "classicInline": {
+        "ok": true
+      },
+      "moduleInline": {
+        "ok": true
+      },
+      "blobScript": {
+        "ok": false,
+        "error": "Error: script error event"
+      },
+      "dataScript": {
+        "ok": false,
+        "error": "Error: script error event"
+      },
+      "httpsScript": {
+        "ok": false,
+        "error": "Error: script error event"
+      },
+      "newFunction": {
+        "ok": false,
+        "error": "EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'unsafe-inline'\".\n"
+      },
+      "evalScript": {
+        "ok": false,
+        "error": "EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'unsafe-inline'\".\n"
+      },
+      "dynamicImportBlob": {
+        "ok": false,
+        "error": "TypeError: Failed to fetch dynamically imported module: blob:null/cf9bd616-e4ca-4358-ba0a-31eabe25f196"
+      },
+      "fetchHttps": {
+        "ok": false,
+        "error": "TypeError: Failed to fetch"
+      },
+      "workerClassic": {
+        "ok": false,
+        "error": "Error: worker error event"
+      },
+      "workerModule": {
+        "ok": false,
+        "error": "Error: worker error event"
+      },
+      "pdf": {
+        "ok": true,
+        "pages": 1,
+        "text": "Hello",
+        "rendered": true,
+        "pageDark": 445,
+        "blankDark": 0,
+        "renderError": ""
+      },
+      "parentOrigin": "Failed to read a named property 'origin' from 'Location': Blocked a frame with origin \"http://127.0.0.1:44001\" from accessing a cross-origin frame.",
+      "sandboxAttr": "allow-scripts"
+    },
+    {
+      "name": "spec-csp",
+      "sandbox": "allow-scripts",
+      "mode": "scripts",
+      "origin": "null",
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+      "csp": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'self'",
+      "violations": [
+        {
+          "directive": "script-src-elem",
+          "blocked": "blob"
+        },
+        {
+          "directive": "script-src-elem",
+          "blocked": "data"
+        },
+        {
+          "directive": "script-src-elem",
+          "blocked": "https://example.com/spike.js"
+        },
+        {
+          "directive": "script-src",
+          "blocked": "eval"
+        },
+        {
+          "directive": "script-src",
+          "blocked": "eval"
+        },
+        {
+          "directive": "script-src-elem",
+          "blocked": "blob"
+        },
+        {
+          "directive": "connect-src",
+          "blocked": "https://example.com/"
+        },
+        {
+          "directive": "worker-src",
+          "blocked": "blob"
+        },
+        {
+          "directive": "worker-src",
+          "blocked": "blob"
+        }
+      ],
+      "errors": [],
+      "classicInline": {
+        "ok": true
+      },
+      "moduleInline": {
+        "ok": true
+      },
+      "blobScript": {
+        "ok": false,
+        "error": "Error: script error event"
+      },
+      "dataScript": {
+        "ok": false,
+        "error": "Error: script error event"
+      },
+      "httpsScript": {
+        "ok": false,
+        "error": "Error: script error event"
+      },
+      "newFunction": {
+        "ok": false,
+        "error": "EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'unsafe-inline'\".\n"
+      },
+      "evalScript": {
+        "ok": false,
+        "error": "EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'unsafe-inline'\".\n"
+      },
+      "dynamicImportBlob": {
+        "ok": false,
+        "error": "TypeError: Failed to fetch dynamically imported module: blob:null/fdd0407d-5c43-4b6a-a29f-2a5238cd31c3"
+      },
+      "fetchHttps": {
+        "ok": false,
+        "error": "TypeError: Failed to fetch"
+      },
+      "workerClassic": {
+        "ok": false,
+        "error": "Error: worker error event"
+      },
+      "workerModule": {
+        "ok": false,
+        "error": "Error: worker error event"
+      },
+      "parentOrigin": "Failed to read a named property 'origin' from 'Location': Blocked a frame with origin \"http://127.0.0.1:44001\" from accessing a cross-origin frame.",
+      "sandboxAttr": "allow-scripts"
+    },
+    {
+      "name": "worker-blob-csp",
+      "sandbox": "allow-scripts",
+      "mode": "scripts",
+      "origin": "null",
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+      "csp": "default-src 'none'; script-src 'unsafe-inline'; worker-src blob:; style-src 'unsafe-inline'; img-src data:; media-src data:; connect-src 'none'",
+      "violations": [
+        {
+          "directive": "script-src-elem",
+          "blocked": "blob"
+        },
+        {
+          "directive": "script-src-elem",
+          "blocked": "data"
+        },
+        {
+          "directive": "script-src-elem",
+          "blocked": "https://example.com/spike.js"
+        },
+        {
+          "directive": "script-src",
+          "blocked": "eval"
+        },
+        {
+          "directive": "script-src",
+          "blocked": "eval"
+        },
+        {
+          "directive": "script-src-elem",
+          "blocked": "blob"
+        },
+        {
+          "directive": "connect-src",
+          "blocked": "https://example.com/"
+        }
+      ],
+      "errors": [],
+      "classicInline": {
+        "ok": true
+      },
+      "moduleInline": {
+        "ok": true
+      },
+      "blobScript": {
+        "ok": false,
+        "error": "Error: script error event"
+      },
+      "dataScript": {
+        "ok": false,
+        "error": "Error: script error event"
+      },
+      "httpsScript": {
+        "ok": false,
+        "error": "Error: script error event"
+      },
+      "newFunction": {
+        "ok": false,
+        "error": "EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'unsafe-inline'\".\n"
+      },
+      "evalScript": {
+        "ok": false,
+        "error": "EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'unsafe-inline'\".\n"
+      },
+      "dynamicImportBlob": {
+        "ok": false,
+        "error": "TypeError: Failed to fetch dynamically imported module: blob:null/c48e15be-0497-419c-adda-ea42ea8f36db"
+      },
+      "fetchHttps": {
+        "ok": false,
+        "error": "TypeError: Failed to fetch"
+      },
+      "workerClassic": {
+        "ok": true
+      },
+      "workerModule": {
+        "ok": false,
+        "error": "Error: worker error event"
+      },
+      "parentOrigin": "Failed to read a named property 'origin' from 'Location': Blocked a frame with origin \"http://127.0.0.1:44001\" from accessing a cross-origin frame.",
+      "sandboxAttr": "allow-scripts"
+    },
+    {
+      "name": "blob-script-same-origin",
+      "sandbox": "allow-scripts allow-same-origin",
+      "mode": "scripts",
+      "origin": "null",
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+      "csp": "default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; style-src 'unsafe-inline'; img-src data:; media-src data:; connect-src 'none'",
+      "violations": [
+        {
+          "directive": "script-src-elem",
+          "blocked": "data"
+        },
+        {
+          "directive": "script-src-elem",
+          "blocked": "https://example.com/spike.js"
+        },
+        {
+          "directive": "script-src",
+          "blocked": "eval"
+        },
+        {
+          "directive": "script-src",
+          "blocked": "eval"
+        },
+        {
+          "directive": "connect-src",
+          "blocked": "https://example.com/"
+        }
+      ],
+      "errors": [],
+      "classicInline": {
+        "ok": true
+      },
+      "moduleInline": {
+        "ok": true
+      },
+      "blobScript": {
+        "ok": true
+      },
+      "dataScript": {
+        "ok": false,
+        "error": "Error: script error event"
+      },
+      "httpsScript": {
+        "ok": false,
+        "error": "Error: script error event"
+      },
+      "newFunction": {
+        "ok": false,
+        "error": "EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'unsafe-inline' blob:\".\n"
+      },
+      "evalScript": {
+        "ok": false,
+        "error": "EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'unsafe-inline' blob:\".\n"
+      },
+      "dynamicImportBlob": {
+        "ok": true
+      },
+      "fetchHttps": {
+        "ok": false,
+        "error": "TypeError: Failed to fetch"
+      },
+      "workerClassic": {
+        "ok": true
+      },
+      "workerModule": {
+        "ok": true
+      },
+      "parentOrigin": "null",
+      "sandboxAttr": "allow-scripts allow-same-origin"
+    }
+  ]
+}
