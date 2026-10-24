@@ -21,6 +21,7 @@ import {
   mapHostResult,
 } from "../core/host-bridge.ts";
 import { installHostBridgeClient } from "./host-bridge-client.ts";
+import { translateLegacyTool } from "./data-client/legacy-calls.ts";
 import { V3Store } from "./data-client/store.ts";
 import {
   toBoard,
@@ -396,6 +397,28 @@ function Workbench() {
         await store.sync();
         refreshV3Board();
         return result;
+      }
+      case "sand_import_repository":
+      case "sand_read_source":
+      case "sand_edit_view": {
+        const translated = translateLegacyTool(name, args);
+        if (!translated || "unsupported" in translated)
+          throw Error(
+            translated && "unsupported" in translated
+              ? translated.unsupported
+              : `这一版内核还没有「${name}」这个操作。请重新载入白板后再试。`,
+          );
+        let last: unknown;
+        for (const step of translated.steps)
+          last = await callTool(step.name, step.args);
+        if (translated.refreshBoard) {
+          const store = storeRef.current;
+          if (store) {
+            await store.sync();
+            refreshV3Board();
+          }
+        }
+        return translated.result === "ok" ? true : last;
       }
       default:
         /* v3 的核心工具按原名调用；其余是 v2 才有的工具，明确说清楚。 */

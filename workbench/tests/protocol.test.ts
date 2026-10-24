@@ -38,7 +38,11 @@ test(
       };
       const tools = await client.listTools();
       assert.ok(tools.tools.some((t) => t.name === "sand_context"));
-      assert.ok(tools.tools.some((t) => t.name === "code_repo"));
+      await call("app_edit", {
+        commands: [{ op: "pack.enable", id: "code" }],
+      });
+      const withCode = await client.listTools();
+      assert.ok(withCode.tools.some((t) => t.name === "code_repo"));
       const status = await call("sand_status");
       assert.equal(typeof status.homeBoardId, "string");
       assert.ok(status.homeBoardId);

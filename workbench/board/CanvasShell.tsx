@@ -592,20 +592,6 @@ export function CanvasShell({
                         )}
                       </>
                     )}
-                    <label>
-                      给 AI 的备注
-                      <textarea
-                        key={object.id}
-                        defaultValue={b.notes[object.id] || ""}
-                        onBlur={(e) =>
-                          void action("sand_edit_view", {
-                            revision: b.revision,
-                            viewId,
-                            note: { objectId: object.id, text: e.target.value },
-                          })
-                        }
-                      />
-                    </label>
                     <h3>同文件代码入口</h3>
                     {b.objects
                       .filter(

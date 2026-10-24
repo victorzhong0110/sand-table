@@ -94,7 +94,9 @@ export function listWorkspaces(
     try {
       db = openWorkspaceDb(file, { create: false });
       workspaces.push({
-        id: getMeta(db, "workspace_id") ?? id,
+        // 编号必须是目录名。库里的 workspace_id 可能还是导入前的旧编号，
+        // 拿它去切换、改名、删除会打到另一个目录，当前项也对不上。
+        id,
         title: getMeta(db, "title") ?? id,
         current: id === currentId,
       });

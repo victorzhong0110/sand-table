@@ -4,16 +4,28 @@
 // 工作空间放在临时目录里，跑完就删。
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import {
+  createRegistry,
+  getMeta,
+  openWorkspace,
+  type PackSpec,
+} from "../kernel/index.ts";
+import { builtinPacks } from "../packs/index.ts";
 import { createServerV3 } from "../server/server.ts";
 import { connectionConfig } from "../local/config.ts";
 import { bridgeEntry } from "../local/service.ts";
 import { basePack } from "../packs/base/index.ts";
-import type { PackSpec } from "../kernel/index.ts";
 
 const CORE_TOOLS = [
   "sand_activity",
@@ -392,6 +404,58 @@ test("app_workspace 能新建、切换、改名、删除", async () => {
       1,
       "删掉之后只剩一个",
     );
+  } finally {
+    await session.close();
+  }
+});
+
+test("导入后的工作空间列表用目录名，不用库里的旧编号", async () => {
+  const session = await open("current");
+  try {
+    const registry = createRegistry();
+    for (const pack of builtinPacks) registry.registerPack(pack, "builtin");
+    mkdirSync(join(session.root, "imported"), { recursive: true });
+    copyFileSync(
+      join("tests/fixtures/v2/full.json"),
+      join(session.root, "imported", "workspace.json"),
+    );
+    const opened = openWorkspace(session.root, "imported", registry);
+    assert.equal(getMeta(opened.db, "workspace_id"), "demo-workspace");
+    opened.db.close();
+
+    const listed = await call(session.client, "app_workspace", {
+      action: "list",
+    });
+    assert.equal(listed.isError, false, listed.text);
+    const rows = listed.data.workspaces as {
+      id: string;
+      title: string;
+      current: boolean;
+    }[];
+    const imported = rows.find((row) => row.title === "示例工作空间");
+    assert.ok(imported, JSON.stringify(rows));
+    assert.equal(imported.id, "imported");
+    assert.equal(imported.current, false);
+    assert.equal(
+      rows.find((row) => row.current)?.id,
+      "current",
+      "当前项用的是打开时的目录名",
+    );
+
+    const renamed = await call(session.client, "app_workspace", {
+      action: "rename",
+      id: "imported",
+      title: "改名成功",
+    });
+    assert.equal(renamed.isError, false, renamed.text);
+
+    const wrong = await call(session.client, "app_workspace", {
+      action: "rename",
+      id: "demo-workspace",
+      title: "不该打到这个名字",
+    });
+    assert.equal(wrong.isError, true);
+    assert.equal(wrong.data.code, "NOT_FOUND");
   } finally {
     await session.close();
   }
