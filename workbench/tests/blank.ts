@@ -348,29 +348,54 @@ try {
     await page.mouse.up();
   };
   const beforeDrag = b.instances[0].rect;
+  const historyBeforeDrag = await readHistory();
+  const pathBeforeDrag = historyBeforeDrag.records.filter(
+    (record: { onPath?: boolean }) => record.onPath,
+  ).length;
   await dragTo(60, 40);
-  b = await until((b) => b.instances[0].rect.x !== beforeDrag.x);
-  assert.notEqual(
-    b.instances[0].rect.x,
-    beforeDrag.x,
-    "Dragging on the canvas moves the component.",
+  b = await until(
+    (board) =>
+      Math.abs(board.instances[0].rect.x - (beforeDrag.x + 60)) < 2 &&
+      Math.abs(board.instances[0].rect.y - (beforeDrag.y + 40)) < 2,
+  );
+  const historyAfterDrag = await readHistory();
+  assert.equal(
+    historyAfterDrag.records.filter(
+      (record: { onPath?: boolean }) => record.onPath,
+    ).length,
+    pathBeforeDrag + 1,
+    "Dragging a card adds one history record.",
+  );
+  assert.ok(
+    Math.abs(b.instances[0].rect.x - (beforeDrag.x + 60)) < 2 &&
+      Math.abs(b.instances[0].rect.y - (beforeDrag.y + 40)) < 2,
+    "The card lands where the pointer was released.",
+  );
+  await undo();
+  b = await until(
+    (board) => Math.abs(board.instances[0].rect.x - beforeDrag.x) < 0.6,
+  );
+  await redo();
+  b = await until(
+    (board) => Math.abs(board.instances[0].rect.x - (beforeDrag.x + 60)) < 2,
   );
 
-  /* #9.2: a pinned component can still be moved, and moving it un-pins it. */
+  /* 锁住的展示不能被拖走，位置和锁定都保持。 */
   await frame.getByRole("button", { name: "固定位置", exact: true }).click();
-  b = await until((b) => b.instances[0].rect.pinned === true);
+  b = await until((board) => board.instances[0].rect.pinned === true);
   const pinned = b.instances[0].rect;
   await dragTo(-50, 30);
-  b = await until(
-    (b) =>
-      b.instances[0].rect.pinned === false &&
-      b.instances[0].rect.x !== pinned.x,
+  await page.waitForTimeout(400);
+  b = await read();
+  assert.equal(b.instances[0].rect.pinned, true);
+  assert.equal(b.instances[0].rect.x, pinned.x);
+  assert.equal(
+    b.instances[0].rect.y,
+    pinned.y,
+    "A locked card stays where it is.",
   );
-  assert.notEqual(
-    b.instances[0].rect.x,
-    pinned.x,
-    "Moving a pinned component moves it and releases the pin.",
-  );
+  await frame.getByRole("button", { name: "取消固定", exact: true }).click();
+  b = await until((board) => board.instances[0].rect.pinned === false);
 
   /* 拖出视口再拖回来时，同一张卡片的 DOM 节点必须还在。
      选中项不参与裁剪，所以先点空白处取消选择。再把画布收窄，
@@ -475,6 +500,27 @@ try {
     contentText(b, b.instances[0]),
     "就地改过的内容",
     "Editing on the canvas writes the component back.",
+  );
+  const beforeTyping = { ...b.instances[0].rect };
+  await card.dblclick();
+  const composing = frame.getByRole("textbox", { name: "就地编辑内容" });
+  await composing.waitFor();
+  await composing.evaluate((el) => {
+    el.dispatchEvent(new CompositionEvent("compositionstart"));
+    el.dispatchEvent(new CompositionEvent("compositionupdate", { data: "测" }));
+  });
+  const typingBox = (await composing.boundingBox())!;
+  await page.mouse.move(typingBox.x + 8, typingBox.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(typingBox.x + 48, typingBox.y + 36, { steps: 6 });
+  await page.mouse.up();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+  b = await read();
+  assert.ok(
+    Math.abs(b.instances[0].rect.x - beforeTyping.x) < 0.6 &&
+      Math.abs(b.instances[0].rect.y - beforeTyping.y) < 0.6,
+    "Typing and IME composition do not drag the card.",
   );
 
   await frame.getByRole("textbox", { name: "编辑组件名称" }).fill("我的计划");
@@ -625,10 +671,22 @@ try {
     0,
     "Selecting/resizing must not flash disabled toolbox controls.",
   );
-  /* Delete 移除选中的组件，撤销一次把它带回来。 */
+  /* Delete 移除选中的展示，对象还在。撤销一次把展示带回来。 */
   await untilUiSelection(1);
+  const removedObjectId = b.instances.find(
+    (i: any) => i.id === noteId,
+  )?.objectId;
   await page.keyboard.press("Delete");
   b = await until((b) => !b.instances.some((i: any) => i.id === noteId));
+  if (v3 && removedObjectId) {
+    const still = await call("sand_read", { ids: [removedObjectId] });
+    assert.ok(
+      (still.objects ?? []).some(
+        (object: any) => object.id === removedObjectId,
+      ),
+      "Delete removes the presentation, not the object.",
+    );
+  }
   assert.equal(
     b.instances.filter((i: any) => i.id === noteId).length,
     0,
@@ -1168,6 +1226,50 @@ try {
       changes >= 2 && changes <= 5,
       `空闲时每秒一次增量请求（3 秒内 ${changes} 次）。`,
     );
+    const notes = b.instances.filter((item: any) => item.type === "text");
+    assert.ok(notes.length >= 2, "连线需要两张便签。");
+    const sourceCard = frame.locator(
+      '[data-instance-id="' + notes[0].id + '"]',
+    );
+    const targetCard = frame.locator(
+      '[data-instance-id="' + notes[1].id + '"]',
+    );
+    await sourceCard.locator('[aria-label="拖出关系"]').dragTo(targetCard);
+    await frame
+      .getByRole("dialog", { name: "选择关系" })
+      .getByRole("button", { name: "相关", exact: true })
+      .click();
+    const related = await call("sand_read", {
+      ids: [notes[0].objectId],
+      include: ["relations"],
+    });
+    assert.ok(
+      (related.objects?.[0]?.relations ?? []).some(
+        (relation: { kind?: string; otherId?: string }) =>
+          relation.kind === "base.related" &&
+          relation.otherId === notes[1].objectId,
+      ),
+      "Connecting two cards and choosing 相关 creates base.related.",
+    );
+    await frame.getByRole("button", { name: "缩小", exact: true }).click();
+    await frame.getByRole("button", { name: "缩小", exact: true }).click();
+    await page.waitForTimeout(1200);
+    const zoomLabel = (await frame.locator(".zoom span").innerText()).trim();
+    await page.reload();
+    await frame.locator(".zoom span").waitFor();
+    await frame.locator(".component-card").first().waitFor({ timeout: 30000 });
+    let restored = "";
+    for (let i = 0; i < 40; i++) {
+      restored = (await frame.locator(".zoom span").innerText()).trim();
+      if (restored === zoomLabel) break;
+      await page.waitForTimeout(150);
+    }
+    assert.equal(
+      restored,
+      zoomLabel,
+      "Reopening the board restores the viewport.",
+    );
+    await page.setViewportSize({ width: 1440, height: 1000 });
     /* 导出再导入：文件能下来，导入后能切到新工作空间并看到原来的组件。 */
     await page.setViewportSize({ width: 1440, height: 1000 });
     await frame.getByRole("button", { name: "设置", exact: true }).click();

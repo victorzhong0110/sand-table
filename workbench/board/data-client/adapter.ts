@@ -219,6 +219,8 @@ export function v3TypeOf(
 
 /** 现有连线类型 → v3 关系类型。 */
 export function v3LinkOf(v2Kind: string): string {
+  /* 已经是「包.关系」的名字原样进内核。未知的短名字仍落到「相关」。 */
+  if (v2Kind.includes(".")) return v2Kind;
   return V3_LINK_BY_V2[v2Kind] ?? "base.related";
 }
 
@@ -325,9 +327,11 @@ function toInstance(
       width: row.width,
       height: row.height,
       /* v3 的 locked（锁住）与现有界面的固定位置是一回事：
-         位置被锁住时界面显示成「位置已固定」，移动时先解锁再移动。 */
+         锁住的展示不能拖动，也不能改尺寸。 */
       pinned: row.locked,
     },
+    ...(row.parentId ? { parentId: row.parentId } : {}),
+    z: row.z,
     updatedAt: row.updatedAt,
     author: row.updatedBy,
   };

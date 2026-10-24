@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
 import type { Board, Item, GuideFocus } from "./data-client/model.ts";
 import "./style.css";
-import { SpaceCanvas } from "./SpaceCanvas.tsx";
+import { FlowCanvas } from "./canvas/FlowCanvas.tsx";
 import { ChangePanel } from "./ChangePanel.tsx";
 import { ComponentPanel, ThemePanel } from "./ComponentPanel.tsx";
 import { safeUrl } from "./data-client/spaces.ts";
@@ -65,8 +65,22 @@ function readableError(error: unknown): string {
   }
   return raw;
 }
+function storedViewId() {
+  const key = "sand-table-view";
+  try {
+    const existing = sessionStorage.getItem(key);
+    if (existing) return existing;
+    const created = crypto.randomUUID();
+    sessionStorage.setItem(key, created);
+    return created;
+  } catch {
+    return crypto.randomUUID();
+  }
+}
+
 function Workbench() {
-  const [viewId] = useState(() => crypto.randomUUID());
+  /* 同一浏览器会话复用视角编号，关闭再打开才能读回上次的镜头。 */
+  const [viewId] = useState(storedViewId);
   const [tab, setTab] = useState("inspect");
   const [, hostChanged] = useState(0);
   const [hostTask, setHostTask] = useState<HostTaskEvent>();
@@ -359,6 +373,8 @@ function Workbench() {
         throw Error(
           "v3 内核的工作空间就是数据库文件，没有「保留副本并重新加载」这一步。",
         );
+      case "app_view":
+        return callTool("app_view", args);
       case "sand_open_view":
         /* 视角由界面自己掌握：v3 的 app_view 只在没有 app_view 接口时用。 */
         return { viewId };
@@ -1233,7 +1249,7 @@ function Workbench() {
         </div>
       )}
       <div className="layout">
-        <SpaceCanvas
+        <FlowCanvas
           board={board}
           viewId={viewId}
           mode={mode}
