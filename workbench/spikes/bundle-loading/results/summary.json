@@ -1,6 +1,6 @@
 {
   "sizes": {
-    "commit": "34462b471bf7dbb733eb0cf2ba8e15df48a36ab7",
+    "commit": "e026ed31e8fe67dca3c4aaf113ee18008bafb71f",
     "node": "v22.23.4",
     "gzip": "node:zlib gzipSync 默认级别 6",
     "versions": {
@@ -85,8 +85,8 @@
       },
       "chunkApi": {
         "file": "pdf-runner.js",
-        "raw": 429251,
-        "gzip": 129662
+        "raw": 429559,
+        "gzip": 129749
       },
       "chunkWorker": {
         "file": "pdf-worker.js",
@@ -184,7 +184,7 @@
         },
         "dynamicImportBlob": {
           "ok": false,
-          "error": "TypeError: Failed to fetch dynamically imported module: blob:null/11cfe547-0555-48f9-944d-3761389367ee"
+          "error": "TypeError: Failed to fetch dynamically imported module: blob:null/0a85363a-341d-4a29-bf25-b6272ebfd5c5"
         },
         "fetchHttps": {
           "ok": false,
@@ -203,7 +203,7 @@
           "error": "Error: No \"GlobalWorkerOptions.workerSrc\" specified.",
           "errors": []
         },
-        "parentOrigin": "Failed to read a named property 'origin' from 'Location': Blocked a frame with origin \"http://127.0.0.1:36345\" from accessing a cross-origin frame.",
+        "parentOrigin": "Failed to read a named property 'origin' from 'Location': Blocked a frame with origin \"http://127.0.0.1:44001\" from accessing a cross-origin frame.",
         "sandboxAttr": "allow-scripts"
       },
       {
@@ -280,7 +280,7 @@
         },
         "dynamicImportBlob": {
           "ok": false,
-          "error": "TypeError: Failed to fetch dynamically imported module: blob:null/e33229fc-2bb6-4c89-a1dc-63d7fd5a2fc5"
+          "error": "TypeError: Failed to fetch dynamically imported module: blob:null/cf9bd616-e4ca-4358-ba0a-31eabe25f196"
         },
         "fetchHttps": {
           "ok": false,
@@ -299,9 +299,11 @@
           "pages": 1,
           "text": "Hello",
           "rendered": true,
+          "pageDark": 445,
+          "blankDark": 0,
           "renderError": ""
         },
-        "parentOrigin": "Failed to read a named property 'origin' from 'Location': Blocked a frame with origin \"http://127.0.0.1:36345\" from accessing a cross-origin frame.",
+        "parentOrigin": "Failed to read a named property 'origin' from 'Location': Blocked a frame with origin \"http://127.0.0.1:44001\" from accessing a cross-origin frame.",
         "sandboxAttr": "allow-scripts"
       },
       {
@@ -378,7 +380,7 @@
         },
         "dynamicImportBlob": {
           "ok": false,
-          "error": "TypeError: Failed to fetch dynamically imported module: blob:null/a0a075a9-2a32-492b-b39a-37b672e742aa"
+          "error": "TypeError: Failed to fetch dynamically imported module: blob:null/fdd0407d-5c43-4b6a-a29f-2a5238cd31c3"
         },
         "fetchHttps": {
           "ok": false,
@@ -392,7 +394,7 @@
           "ok": false,
           "error": "Error: worker error event"
         },
-        "parentOrigin": "Failed to read a named property 'origin' from 'Location': Blocked a frame with origin \"http://127.0.0.1:36345\" from accessing a cross-origin frame.",
+        "parentOrigin": "Failed to read a named property 'origin' from 'Location': Blocked a frame with origin \"http://127.0.0.1:44001\" from accessing a cross-origin frame.",
         "sandboxAttr": "allow-scripts"
       },
       {
@@ -461,7 +463,7 @@
         },
         "dynamicImportBlob": {
           "ok": false,
-          "error": "TypeError: Failed to fetch dynamically imported module: blob:null/46de99f0-3794-458d-96f9-60243b4f0cc4"
+          "error": "TypeError: Failed to fetch dynamically imported module: blob:null/c48e15be-0497-419c-adda-ea42ea8f36db"
         },
         "fetchHttps": {
           "ok": false,
@@ -474,7 +476,7 @@
           "ok": false,
           "error": "Error: worker error event"
         },
-        "parentOrigin": "Failed to read a named property 'origin' from 'Location': Blocked a frame with origin \"http://127.0.0.1:36345\" from accessing a cross-origin frame.",
+        "parentOrigin": "Failed to read a named property 'origin' from 'Location': Blocked a frame with origin \"http://127.0.0.1:44001\" from accessing a cross-origin frame.",
         "sandboxAttr": "allow-scripts"
       },
       {
@@ -596,7 +598,7 @@
       }
     },
     "localHost": {
-      "origin": "http://127.0.0.1:46523",
+      "origin": "http://127.0.0.1:46831",
       "boardRendered": true,
       "csp": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; connect-src 'none'",
       "viewBridge": {

@@ -27,6 +27,14 @@ if (!localPdf?.classicInline?.ok) {
 if (!localPdf.pdf?.ok || !String(localPdf.pdf.text).includes("Hello")) {
   throw new Error(`主线程 pdf.js 没有读出 Hello：${JSON.stringify(localPdf.pdf)}`);
 }
+if (
+  !(
+    localPdf.pdf.rendered === true &&
+    localPdf.pdf.pageDark > localPdf.pdf.blankDark + 20
+  )
+) {
+  throw new Error(`PDF 没有画出深色字形：${JSON.stringify(localPdf.pdf)}`);
+}
 
 const sdk = await probeSdk();
 const localHost = await probeLocalHost();

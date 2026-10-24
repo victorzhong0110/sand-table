@@ -1,5 +1,5 @@
 {
-  "commit": "34462b471bf7dbb733eb0cf2ba8e15df48a36ab7",
+  "commit": "e026ed31e8fe67dca3c4aaf113ee18008bafb71f",
   "node": "v22.23.4",
   "gzip": "node:zlib gzipSync 默认级别 6",
   "versions": {
@@ -84,8 +84,8 @@
     },
     "chunkApi": {
       "file": "pdf-runner.js",
-      "raw": 429251,
-      "gzip": 129662
+      "raw": 429559,
+      "gzip": 129749
     },
     "chunkWorker": {
       "file": "pdf-worker.js",

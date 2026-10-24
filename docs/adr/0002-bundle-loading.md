@@ -100,7 +100,7 @@ DeepSeek Harness 未测。`workbench/dsh-plugin/client.js` 把 iframe 指到本�
 
 不设置 `GlobalWorkerOptions.workerSrc`，也不调用 `new Worker`。worker 块执行后写 `globalThis.pdfjsWorker`。pdf.js 看到 `pdfjsWorker.WorkerMessageHandler` 就走主线程假 worker，不再读 `workerSrc`。没有这份全局对象时，`getDocument` 直接抛出 `No "GlobalWorkerOptions.workerSrc" specified.`，不会自己退回主线程。
 
-调用参数：`disableFontFace: true`、`isEvalSupported: false`、`useSystemFonts: false`。在本地 CSP 和 `sandbox="allow-scripts"` 下，一页只含 Helvetica 单词 Hello 的 PDF 读出了 `Hello`，并且画到 canvas 上（非透明像素超过 20 个）。没有网络请求，也没有 `unsafe-eval`。
+调用参数：`disableFontFace: true`、`isEvalSupported: false`、`useSystemFonts: false`。在本地 CSP 和 `sandbox="allow-scripts"` 下，一页只含 Helvetica 单词 Hello 的 PDF 读出了 `Hello`。pdf.js 会先把页面涂白，白底的 RGB 也大于 0，所以不能拿非零像素当画出了字形。对照是一张同样尺寸、只填 `#ffffff` 的空白画布：它的深色像素（不透明且任一通道小于 200）是 0，Hello 页是 445。多出的深色像素超过 20 才算画成功。没有网络请求，也没有 `unsafe-eval`。
 
 这只证明了这一页。标准字体、CMap、含脚本的 PDF 没有测。T45 若需要字体，把字体字节打进块里，不能 `fetch`。`createPdfWorker()` 表示「worker 块已经在主线程就位」，`destroy()` 只释放引用和 pdf.js 的 loading task；没有 `Worker` 可以 `terminate`。块的顺序必须是 worker，然后才是 API。
 
