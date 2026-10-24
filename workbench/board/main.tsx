@@ -21,7 +21,13 @@ import {
 } from "../core/host-bridge.ts";
 import { installHostBridgeClient } from "./host-bridge-client.ts";
 import { V3Store, isUnknownToolError } from "./v3/store.ts";
-import { toBoard, toCommands, v3RetryInfo, type V3View } from "./v3/adapter.ts";
+import {
+  toBoard,
+  toCommands,
+  toReportedActivities,
+  v3RetryInfo,
+  type V3View,
+} from "./v3/adapter.ts";
 import type { HostTaskEvent, WorkspaceDescriptor } from "../core/objects.ts";
 const relationLabels = {
   contains: "包含",
@@ -57,6 +63,7 @@ function Workbench() {
   const storeRef = useRef<V3Store | undefined>(undefined);
   /* v3 的活动报告：内核的活动表不在增量集里，只能单独读一次。 */
   const activitiesRef = useRef<Board["activities"]>([]);
+  const spaceActivitiesRef = useRef<Board["spaceActivities"]>([]);
   /* v3 的视角由界面自己掌握：内核的 views 表没有读接口（见 T20 的说明）。 */
   const viewRef = useRef<V3View>({
     id: viewId,
@@ -216,6 +223,7 @@ function Workbench() {
       boardId: store.cache.boardId,
       view: v3View(),
       activities: activitiesRef.current,
+      spaceActivities: spaceActivitiesRef.current,
     });
   }
   /** 缓存变了就把界面拉回来。 */
@@ -831,15 +839,12 @@ function Workbench() {
     if (kernel !== "v3") return;
     const readActivities = async () => {
       const data: any = await callTool("app_activity", { action: "list" });
-      activitiesRef.current = (data?.activities ?? []).map((activity: any) => ({
-        agentId: String(activity.actor ?? ""),
-        workspaceId: "",
-        objectIds: activity.objectIds ?? [],
-        task: String(activity.task ?? ""),
-        action: String(activity.action ?? ""),
-        state: activity.state ?? "unknown",
-        reportedAt: activity.reportedAt ?? 0,
-      }));
+      const reported = toReportedActivities(
+        data?.activities ?? [],
+        storeRef.current?.cache.presentations.values() ?? [],
+      );
+      activitiesRef.current = reported.activities;
+      spaceActivitiesRef.current = reported.spaceActivities;
       refreshV3Board();
     };
     const timer = setInterval(() => {

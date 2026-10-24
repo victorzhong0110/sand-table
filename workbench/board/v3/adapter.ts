@@ -8,7 +8,12 @@
 // base.code_snippet → code，novel.* / research.* 走现有的领域兜底分支，
 // 其余未知类型走现有的「未知组件」占位。
 
-import type { Board } from "../../core/model.ts";
+import type {
+  Activity,
+  Board,
+  ComponentPack,
+  SpaceActivity,
+} from "../../core/model.ts";
 import { componentTypes, defaultData } from "../../core/spaces.ts";
 import type {
   Camera,
@@ -17,7 +22,6 @@ import type {
   SpaceLink,
   ThemeConfig,
 } from "../../core/spaces.ts";
-import type { ComponentPack } from "../../core/model.ts";
 import type { ObjectRelation, WorkspaceObject } from "../../core/objects.ts";
 import type {
   V3Cache,
@@ -396,6 +400,72 @@ export type V3View = {
   updatedAt: number;
 };
 
+const ACTIVITY_STATES = new Set(["running", "waiting", "done", "unknown"]);
+
+/** app_activity 的一行。只取界面用得上的字段。 */
+export type ReportedActivity = {
+  actor?: unknown;
+  state?: unknown;
+  task?: unknown;
+  action?: unknown;
+  boardId?: unknown;
+  objectIds?: unknown;
+  reportedAt?: unknown;
+};
+
+/**
+ * 活动报告 → 现有界面的两份列表。
+ *
+ * 徽标读 activities；「AI 编排」面板和卡片上的标记读 spaceActivities。
+ * 活动只标对象编号，面板上的「查看」要的是展示编号，这里按对象对上。
+ */
+export function toReportedActivities(
+  rows: readonly ReportedActivity[],
+  presentations: Iterable<V3PresentationRow>,
+): { activities: Activity[]; spaceActivities: SpaceActivity[] } {
+  const live = [...presentations].filter((row) => !row.deleted);
+  const activities: Activity[] = [];
+  const spaceActivities: SpaceActivity[] = [];
+  for (const row of rows) {
+    const state =
+      typeof row.state === "string" && ACTIVITY_STATES.has(row.state)
+        ? (row.state as Activity["state"])
+        : "unknown";
+    const objectIds = Array.isArray(row.objectIds)
+      ? row.objectIds.filter((id): id is string => typeof id === "string")
+      : [];
+    const spaceId = typeof row.boardId === "string" ? row.boardId : "";
+    const reportedAt =
+      typeof row.reportedAt === "number" && Number.isFinite(row.reportedAt)
+        ? row.reportedAt
+        : 0;
+    const shared = {
+      agentId: String(row.actor ?? ""),
+      task: String(row.task ?? ""),
+      action: String(row.action ?? ""),
+      state,
+      reportedAt,
+      stale: false,
+    };
+    activities.push({ ...shared, workspaceId: "", objectIds });
+    const onBoard = spaceId
+      ? live.filter(
+          (item) =>
+            item.boardId === spaceId && objectIds.includes(item.objectId),
+        )
+      : [];
+    const matched = onBoard.length
+      ? onBoard
+      : live.filter((item) => objectIds.includes(item.objectId));
+    spaceActivities.push({
+      ...shared,
+      spaceId,
+      instanceIds: matched.map((item) => item.id),
+    });
+  }
+  return { activities, spaceActivities };
+}
+
 /**
  * 缓存 → 现有的白板。
  *
@@ -409,8 +479,10 @@ export function toBoard(
     boardId: string;
     /** 界面的视角（选择与镜头由界面自己掌握）。 */
     view: V3View;
-    /** 活动报告：Agent 在哪里。 */
+    /** 活动报告：Agent 在哪里。徽标读这一份。 */
     activities?: Board["activities"];
+    /** 活动报告：AI 面板和卡片标记读这一份。 */
+    spaceActivities?: Board["spaceActivities"];
   },
 ): Board {
   const presentations = [...cache.presentations.values()].filter(
@@ -483,7 +555,7 @@ export function toBoard(
     notes: {},
     groups: [],
     activities: options.activities ?? [],
-    spaceActivities: [],
+    spaceActivities: options.spaceActivities ?? [],
     explanations: [],
     guides: [],
     spaces,

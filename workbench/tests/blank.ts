@@ -1115,9 +1115,10 @@ try {
      不依赖界面自己那一套读法。 */
   if (v3) {
     b = await read();
-    const current = (await call("app_view", { action: "get" })).board?.id;
+    /* app_view 的 get 必须带界面自己的视角编号，测试拿不到那个随机编号。
+       read() 已经按当前视角装载了这块白板，核对就用同一块。 */
     const rows: any = await call("sand_query", {
-      boardId: current ?? boardId,
+      boardId: b.id,
       types: ["base.note"],
       limit: 50,
     });
