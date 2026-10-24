@@ -21,10 +21,11 @@
 - 代码注释只写代码本身表达不了的约束。不要写“根据任务卡”“这次修改是为了……”这类给审查者看的话。
 - 界面和错误信息用中文，具体到能指导用户下一步怎么做。
 - PR 描述如实写没做到的部分。issue 和 PR 描述要短，写现象、做法、结果；不要写“未宣称”“关闭不等于修复”之类的固定段落。
+- 每次提交都在说明最后一行署名。grok 写 `G`，minimax 写 `M`，chatgpt 写 `C`。作者字段仍用下面的账号，不要改成模型名。
 
 ## 提交身份
 
-所有提交的作者和提交者都必须是 `victorzhong0110 <victorzhong0110@gmail.com>`。用本次命令的环境变量设置，**不要修改 git config**：
+所有提交的作者和提交者都必须是 `victorzhong0110 <victorzhong0110@gmail.com>`。GitHub 上只能看到这个账号，不能靠作者名区分是谁写的。用本次命令的环境变量设置，**不要修改 git config**：
 
 ```bash
 GIT_AUTHOR_NAME=victorzhong0110 GIT_AUTHOR_EMAIL=victorzhong0110@gmail.com \
@@ -32,7 +33,21 @@ GIT_COMMITTER_NAME=victorzhong0110 GIT_COMMITTER_EMAIL=victorzhong0110@gmail.com
 git commit -m "说明"
 ```
 
-提交说明里不能有 `Co-authored-by`。推送前运行 `git log -1 --format=%B` 检查；如果工具或钩子自动加上了，用 `git commit --amend` 删掉（同样带上面的环境变量）再推送。
+提交说明的最后一行单独写署名，前后不要加别的字：
+
+| 谁写的 | 署名 |
+|---|---|
+| grok | `G` |
+| minimax | `M` |
+| chatgpt | `C` |
+
+```text
+fix: 说明改了什么
+
+G
+```
+
+提交说明里不能有 `Co-authored-by`。推送前运行 `git log -1 --format=%B` 检查：最后一行是上表里的一个字母；如果工具或钩子自动加上了 `Co-authored-by`，用 `git commit --amend` 删掉（同样带上面的环境变量，并保留署名）再推送。
 
 ## 常用命令
 
