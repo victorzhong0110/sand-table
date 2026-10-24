@@ -135,7 +135,25 @@ export async function startLocal(options: {
   };
   const primary = async () => {
     // v3 的工作空间启动时就打开了首页白板，没有「再打开一块板」这一步。
-    if (process.env.SAND_KERNEL === "v3") return null;
+    if (process.env.SAND_KERNEL === "v3") {
+      const r = await client.callTool({
+        name: "sand_status",
+        arguments: {},
+      });
+      if (r.isError)
+        throw Error(
+          (r.content as any)?.[0]?.text || "Cannot open the workspace.",
+        );
+      /* 界面启动时也要一个白板编号：v3 的首页白板在打开工作空间时就已经存在。 */
+      const data = (r as any).structuredContent?.data ?? {};
+      return {
+        ...r,
+        _meta: {
+          ...((r as any)._meta ?? {}),
+          data: { ...data, id: data.homeBoardId },
+        },
+      };
+    }
     if (primaryBoardId) {
       const r = await client.callTool({
         name: "sand_read_board",

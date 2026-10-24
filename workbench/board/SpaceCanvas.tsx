@@ -63,6 +63,8 @@ export function SpaceCanvas({
           /** 编辑开始时看到的那份内容：提交时作为基线，冲突才认得出来。 */
           baseTitle: string;
           baseData: Record<string, unknown>;
+          /** 编辑开始时对象的那一版：写回时带上，别把别人的改动盖掉。 */
+          version?: number;
         }
       | undefined
     >(),
@@ -325,6 +327,8 @@ export function SpaceCanvas({
         field === "text" ? String(resolved.data.text ?? "") : resolved.title,
       baseTitle: resolved.title,
       baseData: resolved.data,
+      /* 记下开始编辑时对象的那一版：写回时带上它。 */
+      version: b.contentObjects.find((o) => o.id === c.objectId)?.version,
     });
     if (!view?.selection.includes(c.id)) void changeSelection([c.id]);
   };
@@ -351,6 +355,9 @@ export function SpaceCanvas({
             instanceId: c.id,
             title: edit.value.slice(0, 120),
             baseTitle: edit.baseTitle,
+            ...(edit.version !== undefined
+              ? { expectedVersion: edit.version }
+              : {}),
             intentId: editIntent(c.id),
           }
         : {
@@ -358,6 +365,9 @@ export function SpaceCanvas({
             instanceId: c.id,
             data: { ...edit.baseData, text: edit.value },
             baseData: edit.baseData,
+            ...(edit.version !== undefined
+              ? { expectedVersion: edit.version }
+              : {}),
             intentId: editIntent(c.id),
           };
     const result = await operate(op);

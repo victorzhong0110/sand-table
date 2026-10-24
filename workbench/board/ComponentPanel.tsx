@@ -396,10 +396,35 @@ function ComponentEditor({
   };
   /** 写回一次。成功返回 true；失败保留草稿并把原因说清楚。 */
   const commit = async (): Promise<boolean> => {
+    /* 一次只写一笔：写的时候再来一次（失焦与自动保存撞在一起），
+       记下来等这一笔写完再写。否则两笔会拿着同一个版本号，
+       后一笔要么白写一次，要么跟内核撞版本。 */
+    if (writing.current) {
+      writeAgain.current = true;
+      return true;
+    }
+    writing.current = true;
+    try {
+      return await writeOnce();
+    } finally {
+      writing.current = false;
+      if (writeAgain.current) {
+        writeAgain.current = false;
+        void commit();
+      }
+    }
+  };
+  const writing = useRef(false);
+  const writeAgain = useRef(false);
+  const writeOnce = async (): Promise<boolean> => {
     clearTimeout(timer.current);
     const paths = Object.keys(edits.current);
     const titleChanged = titleRef.current !== startTitle.current;
     if (!paths.length && !titleChanged) return true;
+    /* 这次写回带出去的值：写回期间人又改过的字段不算写成功了，
+       排队的下一笔还得看得见那些改动。 */
+    const written: Record<string, unknown> = { ...edits.current };
+    const writtenTitle = titleRef.current;
     const op: any = {
       kind: "update",
       instanceId: c.id,
@@ -432,11 +457,14 @@ function ComponentEditor({
       return false;
     }
     for (const path of paths) {
+      /* 人在这笔写回期间又改过这个字段：改动留着，下一笔再写。 */
+      if (!sameValue(edits.current[path], written[path])) continue;
       delete edits.current[path];
       delete starts.current[path];
       delete labels.current[path];
     }
-    if (titleChanged) startTitle.current = titleRef.current;
+    if (titleChanged && titleRef.current === writtenTitle)
+      startTitle.current = writtenTitle;
     /* 服务端把对象版本加了一：下一次保存要用新版本。 */
     if (version.current !== undefined) version.current += 1;
     setFailure("");
