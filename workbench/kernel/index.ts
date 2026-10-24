@@ -88,3 +88,5 @@ export type { OpenWorkspaceResult } from "./workspace.ts";
 export { importV2 } from "./legacy/import-v2.ts";
 export type { ImportReport, ImportSkipped } from "./legacy/import-v2.ts";
 export { toObjectRow, toPresentationRow, toRelationRow } from "./rows.ts";
+export { migrateData, migrateRow } from "./migrate.ts";
+export type { MigratedObjectRow, MigrationResult } from "./migrate.ts";

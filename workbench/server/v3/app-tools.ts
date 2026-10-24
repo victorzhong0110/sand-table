@@ -65,7 +65,7 @@ export function registerAppTools(
     (args, ctx) => {
       const session = host.session();
       assertSameWorkspace(session.workspaceId, args.workspaceId);
-      const contents = boardContents(ctx.db, args.boardId);
+      const contents = boardContents(ctx.db, ctx.registry, args.boardId);
       return toolValue(
         {
           workspaceId: session.workspaceId,
@@ -91,7 +91,7 @@ export function registerAppTools(
     (args, ctx) => {
       const session = host.session();
       assertSameWorkspace(session.workspaceId, args.workspaceId);
-      const changes = changesSince(ctx.db, args.since);
+      const changes = changesSince(ctx.db, ctx.registry, args.since);
       if ("reset" in changes)
         return toolValue(
           {
