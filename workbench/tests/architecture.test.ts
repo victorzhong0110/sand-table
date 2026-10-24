@@ -270,9 +270,18 @@ function checkKernelImports(files: SourceFile[]): Violation[] {
 
 /**
  * 代码包要解析 TypeScript，并用 zod 描述工具参数。
- * 这两个依赖的版本钉在 workbench/package.json，不向其他包放开。
+ * 科研包用同一份 zod 描述工具参数，并用钉死版本的 pdfjs-dist 读 PDF。
+ * 这些依赖的版本钉在 workbench/package.json，不向其他包放开。
  */
-const PACK_DEPENDENCIES = new Set(["typescript", "zod"]);
+function packDependencyAllowed(pack: string, spec: string): boolean {
+  const allowed: Record<string, string[]> = {
+    code: ["typescript", "zod"],
+    research: ["zod", "pdfjs-dist"],
+  };
+  return (allowed[pack] ?? []).some(
+    (name) => spec === name || spec.startsWith(`${name}/`),
+  );
+}
 
 /** 规则 2：包只依赖内核。 */
 function checkPackImports(files: SourceFile[]): Violation[] {
@@ -285,10 +294,7 @@ function checkPackImports(files: SourceFile[]): Violation[] {
     const isList = segments.length === 2;
     for (const { spec, line } of importSpecifiers(file)) {
       if (!spec.startsWith(".")) {
-        if (
-          !spec.startsWith("node:") &&
-          !(pack === "code" && PACK_DEPENDENCIES.has(spec))
-        )
+        if (!spec.startsWith("node:") && !packDependencyAllowed(pack, spec))
           violations.push({
             file: file.path,
             line,

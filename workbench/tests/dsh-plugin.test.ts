@@ -4,14 +4,13 @@
 // X7（两端代码语法可解析）。
 //
 // 这里**不启动 DSH**：本沙箱没有 DSH，装不了也跑不起来。
-// 运行时行为（槽位注册、工具被模型调用、命令被客户端调到）一律未验证，
-// 逐条清单在 dsh-plugin/README.md 的「未验证项」里。
+// 槽位注册和会话命令被宿主调到仍未验证。工具转调用假的 MCP 客户端核对。
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { join } from "node:path";
 
 const pluginDir = fileURLToPath(new URL("../dsh-plugin/", import.meta.url));
@@ -160,4 +159,320 @@ test("X7：Host 半导出 apply，并且不 import 宿主包", () => {
       specifier.startsWith("node:") || specifier === "./tasks.js",
       `运行时代码不 import ${specifier}（不引宿主包、不引第三方包）`,
     );
+});
+
+test("对外工具名不变", () => {
+  const host = readPlugin("index.js");
+  for (const name of [
+    "sand_table_list_boards",
+    "sand_table_read_board",
+    "sand_table_read_object",
+    "sand_table_edit_space",
+  ])
+    assert.match(host, new RegExp(`name: "${name}"`));
+});
+
+type PluginOperations = {
+  listBoards: () => Promise<{ boards: Record<string, unknown>[] }>;
+  readBoard: (
+    boardId?: string,
+    offset?: number,
+  ) => Promise<Record<string, unknown>>;
+  readObject: (
+    boardId?: string,
+    objectId?: string,
+  ) => Promise<Record<string, unknown>>;
+  editSpace: (args: Record<string, unknown>) => Promise<unknown>;
+};
+
+async function loadPlugin() {
+  const href = pathToFileURL(join(pluginDir, "index.js")).href;
+  return (await import(href)) as {
+    createOperations: (
+      mcp: {
+        callTool: (
+          name: string,
+          args: Record<string, unknown>,
+        ) => Promise<unknown>;
+      },
+      kernel?: string,
+    ) => PluginOperations;
+  };
+}
+
+function recorded(
+  plugin: Awaited<ReturnType<typeof loadPlugin>>,
+  kernel: string | undefined,
+  reply: (name: string, args: Record<string, unknown>) => unknown,
+) {
+  const calls: { name: string; args: Record<string, unknown> }[] = [];
+  const ops = plugin.createOperations(
+    {
+      async callTool(name: string, args: Record<string, unknown>) {
+        calls.push({ name, args });
+        return reply(name, args);
+      },
+    },
+    kernel,
+  );
+  return { calls, ops };
+}
+
+function statusReply(revision: number, boards: unknown[] = []) {
+  return {
+    structuredContent: {
+      data: { workspace: { revision }, boards },
+    },
+  };
+}
+
+test("SAND_KERNEL=v3 时四个操作转调 v3 工具", async () => {
+  const plugin = await loadPlugin();
+  const listed = recorded(plugin, "v3", () =>
+    statusReply(2, [{ id: "home", title: "首页", presentations: 3 }]),
+  );
+  const boards = await listed.ops.listBoards();
+  assert.deepEqual(
+    listed.calls.map((call) => call.name),
+    ["sand_status"],
+  );
+  assert.deepEqual(boards.boards, [
+    {
+      boardId: "home",
+      id: "home",
+      title: "首页",
+      revision: 2,
+      objectCount: 3,
+    },
+  ]);
+
+  const empty = recorded(plugin, "v3", () => statusReply(1, []));
+  assert.deepEqual((await empty.ops.listBoards()).boards, []);
+  assert.deepEqual(
+    empty.calls.map((call) => call.name),
+    ["sand_status"],
+  );
+
+  const board = recorded(plugin, "v3", () => ({
+    structuredContent: {
+      data: {
+        rows: [{ id: "n1", title: "便签" }],
+        total: 4,
+        nextCursor: "x",
+      },
+    },
+  }));
+  const page = await board.ops.readBoard("board-1", 50);
+  assert.deepEqual(board.calls, [
+    {
+      name: "sand_query",
+      args: {
+        boardId: "board-1",
+        cursor: Buffer.from("50").toString("base64url"),
+      },
+    },
+  ]);
+  assert.equal((page.objects as unknown[]).length, 1);
+  assert.equal(page.total, 4);
+
+  const object = recorded(plugin, "v3", () => ({
+    structuredContent: {
+      data: { objects: [{ id: "n1", title: "便签", type: "base.note" }] },
+    },
+  }));
+  const read = await object.ops.readObject("board-1", "n1");
+  assert.deepEqual(object.calls, [
+    { name: "sand_read", args: { ids: ["n1"] } },
+  ]);
+  assert.equal(read.boardId, "board-1");
+  assert.equal(read.id, "n1");
+
+  const created = recorded(plugin, "v3", (name) =>
+    name === "sand_status"
+      ? statusReply(4)
+      : { structuredContent: { data: { ok: true } } },
+  );
+  await created.ops.editSpace({
+    boardId: "board-1",
+    viewId: "view-1",
+    revision: 4,
+    operation: JSON.stringify({
+      kind: "create",
+      type: "text",
+      title: "便签",
+      data: { text: "你好" },
+      rect: { x: 10, y: 20, width: 280, height: 180, pinned: true },
+    }),
+  });
+  assert.deepEqual(
+    created.calls.map((call) => call.name),
+    ["sand_status", "sand_edit"],
+  );
+  assert.deepEqual(created.calls[1]?.args.commands, [
+    {
+      op: "object.create",
+      ref: "created",
+      type: "base.note",
+      title: "便签",
+      data: { body: "你好" },
+    },
+    {
+      op: "presentation.create",
+      boardId: "board-1",
+      objectId: "@created",
+      x: 10,
+      y: 20,
+      width: 280,
+      height: 180,
+      locked: true,
+    },
+  ]);
+
+  const selected = recorded(plugin, "v3", (name) =>
+    name === "sand_status"
+      ? statusReply(4)
+      : { structuredContent: { data: { ok: true } } },
+  );
+  await selected.ops.editSpace({
+    boardId: "board-1",
+    viewId: "view-1",
+    revision: 4,
+    operation: JSON.stringify({ kind: "select", ids: ["p1"] }),
+  });
+  assert.deepEqual(selected.calls[1], {
+    name: "app_view",
+    args: {
+      action: "select",
+      viewId: "view-1",
+      boardId: "board-1",
+      selection: ["p1"],
+    },
+  });
+
+  const undone = recorded(plugin, "v3", (name) =>
+    name === "sand_status"
+      ? statusReply(4)
+      : { structuredContent: { data: { ok: true } } },
+  );
+  await undone.ops.editSpace({
+    boardId: "board-1",
+    viewId: "view-1",
+    revision: 4,
+    operation: JSON.stringify({ kind: "undo" }),
+  });
+  assert.deepEqual(undone.calls[1], {
+    name: "sand_history",
+    args: { action: "undo" },
+  });
+
+  const related = recorded(plugin, "v3", (name) =>
+    name === "sand_status"
+      ? statusReply(4)
+      : { structuredContent: { data: { ok: true } } },
+  );
+  await related.ops.editSpace({
+    boardId: "board-1",
+    viewId: "view-1",
+    revision: 4,
+    operation: JSON.stringify({
+      kind: "relate",
+      source: "a",
+      target: "b",
+      relation: "supports",
+      status: "confirmed",
+      basis: "实验",
+    }),
+  });
+  const relateCommands = related.calls[1]?.args.commands as {
+    kind: string;
+    basis: string;
+  }[];
+  assert.equal(relateCommands[0]?.kind, "base.supports");
+  assert.equal(relateCommands[0]?.basis, "实验");
+
+  const updated = recorded(plugin, "v3", (name) => {
+    if (name === "sand_status") return statusReply(4);
+    if (name === "app_board")
+      return {
+        structuredContent: { data: { revision: 4 } },
+        _meta: {
+          data: {
+            presentations: [{ id: "p1", objectId: "o1" }],
+            objects: [{ id: "o1", type: "base.note" }],
+          },
+        },
+      };
+    return { structuredContent: { data: { ok: true } } };
+  });
+  await updated.ops.editSpace({
+    boardId: "board-1",
+    viewId: "view-1",
+    revision: 4,
+    operation: JSON.stringify({
+      kind: "update",
+      instanceId: "p1",
+      title: "新标题",
+      data: { text: "正文" },
+    }),
+  });
+  assert.deepEqual(
+    updated.calls.map((call) => call.name),
+    ["sand_status", "app_board", "sand_edit"],
+  );
+  assert.deepEqual(updated.calls[2]?.args.commands, [
+    {
+      op: "object.update",
+      id: "o1",
+      title: "新标题",
+      set: { body: "正文" },
+    },
+  ]);
+
+  const stale = recorded(plugin, "v3", () => statusReply(1));
+  await assert.rejects(
+    () =>
+      stale.ops.editSpace({
+        boardId: "board-1",
+        viewId: "view-1",
+        revision: 4,
+        operation: JSON.stringify({ kind: "undo" }),
+      }),
+    /已经变了/,
+  );
+  assert.deepEqual(
+    stale.calls.map((call) => call.name),
+    ["sand_status"],
+  );
+});
+
+test("内核不是 v3 时仍调用 v2 工具", async () => {
+  const plugin = await loadPlugin();
+  let listed = 0;
+  const calls: string[] = [];
+  const ops = plugin.createOperations(
+    {
+      async callTool(name: string) {
+        calls.push(name);
+        if (name === "sand_list_boards") {
+          listed += 1;
+          return {
+            structuredContent: {
+              data: { boards: listed === 1 ? [] : [{ id: "b" }] },
+            },
+          };
+        }
+        return { structuredContent: { data: { id: "n1" } } };
+      },
+    },
+    "v2",
+  );
+  const boards = await ops.listBoards();
+  assert.deepEqual(calls, [
+    "sand_list_boards",
+    "sand_open_board",
+    "sand_list_boards",
+  ]);
+  assert.equal(boards.boards.length, 1);
+  await ops.readObject("board-1", "n1");
+  assert.equal(calls.at(-1), "sand_read_object");
 });

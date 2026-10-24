@@ -7,6 +7,7 @@
 // 字段限制从 v2 的 workbench/domains/research/index.ts 搬来；v2 的占位值不留。
 
 import type { PackSpec } from "../../kernel/index.ts";
+import { registerResearchTools } from "./tools.ts";
 
 export const researchPack: PackSpec = {
   id: "research",
@@ -297,4 +298,5 @@ export const researchPack: PackSpec = {
       ],
     },
   ],
+  registerTools: registerResearchTools,
 };

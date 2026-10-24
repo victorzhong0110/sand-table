@@ -12,6 +12,7 @@ let open = false,
     : undefined,
   workspaceId: string | undefined = process.env.SAND_WORKSPACE_ID,
   preset: "blank" | "code" = "blank";
+let folder = "";
 type LocalRuntime = { serverEnv?: Record<string, string>; mcpEntry?: McpEntry };
 let runtime: LocalRuntime | undefined;
 const readRuntime = (raw: string): LocalRuntime => {
@@ -48,6 +49,7 @@ for (let i = 0; i < args.length; i++) {
       "--workspace-dir",
       "--workspace-id",
       "--embed-origin",
+      "--folder",
     ].includes(arg)
   ) {
     const value = args[++i];
@@ -57,6 +59,7 @@ for (let i = 0; i < args.length; i++) {
     else if (arg === "--session-file") sessionFile = resolve(value);
     else if (arg === "--workspace-dir") workspaceDir = resolve(value);
     else if (arg === "--workspace-id") workspaceId = value;
+    else if (arg === "--folder") folder = resolve(value);
     else {
       port = Number(value);
       if (!Number.isInteger(port) || port < 0 || port > 65535)
@@ -75,6 +78,11 @@ for (let i = 0; i < args.length; i++) {
   }
 }
 const bindings = roots.length ? bind(roots) : [];
+if (folder) {
+  if (process.env.SAND_KERNEL !== "v3")
+    throw Error("绑定文件夹需要先设置 SAND_KERNEL=v3，再带 --folder 启动。");
+  process.env.SAND_FOLDER = folder;
+}
 try {
   const local = await startLocal({
     workspaces: bindings.map((w) => `${w.label}=${w.root}`),

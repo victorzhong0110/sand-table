@@ -30,6 +30,7 @@ const forward = {
       params: { uri: "ui://sand-table/overview.html" },
     }),
 };
+const folder = process.env.SAND_FOLDER?.trim();
 const { server, dispose } =
   process.env.SAND_KERNEL === "v3"
     ? createServerV3({
@@ -37,6 +38,7 @@ const { server, dispose } =
         // 这里只需要一份同样的工具清单。
         workspaceRoot: process.env.SAND_WORKSPACE_DIR ?? "",
         workspaceId: process.env.SAND_WORKSPACE_ID ?? "default",
+        ...(folder ? { folder } : {}),
         forward,
       })
     : createServer([], forward);
