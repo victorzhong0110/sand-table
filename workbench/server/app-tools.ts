@@ -23,7 +23,7 @@ import {
   undo,
   type CommandResult,
   type ToolRegistrar,
-} from "../../kernel/index.ts";
+} from "../kernel/index.ts";
 import { toolValue } from "./output.ts";
 import {
   createWorkspace,

@@ -21,8 +21,7 @@
     "test:performance": "node --disable-warning=ExperimentalWarning --experimental-strip-types tests/performance.ts",
     "test:blank": "node --disable-warning=ExperimentalWarning --experimental-strip-types tests/blank.ts",
     "test:host": "node --disable-warning=ExperimentalWarning --experimental-strip-types tests/host-browser.ts",
-    "format:check": "prettier --check \"{board,core,connectors,domains,server,local,dev,scripts,tests,kernel,packs}/**/*.{ts,tsx}\"",
-    "test:recovery": "node --disable-warning=ExperimentalWarning --experimental-strip-types tests/recovery-browser.ts",
+    "format:check": "prettier --check \"{board,core,server,local,dev,scripts,tests,kernel,packs}/**/*.{ts,tsx}\"",
     "test:reopen": "node --disable-warning=ExperimentalWarning --experimental-strip-types tests/reopen-browser.ts"
   },
   "dependencies": {

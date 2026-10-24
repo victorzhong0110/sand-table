@@ -219,7 +219,7 @@ export type JsonSchema = Record<string, unknown>;
 
 /**
  * 工具注册器。内核不认 zod，参数结构按 zod 的 shape 传进来，
- * 具体类型由 server/v3/ 那一层收窄。
+ * 具体类型由 server/ 那一层收窄。
  */
 export type ToolRegistrar = {
   tool(

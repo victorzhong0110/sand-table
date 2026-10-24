@@ -226,7 +226,7 @@ function statusReply(revision: number, boards: unknown[] = []) {
   };
 }
 
-test("SAND_KERNEL=v3 时四个操作转调 v3 工具", async () => {
+test("四个操作转调当前工具面", async () => {
   const plugin = await loadPlugin();
   const listed = recorded(plugin, "v3", () =>
     statusReply(2, [{ id: "home", title: "首页", presentations: 3 }]),
@@ -688,36 +688,4 @@ test("内容编辑不要求 viewId，删除默认拒绝引用，外观和媒体�
     badAsset.calls.map((call) => call.name),
     ["sand_status"],
   );
-});
-
-test("内核不是 v3 时仍调用 v2 工具", async () => {
-  const plugin = await loadPlugin();
-  let listed = 0;
-  const calls: string[] = [];
-  const ops = plugin.createOperations(
-    {
-      async callTool(name: string) {
-        calls.push(name);
-        if (name === "sand_list_boards") {
-          listed += 1;
-          return {
-            structuredContent: {
-              data: { boards: listed === 1 ? [] : [{ id: "b" }] },
-            },
-          };
-        }
-        return { structuredContent: { data: { id: "n1" } } };
-      },
-    },
-    "v2",
-  );
-  const boards = await ops.listBoards();
-  assert.deepEqual(calls, [
-    "sand_list_boards",
-    "sand_open_board",
-    "sand_list_boards",
-  ]);
-  assert.equal(boards.boards.length, 1);
-  await ops.readObject("board-1", "n1");
-  assert.equal(calls.at(-1), "sand_read_object");
 });

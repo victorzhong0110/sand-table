@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { History, migrateHistoryState } from "../core/history.ts";
-import type { HistoryEntry, Patch } from "../core/objects.ts";
+import { History, migrateHistoryState } from "../board/data-client/history.ts";
+import type { HistoryEntry, Patch } from "../board/data-client/objects.ts";
 
 let seq = 0;
 

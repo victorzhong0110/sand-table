@@ -20,7 +20,7 @@ import {
   undo,
   type CommandResult,
   type ToolRegistrar,
-} from "../../kernel/index.ts";
+} from "../kernel/index.ts";
 import { modelText, overBudget } from "./output.ts";
 
 export type CoreToolsHost = {

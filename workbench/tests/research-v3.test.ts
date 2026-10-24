@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { bridgeEntry } from "../local/service.ts";
-import { createServerV3 } from "../server/v3/server.ts";
+import { createServerV3 } from "../server/server.ts";
 
 const CORE_TOOLS = [
   "sand_activity",
@@ -453,14 +453,12 @@ test("桥接条目在设置了 SAND_FOLDER 时带上同一个目录", () => {
   const sessionFile = join(tmpdir(), "sand-research-session.json");
   try {
     delete process.env.SAND_FOLDER;
-    const plain = bridgeEntry("v3", undefined, sessionFile);
-    assert.equal(plain?.env?.SAND_KERNEL, "v3");
-    assert.equal(plain?.env?.SAND_FOLDER, undefined);
+    const plain = bridgeEntry(undefined, sessionFile);
+    assert.equal(plain.env?.SAND_FOLDER, undefined);
 
     process.env.SAND_FOLDER = "/tmp/sand-bound-folder";
-    const bound = bridgeEntry("v3", undefined, sessionFile);
-    assert.equal(bound?.env?.SAND_FOLDER, "/tmp/sand-bound-folder");
-    assert.equal(bound?.env?.SAND_KERNEL, "v3");
+    const bound = bridgeEntry(undefined, sessionFile);
+    assert.equal(bound.env?.SAND_FOLDER, "/tmp/sand-bound-folder");
   } finally {
     if (previous === undefined) delete process.env.SAND_FOLDER;
     else process.env.SAND_FOLDER = previous;

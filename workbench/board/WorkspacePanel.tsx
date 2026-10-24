@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Icon } from "./Icon.tsx";
-import type { WorkspaceDescriptor } from "../core/objects.ts";
+import type { WorkspaceDescriptor } from "./data-client/objects.ts";
 import "./workspace.css";
 
 /** 导入完成后给人看的结果。 */

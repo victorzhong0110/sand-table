@@ -1,4 +1,4 @@
-import type { HostTaskRequest, HostTaskEvent } from "../core/objects.ts";
+import type { HostTaskRequest, HostTaskEvent } from "./data-client/objects.ts";
 import { HOST_BRIDGE_KEY, type InjectedHost } from "../core/host-bridge.ts";
 export const HOST_BRIDGE_MESSAGE = "sand-table:host-bridge";
 export const SUBMIT_TASK_MESSAGE = "sand-table:submit-task";

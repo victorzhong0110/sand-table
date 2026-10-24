@@ -1,5 +1,5 @@
-import { safeUrl } from "../core/spaces.ts";
-import { resultData } from "../core/results.ts";
+import { safeUrl } from "../board/data-client/spaces.ts";
+import { resultData } from "../board/data-client/results.ts";
 import {
   AppBridge,
   PostMessageTransport,

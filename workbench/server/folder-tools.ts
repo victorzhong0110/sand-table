@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { CommandError, type ToolRegistrar } from "../../kernel/index.ts";
+import { CommandError, type ToolRegistrar } from "../kernel/index.ts";
 
 const digest = (value: string) =>
   createHash("sha256").update(value).digest("hex");

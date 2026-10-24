@@ -4,7 +4,7 @@
 // 出错时给 { code, message, hint }：message 说清发生了什么，hint 按错误码固定，
 // 告诉模型下一步该做什么。
 
-import { CommandError, type ErrorCode } from "../../kernel/index.ts";
+import { CommandError, type ErrorCode } from "../kernel/index.ts";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 
 /** 模型一次能读的文本上限（字节）。 */

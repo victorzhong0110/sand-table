@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { V3Store } from "../board/v3/store.ts";
+import { V3Store } from "../board/data-client/store.ts";
 
 const objectRow = (id: string, rev: number) => ({
   id,

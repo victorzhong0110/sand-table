@@ -7,8 +7,12 @@ import {
   isExternalEffect,
   redoPath,
   undoPath,
-} from "../core/history.ts";
-import type { AuditEntry, HistoryEntry, Patch } from "../core/objects.ts";
+} from "../board/data-client/history.ts";
+import type {
+  AuditEntry,
+  HistoryEntry,
+  Patch,
+} from "../board/data-client/objects.ts";
 
 let seq = 0;
 

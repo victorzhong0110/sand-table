@@ -1,5 +1,5 @@
-import { safeUrl } from "../core/spaces.ts";
-import { resultData } from "../core/results.ts";
+import { safeUrl } from "../board/data-client/spaces.ts";
+import { resultData } from "../board/data-client/results.ts";
 import {
   AppBridge,
   PostMessageTransport,
@@ -25,10 +25,10 @@ async function rpc(method: string, params: unknown) {
 }
 async function main() {
   const result = await rpc("tools/call", {
-    name: "sand_open_board",
-    arguments: { title: "代码如何协作", preset: "code" },
+    name: "sand_status",
+    arguments: {},
   });
-  window.__boardId = resultData(result).id;
+  window.__boardId = resultData(result).homeBoardId;
   const resource = await rpc("resources/read", {
     uri: "ui://sand-table/overview.html",
   });
@@ -70,7 +70,7 @@ async function main() {
     try {
       output.textContent = JSON.stringify(
         await rpc("tools/call", {
-          name: "sand_read_context",
+          name: "sand_context",
           arguments: { boardId: window.__boardId },
         }),
         null,

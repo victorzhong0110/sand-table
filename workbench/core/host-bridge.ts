@@ -5,12 +5,12 @@
 // 存在的唯一理由：**入口显隐由宿主的真实能力决定，不由猜测决定**。
 // 拿不到能力就不显示对话入口——这是集成轮决策 D7 的延续。
 
-import { safeUrl } from "./spaces.ts";
+import { safeUrl } from "../board/data-client/spaces.ts";
 import type {
   HostCapabilities,
   HostTaskEvent,
   HostTaskRequest,
-} from "./objects.ts";
+} from "../board/data-client/objects.ts";
 
 /** 宿主桥：把「向宿主提交任务、接收事件」抽象成接口。 */
 export type HostBridge = {

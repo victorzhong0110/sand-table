@@ -1,15 +1,15 @@
 import { initialData } from "./domain-ui.ts";
 import { Icon } from "./Icon.tsx";
 import { useState, useEffect, useRef, type CSSProperties } from "react";
-import type { HostTaskEvent } from "../core/objects.ts";
-import type { Board, Item } from "../core/model.ts";
-import type { HistorySnapshot } from "../core/history.ts";
+import type { HostTaskEvent } from "./data-client/objects.ts";
+import type { Board, Item } from "./data-client/model.ts";
+import type { HistorySnapshot } from "./data-client/history.ts";
 import {
   safeUrl,
   defaultData,
   componentTypes,
   findComponentSpec,
-} from "../core/spaces.ts";
+} from "./data-client/spaces.ts";
 import { SpaceCanvas } from "./SpaceCanvas.tsx";
 import { Toolbox } from "./Toolbox.tsx";
 import { ComponentPanel, ThemePanel } from "./ComponentPanel.tsx";

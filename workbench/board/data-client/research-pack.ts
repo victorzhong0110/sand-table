@@ -16,7 +16,7 @@ import type {
   DomainToolSpec,
   ResourceReference,
   WorkspaceObject,
-} from "../../core/objects.ts";
+} from "./objects.ts";
 
 /** 注册表里的包 id。 */
 export const RESEARCH_PACK_ID = "research";

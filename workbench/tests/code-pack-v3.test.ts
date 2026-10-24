@@ -21,7 +21,7 @@ import { CommandError, type Actor } from "../kernel/index.ts";
 import { spillText, TEXT_BLOB_LIMIT } from "../packs/code/blobs.ts";
 import { digest } from "../packs/code/git.ts";
 import { decideProposal } from "../packs/code/tools.ts";
-import { createServerV3 } from "../server/v3/server.ts";
+import { createServerV3 } from "../server/server.ts";
 
 const HUMAN: Actor = { id: "human", kind: "human" };
 const AGENT: Actor = { id: "agent", kind: "agent" };

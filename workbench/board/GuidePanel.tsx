@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Board, GuideFocus, Item } from "../core/model.ts";
+import type { Board, GuideFocus, Item } from "./data-client/model.ts";
 type Props = {
   board: Board;
   busy: boolean;

@@ -1,5 +1,5 @@
 // Scripted integration fixture, never loaded by the product or presented as a model response.
-import type { Board, GuideDraft } from "../core/model.ts";
+import type { Board, GuideDraft } from "../board/data-client/model.ts";
 export function fixtureGuide(board: Board): GuideDraft {
   const clsx = board.objects.find(
     (o) => o.title === "clsx" && o.source?.path === "src/index.js",

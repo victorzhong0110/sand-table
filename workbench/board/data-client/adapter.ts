@@ -8,21 +8,16 @@
 // base.code_snippet → code，novel.* / research.* 走现有的领域兜底分支，
 // 其余未知类型走现有的「未知组件」占位。
 
-import type {
-  Activity,
-  Board,
-  ComponentPack,
-  SpaceActivity,
-} from "../../core/model.ts";
-import { componentTypes, defaultData } from "../../core/spaces.ts";
+import type { Activity, Board, ComponentPack, SpaceActivity } from "./model.ts";
+import { componentTypes, defaultData } from "./spaces.ts";
 import type {
   Camera,
   ComponentInstance,
   Space,
   SpaceLink,
   ThemeConfig,
-} from "../../core/spaces.ts";
-import type { ObjectRelation, WorkspaceObject } from "../../core/objects.ts";
+} from "./spaces.ts";
+import type { ObjectRelation, WorkspaceObject } from "./objects.ts";
 import type {
   V3Cache,
   V3ObjectRow,

@@ -1,4 +1,4 @@
-import type { Camera, Rect } from "../core/spaces.ts";
+import type { Camera, Rect } from "./data-client/spaces.ts";
 export function easeCamera(t: number) {
   const p = Math.max(0, Math.min(1, t));
   return p < 0.5 ? 4 * p ** 3 : 1 - (-2 * p + 2) ** 3 / 2;

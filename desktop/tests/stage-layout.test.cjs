@@ -9,7 +9,7 @@
 // 表现只是「窗口停在加载页」。
 //
 // 2026-10-24 实测：kernel v3 的工具面（PR #76）让 server/main.ts 与
-// local/bridge.ts 开始 import server/v3/server.ts，而它 import packs/index.ts；
+// local/bridge.ts 与 server/main.ts import server/server.ts，而它 import packs/index.ts；
 // 清单里没有 packs/，于是便携冒烟从「窗口停在加载页」开始红，一直红到今天。
 //
 // 做法：按相对 import 把运行期入口的文件闭包算出来，再核对这份闭包涉及的
@@ -29,8 +29,8 @@ const workbench = path.join(repoRoot, "workbench");
 const RUNTIME_ENTRIES = [
   "local/main.ts", // 桌面主进程起的本地工作台
   "local/bridge.ts", // MCP 桥接
-  "server/main.ts", // v2 的 MCP server 入口
-  "server/v3/server.ts", // v3 的 MCP server 入口
+  "server/main.ts", // MCP server 入口
+  "server/server.ts",
 ];
 
 /**
@@ -193,7 +193,7 @@ test("v3 的工具面要能进包（packs/ 是内核的领域包）", () => {
   const layout = readLayout();
   assert.ok(
     layout.dirs.includes("packs"),
-    "server/v3/server.ts import 了 packs/index.ts，清单里必须带上 packs/",
+    "server/server.ts import 了 packs/index.ts，清单里必须带上 packs/",
   );
   const { files } = runtimeClosure();
   assert.ok(

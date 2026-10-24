@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon.tsx";
 import { indentOf } from "./history-layout.ts";
-import type { HistorySnapshot, TimelineRecord } from "../core/history.ts";
+import type { HistorySnapshot, TimelineRecord } from "./data-client/history.ts";
 import "./history.css";
 
 /** MCP 工具调用：与 board/main.tsx 的 call 同签名。 */

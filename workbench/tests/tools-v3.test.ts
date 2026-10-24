@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import { createServerV3 } from "../server/v3/server.ts";
+import { createServerV3 } from "../server/server.ts";
 import { connectionConfig } from "../local/config.ts";
 import { bridgeEntry } from "../local/service.ts";
 import { basePack } from "../packs/base/index.ts";
@@ -533,10 +533,10 @@ test("工作空间编号越界或不合规时拒绝，目录一个都不动", as
   }
 });
 
-test("v3 默认生成的 MCP 条目也带 SAND_KERNEL=v3", () => {
+test("默认生成的 MCP 条目指向桥接，不另加环境变量", () => {
   const sessionFile = join(tmpdir(), "sand-tools-v3-session.json");
-  const entry = bridgeEntry("v3", undefined, sessionFile);
-  assert.equal(entry?.env?.SAND_KERNEL, "v3");
+  const entry = bridgeEntry(undefined, sessionFile);
+  assert.equal(entry.env, undefined);
 
   const config = connectionConfig(sessionFile, entry);
   const parsed = JSON.parse(config.json) as {
@@ -547,15 +547,14 @@ test("v3 默认生成的 MCP 条目也带 SAND_KERNEL=v3", () => {
   };
   const server = parsed.mcpServers["sand-table"];
   assert.ok(server, "配置里要有 sand-table 这一条");
-  assert.equal(server.env?.SAND_KERNEL, "v3", "桥接命令要带上内核版本");
+  assert.equal(server.env, undefined);
   assert.ok(server.args.includes("--session-file"), "桥接命令要指明会话文件");
-  assert.match(config.codex, /'--env' 'SAND_KERNEL=v3'/);
-  assert.match(config.toml, /"SAND_KERNEL" = "v3"/);
+  assert.doesNotMatch(config.codex, /--env/);
+  assert.doesNotMatch(config.toml, /\[mcp_servers\.sand-table\.env\]/);
 });
 
-test("自定义 MCP 条目保留自己的环境变量，只补内核版本", () => {
+test("自定义 MCP 条目保留自己的环境变量", () => {
   const entry = bridgeEntry(
-    "v3",
     {
       command: "/app/sand-table",
       args: ["--mcp"],
@@ -563,21 +562,16 @@ test("自定义 MCP 条目保留自己的环境变量，只补内核版本", () 
     },
     join(tmpdir(), "sand-tools-v3-session.json"),
   );
-  assert.deepEqual(entry?.env, {
+  assert.deepEqual(entry.env, {
     ELECTRON_RUN_AS_NODE: "1",
-    SAND_KERNEL: "v3",
   });
-  assert.equal(entry?.command, "/app/sand-table");
-  assert.deepEqual(entry?.args, ["--mcp"]);
+  assert.equal(entry.command, "/app/sand-table");
+  assert.deepEqual(entry.args, ["--mcp"]);
 });
 
-test("不设内核版本时，条目跟以前一样", () => {
+test("没有绑定文件夹时，自定义条目原样返回", () => {
   const custom = { command: "/app/sand-table", args: ["--mcp"] };
-  assert.equal(
-    bridgeEntry(undefined, undefined, "/tmp/session.json"),
-    undefined,
-  );
-  assert.equal(bridgeEntry(undefined, custom, "/tmp/session.json"), custom);
+  assert.equal(bridgeEntry(custom, "/tmp/session.json"), custom);
 });
 
 // —— T74：app_activity、app_view 的 boardId、类型元数据、过期响应隔离 ——
