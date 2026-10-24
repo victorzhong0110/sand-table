@@ -3,6 +3,7 @@ import { CommandError } from "./errors.ts";
 import { historyKind, recordHistory } from "./history-record.ts";
 import { newId } from "./ids.ts";
 import { makeLabel, type LabelLookup } from "./labels.ts";
+import { migrateData } from "./migrate.ts";
 import { isPackEnabled } from "./packs-state.ts";
 import { createRegistry, PackSpecError, type Registry } from "./registry.ts";
 import { toObjectRow, toPresentationRow, toRelationRow } from "./rows.ts";
@@ -387,9 +388,20 @@ function updateObject(
     unset.length > 0 ||
     command.source !== undefined;
   let dataJson = JSON.stringify(row.data);
+  let typeVersion = row.typeVersion;
   if (touchesData) {
     requireType(ctx, row.type, index);
-    const next = { ...row.data };
+    // 先把旧数据迁到当前版本，再合并这次的改动：不合并不落盘，
+    // 旧字段就会一直留在数据里，而内核只把这类问题降级成提示。
+    const migrated = migrateData(ctx.staged, row);
+    if (migrated.error)
+      throw new CommandError(
+        "INVALID_DATA",
+        `迁移失败，已拒绝这次修改。${migrated.error}`,
+        index,
+        { path: "/typeVersion", message: migrated.error },
+      );
+    const next = { ...migrated.data };
     for (const key of unset) delete next[key];
     Object.assign(next, set);
     dataJson = assertDataSize(next, index);
@@ -397,6 +409,7 @@ function updateObject(
     if (!validated.ok)
       classifyUpdateErrors(ctx, validated.errors, set, unset, index);
     if (command.source) assertSource(command.source, index);
+    typeVersion = migrated.typeVersion;
   }
   const before = snapshotObject(ctx.db, row.id);
   const sets: Record<string, string | number | null> = {
@@ -405,7 +418,10 @@ function updateObject(
     updated_by: ctx.actor.id,
     rev: ctx.rev,
   };
-  if (touchesData) sets.data = dataJson;
+  if (touchesData) {
+    sets.data = dataJson;
+    sets.type_version = typeVersion;
+  }
   if (command.title !== undefined) sets.title = command.title;
   if (command.source !== undefined)
     sets.source = JSON.stringify(command.source);
@@ -466,7 +482,16 @@ function cloneObject(
 ) {
   const row = objectById(ctx, command.id, index);
   requireType(ctx, row.type, index);
-  const validated = ctx.staged.validateData(row.type, row.data);
+  // 副本跟原对象一起迁到当前版本：旧结构的数据过不了当前 Schema 的校验。
+  const migrated = migrateData(ctx.staged, row);
+  if (migrated.error)
+    throw new CommandError(
+      "INVALID_DATA",
+      `迁移失败，不能复制这个对象。${migrated.error}`,
+      index,
+      { path: "/typeVersion", message: migrated.error },
+    );
+  const validated = ctx.staged.validateData(row.type, migrated.data);
   if (!validated.ok) throwData(validated.errors, index);
   const id = newId();
   ctx.db
@@ -479,9 +504,9 @@ function cloneObject(
     .run(
       id,
       row.type,
-      row.typeVersion,
+      migrated.typeVersion,
       row.title,
-      JSON.stringify(row.data),
+      JSON.stringify(migrated.data),
       row.source ? JSON.stringify(row.source) : null,
       ctx.now,
       ctx.actor.id,

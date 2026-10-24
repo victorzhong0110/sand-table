@@ -22,7 +22,7 @@ export type Command =
   | { op: "object.create"; ref?: string; type: string; title?: string; data?: Record<string, unknown>; source?: ObjectSource }
   | { op: "object.update"; id: string; expectedVersion?: number; title?: string; set?: Record<string, unknown>; unset?: string[]; source?: ObjectSource }
   | { op: "object.delete"; id: string; expectedVersion?: number }
-  | { op: "object.clone"; ref?: string; id: string } // 复制出独立对象（新 id，内容相同，不复制展示和关系）
+  | { op: "object.clone"; ref?: string; id: string } // 复制出独立对象（新 id，不复制展示和关系）。数据先迁到当前类型版本再落盘；迁移失败则整条拒绝，不写出半新的副本
   | {
       op: "presentation.create";
       ref?: string;
@@ -90,7 +90,7 @@ export class CommandError extends Error {
 |---|---|---|
 | 类型不存在或所属包未启用 | 拒绝创建；拒绝修改数据（可以改标题） | `UNKNOWN_TYPE` |
 | `object.create` 的数据 | 必须完整通过类型的 JSON Schema | `INVALID_DATA` |
-| `object.update` 的数据 | 把 `set` / `unset` 合并进当前数据后整体校验；错误路径属于本次 `set` / `unset` 的键时报错；其余错误（旧数据遗留问题）放进 `warnings`，不阻止保存 | `INVALID_DATA` |
+| `object.update` 的数据 | 先迁到当前类型版本，再把 `set` / `unset` 合并进去做整体校验。迁移失败则拒绝改数据（信息里带原因），只改标题时保留旧 `data` / `type_version`。迁成之后，错误路径属于本次 `set` / `unset` 的键时报错；其余错误（旧数据遗留问题）放进 `warnings`，不阻止保存 | `INVALID_DATA` |
 | 数据序列化后超过 1 MB | 拒绝 | `LIMIT` |
 | 标题超过 300 字 | 拒绝 | `LIMIT` |
 | 带 `expectedVersion` 且与当前版本不同 | 拒绝，`details` 里给出当前版本 | `VERSION_CONFLICT` |
@@ -145,10 +145,10 @@ export class CommandError extends Error {
 |---|---|
 | `status(db)` | 工作空间 id、标题、修订号、首页白板、白板列表（最多 50）、包列表 |
 | `listTypes(db, filter?)` | 已启用包的类型、关系类型、模板；带过滤时返回完整声明 |
-| `query(db, filter)` | 按白板、类型、文字、关系查对象，分页，返回精简行 |
-| `readObjects(db, ids, options)` | 读完整对象，附带展示位置和关系 |
-| `boardContents(db, boardId)` | 同一只读事务快照中的白板、展示、对象、关系、有效 settings/packs 及 revision |
-| `changesSince(db, rev)` | 修订号大于 rev 的所有行（含墓碑），或 `{ reset: true }` |
+| `query(db, registry, filter)` | 按白板、类型、文字、关系查对象，分页，返回精简行。摘要和 `typeVersion` 用迁移后的数据；失败时带 `migrationError` |
+| `readObjects(db, registry, ids, options)` | 读完整对象，附带展示位置和关系。`data` 与 `typeVersion` 是迁到当前类型版本后的结果；失败时带 `migrationError`，库里的行不变 |
+| `boardContents(db, registry, boardId)` | 同一只读事务快照中的白板、展示、对象、关系、有效 settings/packs 及 revision。白板和对象的 `data` / `typeVersion` 同样是迁移后的结果，失败时带 `migrationError` |
+| `changesSince(db, registry, rev)` | 修订号大于 rev 的所有行（含墓碑），或 `{ reset: true }`。对象行的 `data` / `typeVersion` 是迁移后的结果，失败时带 `migrationError` |
 | `historyList(db, limit)` | 历史记录列表，标出当前位置、当前路径、旧分支 |
 | `context(db, actor, viewId?)` | 人当前在看什么、选中了什么、该 Agent 上次读取之后人做了哪些修改 |
 
@@ -223,7 +223,7 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
 }
 ```
 
-输出：`{ rows: [{id, type, title, summary, version, updatedAt, typeAvailable}], nextCursor: string | null, total: number }`。`summary` 取类型 `display.summary` 的第一个有值字段，去掉 Markdown 标记后截取 160 字。
+输出：`{ rows: [{id, type, title, summary, version, updatedAt, typeVersion, typeAvailable, migrationError?}], nextCursor: string | null, total: number }`。`summary` 取类型 `display.summary` 的第一个有值字段，用迁移后的数据，去掉 Markdown 标记后截取 160 字。`typeVersion` 是数据结构版本，不是对象的编辑版本 `version`。迁移失败时带 `migrationError`，`typeVersion` 仍是库里的旧版本。
 
 #### `sand_read`
 
@@ -240,7 +240,7 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
 }
 ```
 
-输出：`{ objects: [{ id, type, title, data, source, version, typeAvailable, truncated: [{field, totalLength}], presentations: [{id, boardId, boardTitle}], relations: [{id, kind, direction, otherId, otherTitle, status, basis}] }], missing: string[] }`。每个对象最多返回 50 条关系。
+输出：`{ objects: [{ id, type, title, data, source, version, typeVersion, typeAvailable, migrationError?, truncated: [{field, totalLength}], presentations: [{id, boardId, boardTitle}], relations: [{id, kind, direction, otherId, otherTitle, status, basis}] }], missing: string[] }`。`data` 和 `typeVersion` 是迁到当前类型版本后的结果；迁移失败时这两项保持库里的原文，并带 `migrationError`。`typeVersion` 不是编辑版本 `version`。读不写库。每个对象最多返回 50 条关系。
 
 #### `sand_edit`
 
@@ -312,8 +312,8 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
 
 | 工具 | 参数要点 | 作用 |
 |---|---|---|
-| `app_board` | `{ boardId }` | 返回 `boardContents` 的完整结果，给画布渲染 |
-| `app_changes` | `{ since }` | 返回 `changesSince`，界面每秒调用一次 |
+| `app_board` | `{ boardId }` | 返回 `boardContents` 的完整结果（对象数据是迁移后的投影），给画布渲染 |
+| `app_changes` | `{ since }` | 返回 `changesSince`（对象数据是迁移后的投影），界面每秒调用一次 |
 | `app_edit` | 同 `sand_edit` | 人的写入，`actor` 为 human |
 | `app_history` | 同 `sand_history` | 人的撤销、重做、跳转 |
 | `app_view` | `{ action: "get" \| "select" \| "camera" \| "navigate", viewId, boardId?, ... }` | 视角、选区、进入或返回白板；不进历史。`get` 返回 `navStack`；`select` 与 `camera` 也接受 `boardId`，第一次调用就能登记视角，不用先 `navigate` 一次 |

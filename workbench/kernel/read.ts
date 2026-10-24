@@ -1,6 +1,7 @@
 import { getMeta, transaction, type Db } from "./db.ts";
 import { CommandError } from "./errors.ts";
 import { auditFrameCoordinates } from "./frame-coords.ts";
+import { migrateData, migrateRow, type MigratedObjectRow } from "./migrate.ts";
 import { isPackEnabled } from "./packs-state.ts";
 import type { Registry } from "./registry.ts";
 import { toObjectRow, toPresentationRow, toRelationRow } from "./rows.ts";
@@ -103,7 +104,11 @@ export type QueryRow = {
   summary: string;
   version: number;
   updatedAt: number;
+  /** 数据迁移后的类型版本。 */
+  typeVersion: number;
   typeAvailable: boolean;
+  /** 迁移没成功时的原因。没有迁移问题时没有这个字段。 */
+  migrationError?: string;
 };
 
 export type ReadOptions = {
@@ -120,7 +125,11 @@ export type ReadResult = {
     data: Record<string, unknown>;
     source: ObjectRow["source"];
     version: number;
+    /** 数据迁移后的类型版本。 */
+    typeVersion: number;
     typeAvailable: boolean;
+    /** 迁移没成功时的原因。没有迁移问题时没有这个字段。 */
+    migrationError?: string;
     truncated: { field: string; totalLength: number }[];
     presentations: { id: string; boardId: string; boardTitle: string }[];
     relations: {
@@ -138,9 +147,9 @@ export type ReadResult = {
 
 export type BoardContents = {
   revision: number;
-  board: ObjectRow;
+  board: MigratedObjectRow;
   presentations: PresentationRow[];
-  objects: ObjectRow[];
+  objects: MigratedObjectRow[];
   relations: RelationRow[];
   settings: { key: string; value: unknown }[];
   packs: { id: string; kind: string; version: number; enabled: boolean }[];
@@ -148,7 +157,7 @@ export type BoardContents = {
 
 export type ChangesResult = {
   revision: number;
-  objects: ObjectRow[];
+  objects: MigratedObjectRow[];
   presentations: PresentationRow[];
   relations: RelationRow[];
   settings: { key: string; value: unknown; rev: number; deleted: boolean }[];
@@ -349,14 +358,21 @@ export function query(
         .all(...params, limit, offset) as Record<string, unknown>[]
     ).map((raw) => {
       const row = toObjectRow(raw);
+      const migrated = migrateData(registry, row);
       return {
         id: row.id,
         type: row.type,
         title: row.title,
-        summary: summarize(registry.getType(row.type), row.data, row.title),
+        summary: summarize(
+          registry.getType(row.type),
+          migrated.data,
+          row.title,
+        ),
         version: row.version,
         updatedAt: row.updatedAt,
+        typeVersion: migrated.typeVersion,
         typeAvailable: typeAvailable(db, registry, row.type),
+        ...(migrated.error ? { migrationError: migrated.error } : {}),
       };
     });
     const next = offset + rows.length;
@@ -401,7 +417,8 @@ export function readObjects(
         missing.push(id);
         continue;
       }
-      const cut = cutData(row.data, id, textLimit, options.textOffset);
+      const migrated = migrateData(registry, row);
+      const cut = cutData(migrated.data, id, textLimit, options.textOffset);
       objects.push({
         id: row.id,
         type: row.type,
@@ -409,7 +426,9 @@ export function readObjects(
         data: cut.data,
         source: row.source,
         version: row.version,
+        typeVersion: migrated.typeVersion,
         typeAvailable: typeAvailable(db, registry, row.type),
+        ...(migrated.error ? { migrationError: migrated.error } : {}),
         truncated: cut.truncated,
         presentations: include.has("presentations")
           ? presentationsOf(db, id)
@@ -421,7 +440,11 @@ export function readObjects(
   });
 }
 
-export function boardContents(db: Db, boardId: string): BoardContents {
+export function boardContents(
+  db: Db,
+  registry: Registry,
+  boardId: string,
+): BoardContents {
   return readOnly(db, () => {
     const board = liveObject(db, boardId);
     if (!board)
@@ -440,7 +463,7 @@ export function boardContents(db: Db, boardId: string): BoardContents {
     const objectIds = [...new Set(presentations.map((item) => item.objectId))];
     const objects = objectIds.flatMap((id) => {
       const row = liveObject(db, id);
-      return row ? [row] : [];
+      return row ? [migrateRow(registry, row)] : [];
     });
     const onBoard = [...new Set(objects.map((item) => item.id))];
     const relations =
@@ -459,7 +482,7 @@ export function boardContents(db: Db, boardId: string): BoardContents {
           ).map(toRelationRow);
     return {
       revision: revisionOf(db),
-      board,
+      board: migrateRow(registry, board),
       presentations,
       objects,
       relations,
@@ -469,7 +492,11 @@ export function boardContents(db: Db, boardId: string): BoardContents {
   });
 }
 
-export function changesSince(db: Db, rev: number): ChangesSinceResult {
+export function changesSince(
+  db: Db,
+  registry: Registry,
+  rev: number,
+): ChangesSinceResult {
   return readOnly(db, () => {
     if (!Number.isInteger(rev))
       throw new CommandError(
@@ -486,7 +513,9 @@ export function changesSince(db: Db, rev: number): ChangesSinceResult {
         db,
         "SELECT * FROM objects WHERE rev > ? ORDER BY rev ASC, id ASC",
         rev,
-      ).map(toObjectRow),
+      )
+        .map(toObjectRow)
+        .map((row) => migrateRow(registry, row)),
       presentations: changedRows(
         db,
         "SELECT * FROM presentations WHERE rev > ? ORDER BY rev ASC, id ASC",
