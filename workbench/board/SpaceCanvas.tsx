@@ -1,10 +1,10 @@
 import { blocksCanvasShortcut } from "./keyboard.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Board } from "../core/model.ts";
+import type { Board } from "./data-client/model.ts";
 import { Icon } from "./Icon.tsx";
-import { componentTypes, displayRect, material } from "../core/spaces.ts";
-import { peekContent } from "../core/content.ts";
-import type { Camera, ComponentInstance, Rect } from "../core/spaces.ts";
+import { componentTypes, displayRect, material } from "./data-client/spaces.ts";
+import { peekContent } from "./data-client/content.ts";
+import type { Camera, ComponentInstance, Rect } from "./data-client/spaces.ts";
 import { centerCamera, easeCamera, edgeVelocity } from "./camera-motion.ts";
 import { ComponentRenderer } from "./ComponentRenderer.tsx";
 import { dragIntent, editIntent, endEditSession } from "./edit-session.ts";

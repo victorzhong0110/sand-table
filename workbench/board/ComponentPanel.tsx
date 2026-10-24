@@ -4,12 +4,12 @@ import {
   useRef,
   type KeyboardEvent as ReactKeyEvent,
 } from "react";
-import { findObjectType } from "../core/domains.ts";
-import type { Board } from "../core/model.ts";
-import type { ComponentInstance, ThemeConfig } from "../core/spaces.ts";
-import { componentTypes, defaultData } from "../core/spaces.ts";
-import { peekContent, resolveContent } from "../core/content.ts";
-import type { WorkspaceObject } from "../core/objects.ts";
+import { findObjectType } from "./data-client/domains.ts";
+import type { Board } from "./data-client/model.ts";
+import type { ComponentInstance, ThemeConfig } from "./data-client/spaces.ts";
+import { componentTypes, defaultData } from "./data-client/spaces.ts";
+import { peekContent, resolveContent } from "./data-client/content.ts";
+import type { WorkspaceObject } from "./data-client/objects.ts";
 import { Icon } from "./Icon.tsx";
 import {
   clearDraft,

@@ -391,7 +391,7 @@ export type HostTaskRequest = {
 export type HostTaskEvent = {
   taskId: string;
   boardId?: string;
-  results?: import("./host-bridge.ts").HostResult[];
+  results?: import("../../core/host-bridge.ts").HostResult[];
   state: "queued" | "running" | "waiting" | "done" | "failed" | "cancelled";
   message?: string;
   /** 结果关联到哪个对象。 */

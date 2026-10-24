@@ -1,9 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
-import type { Board } from "../core/model.ts";
-import type { ComponentInstance } from "../core/spaces.ts";
-import { findObjectType } from "../core/domains.ts";
-import { componentTypes, safeUrl, findComponentSpec } from "../core/spaces.ts";
-import { peekContent } from "../core/content.ts";
+import type { Board } from "./data-client/model.ts";
+import type { ComponentInstance } from "./data-client/spaces.ts";
+import { findObjectType } from "./data-client/domains.ts";
+import {
+  componentTypes,
+  safeUrl,
+  findComponentSpec,
+} from "./data-client/spaces.ts";
+import { peekContent } from "./data-client/content.ts";
 const text = (v: unknown) => (v === undefined || v === null ? "" : String(v));
 export function ComponentRenderer({
   instance: c,

@@ -4,16 +4,28 @@
 // 工作空间放在临时目录里，跑完就删。
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import { createServerV3 } from "../server/v3/server.ts";
+import {
+  createRegistry,
+  getMeta,
+  openWorkspace,
+  type PackSpec,
+} from "../kernel/index.ts";
+import { builtinPacks } from "../packs/index.ts";
+import { createServerV3 } from "../server/server.ts";
 import { connectionConfig } from "../local/config.ts";
 import { bridgeEntry } from "../local/service.ts";
 import { basePack } from "../packs/base/index.ts";
-import type { PackSpec } from "../kernel/index.ts";
 
 const CORE_TOOLS = [
   "sand_activity",
@@ -397,6 +409,58 @@ test("app_workspace 能新建、切换、改名、删除", async () => {
   }
 });
 
+test("导入后的工作空间列表用目录名，不用库里的旧编号", async () => {
+  const session = await open("current");
+  try {
+    const registry = createRegistry();
+    for (const pack of builtinPacks) registry.registerPack(pack, "builtin");
+    mkdirSync(join(session.root, "imported"), { recursive: true });
+    copyFileSync(
+      join("tests/fixtures/v2/full.json"),
+      join(session.root, "imported", "workspace.json"),
+    );
+    const opened = openWorkspace(session.root, "imported", registry);
+    assert.equal(getMeta(opened.db, "workspace_id"), "demo-workspace");
+    opened.db.close();
+
+    const listed = await call(session.client, "app_workspace", {
+      action: "list",
+    });
+    assert.equal(listed.isError, false, listed.text);
+    const rows = listed.data.workspaces as {
+      id: string;
+      title: string;
+      current: boolean;
+    }[];
+    const imported = rows.find((row) => row.title === "示例工作空间");
+    assert.ok(imported, JSON.stringify(rows));
+    assert.equal(imported.id, "imported");
+    assert.equal(imported.current, false);
+    assert.equal(
+      rows.find((row) => row.current)?.id,
+      "current",
+      "当前项用的是打开时的目录名",
+    );
+
+    const renamed = await call(session.client, "app_workspace", {
+      action: "rename",
+      id: "imported",
+      title: "改名成功",
+    });
+    assert.equal(renamed.isError, false, renamed.text);
+
+    const wrong = await call(session.client, "app_workspace", {
+      action: "rename",
+      id: "demo-workspace",
+      title: "不该打到这个名字",
+    });
+    assert.equal(wrong.isError, true);
+    assert.equal(wrong.data.code, "NOT_FOUND");
+  } finally {
+    await session.close();
+  }
+});
+
 test("包停用时它的工具也跟着停用", async () => {
   /* 内置包现在都不注册工具，用一个演示包验证启停。 */
   const demo: PackSpec = {
@@ -533,10 +597,10 @@ test("工作空间编号越界或不合规时拒绝，目录一个都不动", as
   }
 });
 
-test("v3 默认生成的 MCP 条目也带 SAND_KERNEL=v3", () => {
+test("默认生成的 MCP 条目指向桥接，不另加环境变量", () => {
   const sessionFile = join(tmpdir(), "sand-tools-v3-session.json");
-  const entry = bridgeEntry("v3", undefined, sessionFile);
-  assert.equal(entry?.env?.SAND_KERNEL, "v3");
+  const entry = bridgeEntry(undefined, sessionFile);
+  assert.equal(entry.env, undefined);
 
   const config = connectionConfig(sessionFile, entry);
   const parsed = JSON.parse(config.json) as {
@@ -547,15 +611,14 @@ test("v3 默认生成的 MCP 条目也带 SAND_KERNEL=v3", () => {
   };
   const server = parsed.mcpServers["sand-table"];
   assert.ok(server, "配置里要有 sand-table 这一条");
-  assert.equal(server.env?.SAND_KERNEL, "v3", "桥接命令要带上内核版本");
+  assert.equal(server.env, undefined);
   assert.ok(server.args.includes("--session-file"), "桥接命令要指明会话文件");
-  assert.match(config.codex, /'--env' 'SAND_KERNEL=v3'/);
-  assert.match(config.toml, /"SAND_KERNEL" = "v3"/);
+  assert.doesNotMatch(config.codex, /--env/);
+  assert.doesNotMatch(config.toml, /\[mcp_servers\.sand-table\.env\]/);
 });
 
-test("自定义 MCP 条目保留自己的环境变量，只补内核版本", () => {
+test("自定义 MCP 条目保留自己的环境变量", () => {
   const entry = bridgeEntry(
-    "v3",
     {
       command: "/app/sand-table",
       args: ["--mcp"],
@@ -563,21 +626,16 @@ test("自定义 MCP 条目保留自己的环境变量，只补内核版本", () 
     },
     join(tmpdir(), "sand-tools-v3-session.json"),
   );
-  assert.deepEqual(entry?.env, {
+  assert.deepEqual(entry.env, {
     ELECTRON_RUN_AS_NODE: "1",
-    SAND_KERNEL: "v3",
   });
-  assert.equal(entry?.command, "/app/sand-table");
-  assert.deepEqual(entry?.args, ["--mcp"]);
+  assert.equal(entry.command, "/app/sand-table");
+  assert.deepEqual(entry.args, ["--mcp"]);
 });
 
-test("不设内核版本时，条目跟以前一样", () => {
+test("没有绑定文件夹时，自定义条目原样返回", () => {
   const custom = { command: "/app/sand-table", args: ["--mcp"] };
-  assert.equal(
-    bridgeEntry(undefined, undefined, "/tmp/session.json"),
-    undefined,
-  );
-  assert.equal(bridgeEntry(undefined, custom, "/tmp/session.json"), custom);
+  assert.equal(bridgeEntry(custom, "/tmp/session.json"), custom);
 });
 
 // —— T74：app_activity、app_view 的 boardId、类型元数据、过期响应隔离 ——

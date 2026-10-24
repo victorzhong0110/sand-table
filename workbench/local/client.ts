@@ -1,5 +1,5 @@
-import { safeUrl } from "../core/spaces.ts";
-import { resultData } from "../core/results.ts";
+import { safeUrl } from "../board/data-client/spaces.ts";
+import { resultData } from "../board/data-client/results.ts";
 import {
   AppBridge,
   PostMessageTransport,
@@ -123,11 +123,11 @@ function makePrompt(id: string, names: string[] = []) {
   return (
     '使用浏览器已有的 Sand Table boardId="' +
     id +
-    '"，不要另建白板。先用 sand_read_context 读取最新选区、备注和编排，再用 sand_read_spaces 了解组件和包含关系。' +
+    '"，不要另建白板。先用 sand_context 看当前选区，再用 sand_query、sand_read 了解组件。' +
     (names.length
       ? "当前关注：" + names.join("、") + "。"
-      : "这张板子可以为空；按我的请求从组件搭起，不需要先导入仓库。") +
-    "用 sand_edit_space 维护编排。需要代码理解时再读取真实源码、用 sand_publish_guide 提供引用；需要修改源码时先读取明确意图，提交具体提案，等我确认后才使用宿主文件工具写入，再核对和验证。编排不代表写入授权。"
+      : "这张板子可以为空；按我的请求从组件搭起。") +
+    "用 sand_edit 维护编排。需要代码时用 code_repo 读源码；需要修改源码时用 code_change 提交提案，等我确认后才使用宿主文件工具写入。编排不代表写入授权。"
   );
 }
 function renderStatus(data: any) {
@@ -359,14 +359,19 @@ for (const button of document.querySelectorAll<HTMLButtonElement>(
   button.onclick = () => void copy(button.dataset.copy!);
 element("ask").onclick = async () => {
   try {
-    const r = await rpc("sand_read_board");
-    const b = resultData(r);
+    const r = await rpc("sand_context");
+    const data = resultData(r);
+    const names = Array.isArray(data?.selection)
+      ? data.selection
+          .map((item: { title?: string }) => item.title)
+          .filter((title: string | undefined): title is string =>
+            Boolean(title),
+          )
+      : [];
     /* 提问写进自己的框子：#prompt 里是 Agent 发来的原文，不能被覆盖。 */
     element<HTMLTextAreaElement>("ask-text").value = makePrompt(
-      boardId,
-      b.objects
-        .filter((o: any) => b.selection.includes(o.id))
-        .map((o: any) => o.title),
+      data?.board?.id || boardId,
+      names,
     );
     await copy("ask-text");
   } catch (e) {

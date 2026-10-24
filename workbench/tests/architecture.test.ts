@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import { createServerV3 } from "../server/v3/server.ts";
+import { createServerV3 } from "../server/server.ts";
 
 /** workbench/ 目录：仓库里 v2 与 v3 并存的地方。 */
 const ROOT = fileURLToPath(new URL("..", import.meta.url));

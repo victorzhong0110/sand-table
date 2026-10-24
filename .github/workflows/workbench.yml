@@ -50,22 +50,13 @@ jobs:
         env:
           SAND_EXTERNAL_REPO: /tmp/sand-clsx
           SAND_PYTHON_REPO: /tmp/sand-hf-hub
-      - run: SAND_KERNEL=v3 npm test
-        env:
-          SAND_EXTERNAL_REPO: /tmp/sand-clsx
-          SAND_PYTHON_REPO: /tmp/sand-hf-hub
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
         env:
           SAND_EXTERNAL_REPO: /tmp/sand-clsx
 
-      - run: npm run test:recovery
       - run: npm run test:host
       - run: npm run test:blank
-        env:
-          SAND_EXTERNAL_REPO: /tmp/sand-clsx
-
-      - run: SAND_KERNEL=v3 npm run test:blank
         env:
           SAND_EXTERNAL_REPO: /tmp/sand-clsx
 

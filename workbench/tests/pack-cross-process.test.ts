@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import { createServerV3 } from "../server/v3/server.ts";
+import { createServerV3 } from "../server/server.ts";
 import { basePack } from "../packs/base/index.ts";
 import type { PackSpec } from "../kernel/index.ts";
 

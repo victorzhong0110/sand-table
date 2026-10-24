@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import * as content from "../core/content.ts";
+import * as content from "../board/data-client/content.ts";
 import {
   canNest,
   cloneObject,
@@ -15,9 +15,9 @@ import {
   StaleVersionError,
   unlink,
   updateObject,
-} from "../core/content.ts";
-import type { ObjectState } from "../core/content.ts";
-import type { Rect } from "../core/objects.ts";
+} from "../board/data-client/content.ts";
+import type { ObjectState } from "../board/data-client/content.ts";
+import type { Rect } from "../board/data-client/objects.ts";
 
 const rect = (over: Partial<Rect> = {}): Rect => ({
   x: 0,

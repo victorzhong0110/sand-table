@@ -1,9 +1,9 @@
 import { paletteTypes, initialData } from "./domain-ui.ts";
 import { Icon } from "./Icon.tsx";
 import { useState } from "react";
-import type { Board, ComponentPack } from "../core/model.ts";
-import type { HistorySnapshot } from "../core/history.ts";
-import { componentTypes, defaultData } from "../core/spaces.ts";
+import type { Board, ComponentPack } from "./data-client/model.ts";
+import type { HistorySnapshot } from "./data-client/history.ts";
+import { componentTypes, defaultData } from "./data-client/spaces.ts";
 import { HistoryPanel } from "./HistoryPanel.tsx";
 import "./packs.css";
 const groups = [

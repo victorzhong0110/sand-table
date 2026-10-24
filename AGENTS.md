@@ -69,11 +69,11 @@ G
 
 | 目录 | 状态 |
 |---|---|
-| `workbench/kernel/` | v3 内核（新建中）。只能依赖 `node:*`、`ajv` 和自己 |
-| `workbench/packs/` | v3 内置包（新建中）。只能依赖 `workbench/kernel/index.ts` |
-| `workbench/server/v3/` | v3 MCP 工具面（新建中） |
-| `workbench/core/`、`workbench/server/`（v3 子目录除外）、`workbench/domains/`、`workbench/connectors/` | v2，将在 T24 删除。Phase 1、2 期间不要修改，除非任务卡明确要求 |
-| `workbench/board/` | 白板界面（React） |
+| `workbench/kernel/` | 内核。只能依赖 `node:*`、`ajv` 和自己 |
+| `workbench/packs/` | 内置包。只能依赖 `workbench/kernel/index.ts` |
+| `workbench/server/` | MCP 工具面 |
+| `workbench/core/` | 宿主桥 `host-bridge.ts`。v2 内核已删除 |
+| `workbench/board/` | 白板界面（React）。`board/data-client/` 把内核行翻译成界面还在用的形状 |
 | `workbench/local/` | 本地浏览器宿主与 MCP 桥接 |
 | `workbench/dsh-plugin/` | DeepSeek Harness 插件 |
 | `src/`（仓库根目录） | 旧 Research OS 界面，与本项目无关，不要修改 |

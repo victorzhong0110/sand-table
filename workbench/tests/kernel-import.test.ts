@@ -1261,9 +1261,6 @@ test("库里已经有不合格的组件包：跳过它并给出提示，工作�
 
 test("软删除坏包用新修订号：墓碑和 meta.revision 一起推进，没有坏包时修订号不动", () => {
   const s = scene("full.json");
-  const saved = process.env.SAND_KERNEL;
-  // 这条修复不在 SAND_KERNEL=v3 开关后面：不设它行为也一样。
-  delete process.env.SAND_KERNEL;
   try {
     const first = openWorkspace(s.root, "demo", s.registry);
     assert.ok(first.imported, "第一次是导入");
@@ -1322,8 +1319,6 @@ test("软删除坏包用新修订号：墓碑和 meta.revision 一起推进，�
     );
     third.db.close();
   } finally {
-    if (saved === undefined) delete process.env.SAND_KERNEL;
-    else process.env.SAND_KERNEL = saved;
     s.close();
   }
 });

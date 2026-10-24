@@ -657,74 +657,8 @@ function changedFields(data, base) {
  * 白板操作：一次实现，两个调用方（Agent 工具与会话命令共用同一份实现）。
  * 全部走 Sand Table 的 MCP server，不重复实现内核逻辑。
  */
-export function createOperations(mcp, kernel = process.env.SAND_KERNEL) {
-  if (kernel === "v3") return createV3Operations(mcp);
-  return createV2Operations(mcp);
-}
-
-function createV2Operations(mcp) {
-  /** 列出这个 MCP 进程里已经打开的白板。 */
-  const readBoards = async () =>
-    dataOf(await mcp.callTool("sand_list_boards", {}));
-
-  /**
-   * 列出白板；一个都没有时先附加到工作空间里保存的白板。
-   *
-   * MCP server 进程刚起来时内存里没有白板（工作空间是在 open 时才载入的），
-   * 不先附加的话 Agent 永远读到空列表。返回形状始终是 { boards: [...] }。
-   */
-  const listBoards = async () => {
-    const boards = await readBoards();
-    const list = Array.isArray(boards?.boards) ? boards.boards : [];
-    if (list.length > 0) return { boards: list };
-    await mcp.callTool("sand_open_board", {
-      title: DEFAULT_BOARD_TITLE,
-      preset: "blank",
-    });
-    const attached = await readBoards();
-    return {
-      boards: Array.isArray(attached?.boards) ? attached.boards : [],
-    };
-  };
-
-  /** 读一张白板。 */
-  const readBoard = async (boardId, offset = 0) => {
-    if (!boardId) throw new Error("缺少 boardId");
-    const summary = dataOf(await mcp.callTool("sand_read_board", { boardId }));
-    const objects = dataOf(
-      await mcp.callTool("sand_list_objects", { boardId, offset, limit: 50 }),
-    );
-    const spaces = dataOf(
-      await mcp.callTool("sand_read_spaces", { boardId, offset, limit: 50 }),
-    );
-    return {
-      ...summary,
-      objects,
-      spaces,
-      hint: "objects/spaces 各有分页信息；用 offset 读取下一页，再用 sand_table_read_object 读完整对象。",
-    };
-  };
-
-  /** 读白板上的一个对象。 */
-  const readObject = async (boardId, objectId) => {
-    if (!boardId) throw new Error("缺少 boardId");
-    if (!objectId) throw new Error("缺少 objectId");
-    return dataOf(
-      await mcp.callTool("sand_read_object", { boardId, objectId }),
-    );
-  };
-
-  const editSpace = async (args) =>
-    dataOf(
-      await mcp.callTool("sand_edit_space", {
-        boardId: args.boardId,
-        viewId: args.viewId,
-        revision: args.revision,
-        author: "DSH",
-        operation: JSON.parse(args.operation),
-      }),
-    );
-  return { listBoards, readBoard, readObject, editSpace };
+export function createOperations(mcp) {
+  return createV3Operations(mcp);
 }
 
 function createV3Operations(mcp) {

@@ -14,9 +14,9 @@ import { chromium } from "playwright";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { readConnection } from "../local/session.ts";
-import { resultData } from "../core/results.ts";
-import { V3Store } from "../board/v3/store.ts";
-import { toCommands, toBoard } from "../board/v3/adapter.ts";
+import { resultData } from "../board/data-client/results.ts";
+import { V3Store } from "../board/data-client/store.ts";
+import { toCommands, toBoard } from "../board/data-client/adapter.ts";
 const root = mkdtempSync(join(tmpdir(), "sand-blank-")),
   sessionFile = join(root, "connection.json");
 const service = spawn(
@@ -93,7 +93,7 @@ try {
   /* v3 时界面走的是 v3 的工具面：读白板、增量同步、历史导航都不一样。
      两种工具面读出来的白板形状是一样的（界面这一层负责翻译），
      所以下面的断言两边通用。 */
-  const v3 = process.env.SAND_KERNEL === "v3";
+  const v3 = true;
   const store = v3 ? new V3Store(call) : undefined;
   const boardId = v3
     ? (await call("sand_status")).homeBoardId

@@ -14,7 +14,7 @@ import type {
   DomainRelationType,
   DomainTemplate,
   DomainToolSpec,
-} from "../../core/objects.ts";
+} from "./objects.ts";
 
 /** 注册表里的包 id。 */
 export const NOVEL_PACK_ID = "novel";

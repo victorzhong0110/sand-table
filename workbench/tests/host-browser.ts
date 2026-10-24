@@ -190,10 +190,10 @@ try {
       .execute({ boardId: listed.boards[0].boardId }),
   );
   assert.ok(JSON.stringify(readBack).includes("Plugin table"));
+  const fresh = JSON.parse(await tools.get("sand_table_list_boards").execute());
   await tools.get("sand_table_edit_space").execute({
-    boardId: readBack.id,
-    viewId: Object.keys(readBack.spaces.views)[0],
-    revision: readBack.revision,
+    boardId: fresh.boards[0].boardId,
+    revision: fresh.boards[0].revision,
     operation: JSON.stringify({
       kind: "create",
       type: "text",

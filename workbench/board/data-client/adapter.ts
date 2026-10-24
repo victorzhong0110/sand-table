@@ -8,21 +8,16 @@
 // base.code_snippet → code，novel.* / research.* 走现有的领域兜底分支，
 // 其余未知类型走现有的「未知组件」占位。
 
-import type {
-  Activity,
-  Board,
-  ComponentPack,
-  SpaceActivity,
-} from "../../core/model.ts";
-import { componentTypes, defaultData } from "../../core/spaces.ts";
+import type { Activity, Board, ComponentPack, SpaceActivity } from "./model.ts";
+import { componentTypes, defaultData } from "./spaces.ts";
 import type {
   Camera,
   ComponentInstance,
   Space,
   SpaceLink,
   ThemeConfig,
-} from "../../core/spaces.ts";
-import type { ObjectRelation, WorkspaceObject } from "../../core/objects.ts";
+} from "./spaces.ts";
+import type { ObjectRelation, WorkspaceObject } from "./objects.ts";
 import type {
   V3Cache,
   V3ObjectRow,
@@ -722,23 +717,41 @@ export function toCommands(op: any, ctx: WriteContext): V3Command[] {
       const object = ctx.objects.get(presentation.objectId);
       if (!object) break;
       const set: Record<string, unknown> = {};
+      /* 人物没有姓名字段，标题就是名字。旧表单仍交 name，写到标题上。 */
+      let nameAsTitle: string | undefined;
       if (op.data) {
         const base = (op.baseData ?? {}) as Record<string, unknown>;
         const next = op.data as Record<string, unknown>;
+        const allowed = V3_FIELDS[object.type];
         for (const key of Object.keys(next)) {
           /* 只写真正改动的字段：别人同时改过的字段不能被这一笔盖掉。 */
           if (JSON.stringify(base[key]) === JSON.stringify(next[key])) continue;
-          set[v3FieldOf(object.type, key)] = next[key];
+          const mapped = v3FieldOf(object.type, key);
+          if (allowed && !allowed.includes(mapped)) {
+            if (
+              object.type === "novel.character" &&
+              key === "name" &&
+              typeof next[key] === "string"
+            )
+              nameAsTitle = next[key];
+            continue;
+          }
+          set[mapped] = next[key];
         }
       }
       /* 标题跟编辑器的基线比，不跟缓存比：缓存可能已经是新标题了
          （上一次保存刚写进去），拿缓存比会把这次该写的标题丢掉。 */
       const baselineTitle =
         op.baseTitle !== undefined ? String(op.baseTitle) : object.title;
-      const title =
+      const explicitTitle =
         op.title !== undefined && op.title !== baselineTitle
           ? String(op.title)
           : undefined;
+      const title =
+        explicitTitle ??
+        (nameAsTitle !== undefined && nameAsTitle !== baselineTitle
+          ? nameAsTitle
+          : undefined);
       if (title !== undefined || Object.keys(set).length)
         commands.push({
           op: "object.update",

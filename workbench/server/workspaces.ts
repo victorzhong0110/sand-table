@@ -1,214 +1,243 @@
-// 多工作空间管理器的 MCP 工具。
+// v3 的工作空间：根目录下的每个子目录是一个工作空间。
 //
-// 工作空间是长期作品的边界；一台机器上可以并存多个。
-// 本文件只做「编排」：调用 core/workspace-manager.ts，并把失败原因原样带给调用方。
-// 契约见 docs/architecture/workspace-management.zh-CN.md。
+// 切换工作空间 = 打开目标数据库、关掉当前数据库；内核没有「切换」这个概念，
+// 这里只负责开关连接和改 meta.title。
 
-import { randomUUID } from "node:crypto";
-import { cpSync, existsSync } from "node:fs";
-import { viewResult } from "../core/results.ts";
-import { z } from "zod";
-import { WorkspaceManager } from "../core/workspace-manager.ts";
-import { WorkspaceLockError } from "../core/workspace-lock.ts";
-import type { BoardStore } from "../core/store.ts";
-import { WorkspaceStore } from "../core/workspace.ts";
-import { workspacePort } from "../core/persistence.ts";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  CommandError,
+  exportWorkspaceBundle,
+  getMeta,
+  importWorkspaceBundle,
+  newId,
+  openWorkspace,
+  openWorkspaceDb,
+  setMeta,
+  type BundleFile,
+  type BundleImportReport,
+  type Db,
+  type Registry,
+} from "../kernel/index.ts";
 
-const id = z.string().min(1).max(200);
+/** 工作空间编号要能当目录名用。 */
+const ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 
 /**
- * 建管理器，并把它接到内核的宿主端口上。
+ * 工作空间编号过同一道关。
  *
- * 切换工作空间的顺序是「先落盘当前 → 再加载目标」：
- * 反过来会丢当前正在编辑的内容。落盘失败必须中止切换。
+ * 先看编号拼出来的路径还在不在根目录下面，再看编号本身合不合规：
+ * 越界是最危险的一种，先挡掉。两道关都过才放行。
  */
-export function createWorkspaceManager(
-  store: BoardStore,
-  root: string,
-  workspaceId: string,
-): WorkspaceManager {
-  return new WorkspaceManager({
-    root,
-    host: {
-      currentWorkspaceId: () => store.workspaceId,
-      flush: async () => {
-        /* flushSave 会抛错（保存失败必须能被调用方看见），这里不吞：
-           切换失败就是切换失败。必须 await：不等落盘完成就加载目标，
-           会丢掉当前正在编辑的内容。 */
-        await store.flushSave();
-      },
-      restore: (snapshot) => {
-        store.restore(snapshot);
-      },
-      renamed: (title) => {
-        store.workspaceTitle = title;
-      },
-      attach: (nextId, baseline) => {
-        const port = workspacePort(new WorkspaceStore(root), baseline);
-        store.attachPersistence(port, nextId);
-        store.touch();
-      },
-    },
-  });
+function assertWorkspaceId(root: string, id: string): void {
+  const base = resolve(root);
+  const inside = relative(base, resolve(base, id));
+  if (
+    !inside ||
+    inside === ".." ||
+    inside.startsWith(`..${sep}`) ||
+    isAbsolute(inside)
+  )
+    throw new CommandError(
+      "FORBIDDEN",
+      `工作空间编号「${id}」指向的位置不在工作空间根目录里面，不能这样操作。请先列出工作空间，用列表里的编号再试。`,
+      null,
+    );
+  if (!ID.test(id))
+    throw new CommandError(
+      "INVALID_DATA",
+      "工作空间编号只能以字母或数字开头，后面用字母、数字、连字符或下划线，最长 64 位。请先列出工作空间，用列表里的编号再试。",
+      null,
+    );
 }
 
-export type WorkspaceTools = {
-  /** 在 MCP server 上注册这些工具。 */
-  register: (tool: RegisterTool) => void;
+/** 当前打开的工作空间。切换工作空间就是换掉这一份。 */
+export type WorkspaceSession = {
+  registry: Registry;
+  root: string;
+  workspaceId: string;
+  db: Db;
 };
 
-export type RegisterTool = (
-  name: string,
-  description: string,
-  shape: Record<string, z.ZodTypeAny>,
-  fn: (args: Record<string, unknown>) => unknown,
-) => void;
+export type WorkspaceSummary = {
+  id: string;
+  title: string;
+  current: boolean;
+};
 
 /**
- * 把工作空间管理能力暴露成 MCP 工具。
+ * 列出根目录下的工作空间。
  *
- * 语义保持一致：读操作直接返回；写操作（新建/切换/重命名/删除）返回明确结果，
- * 失败时**抛错并带上原因**（例如「谁在占用这个工作空间、持有多久」）。
+ * 损坏的工作空间跳过并点名，不影响其他条目。
  */
-export function registerWorkspaceTools(
-  manager: WorkspaceManager,
-  tool: RegisterTool,
-  store?: BoardStore,
-) {
-  if (store) {
-    tool(
-      "sand_export_workspace",
-      "导出当前内存中的完整工作空间，包括未保存编辑、历史与附件；不覆盖磁盘。",
-      {},
-      () => {
-        const snapshot = structuredClone(store.snapshot());
-        return viewResult(
-          { workspaceId: snapshot.id, exported: true },
-          {
-            filename: `sand-table-${snapshot.id}.json`,
-            json: manager.store.exportSnapshot(snapshot),
-          },
-        );
-      },
-    );
-    tool(
-      "sand_reload_workspace",
-      "先将当前编辑保存为独立恢复副本，再重新加载磁盘版本。任一步失败都会保留当前编辑。",
-      {},
-      async () =>
-        store.withSavingPaused(async () => {
-          const originalId = store.workspaceId;
-          if (!originalId) throw Error("没有活动工作空间。");
-          const copy = manager.create({
-            id: randomUUID(),
-            title: `${store.workspaceTitle ?? store.snapshot().title}（恢复副本）`,
-          });
-          const sourceAttachments = manager.store.attachmentsDir(originalId);
-          if (existsSync(sourceAttachments))
-            cpSync(sourceAttachments, manager.store.attachmentsDir(copy.id), {
-              recursive: true,
-            });
-          for (let attempt = 0; attempt < 32; attempt++) {
-            const generation = store.generation;
-            const snapshot = structuredClone(store.snapshot());
-            if (snapshot.id !== originalId)
-              throw Error("活动工作空间已变化，已中止恢复。");
-            await manager.save({
-              ...snapshot,
-              id: copy.id,
-              title: copy.title,
-              createdAt: copy.createdAt,
-            } as typeof copy);
-            if (generation !== store.generation) continue;
-            const disk = manager.open(originalId);
-            store.restore(disk.workspace);
-            store.attachPersistence(
-              workspacePort(new WorkspaceStore(manager.root), disk.workspace),
-              originalId,
-            );
-            return viewResult(
-              { workspaceId: originalId, recoveryCopyId: copy.id },
-              {
-                board: store.read([...store.boards.keys()][0]),
-                recoveryCopyId: copy.id,
-                recoveryCopyTitle: copy.title,
-              },
-            );
-          }
-          throw Error("当前编辑持续变化，已保留恢复副本；请暂停编辑后重试。");
-        }),
-    );
+export function listWorkspaces(
+  root: string,
+  currentId: string,
+): {
+  workspaces: WorkspaceSummary[];
+  errors: { id: string; message: string }[];
+} {
+  const workspaces: WorkspaceSummary[] = [];
+  const errors: { id: string; message: string }[] = [];
+  let names: string[] = [];
+  try {
+    names = readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    return { workspaces, errors };
   }
-  tool(
-    "sand_list_workspaces",
-    "列出本机工作空间根目录下的全部工作空间。单个损坏的工作空间会被跳过并在 errors 里点名，不影响其他条目。",
-    {},
-    () => {
-      const result = manager.list();
-      return {
-        workspaces: result.workspaces,
-        activeId: manager.activeId(),
-        errors: result.errors,
-      };
-    },
-  );
-
-  tool(
-    "sand_create_workspace",
-    "新建一个空白工作空间。新建后需要显式保存才会落盘。",
-    {
-      id: id.optional(),
-      title: z.string().max(200).optional(),
-    },
-    async (args) => {
-      const workspace = manager.create({
-        id: args.id as string | undefined,
-        title: args.title as string | undefined,
+  for (const id of names.sort()) {
+    const file = join(root, id, "workspace.db");
+    if (!existsSync(file)) continue;
+    let db: Db | null = null;
+    try {
+      db = openWorkspaceDb(file, { create: false });
+      workspaces.push({
+        // 编号必须是目录名。库里的 workspace_id 可能还是导入前的旧编号，
+        // 拿它去切换、改名、删除会打到另一个目录，当前项也对不上。
+        id,
+        title: getMeta(db, "title") ?? id,
+        current: id === currentId,
       });
-      await manager.save(workspace);
-      return { id: workspace.id, title: workspace.title };
-    },
-  );
+    } catch (error) {
+      errors.push({
+        id,
+        message:
+          error instanceof Error
+            ? error.message
+            : "这个工作空间打不开，已跳过。",
+      });
+    } finally {
+      db?.close();
+    }
+  }
+  return { workspaces, errors };
+}
 
-  tool(
-    "sand_switch_workspace",
-    "切换活动工作空间。切换前会先落盘当前工作空间的未保存内容；落盘失败则中止切换，不会丢内容。",
-    { id },
-    async (args) => {
-      const result = await manager.switch(args.id as string);
-      return {
-        id: result.workspace.id,
-        title: result.workspace.title,
-        recovered: result.recovered,
-        reason: result.reason,
-      };
-    },
+/** 新建一个空白工作空间；不切换过去。 */
+export function createWorkspace(
+  root: string,
+  registry: Registry,
+  options: { id?: string; title?: string },
+): { id: string; title: string } {
+  const id = options.id ?? newId();
+  assertWorkspaceId(root, id);
+  if (existsSync(join(root, id)))
+    throw new CommandError(
+      "INVALID_DATA",
+      `工作空间「${id}」已经存在。请换一个编号，或者直接打开它。`,
+      null,
+    );
+  mkdirSync(join(root, id), { recursive: true });
+  const opened = openWorkspace(
+    root,
+    id,
+    registry,
+    options.title ? { title: options.title } : undefined,
   );
+  const title = getMeta(opened.db, "title") ?? id;
+  opened.db.close();
+  return { id, title };
+}
 
-  tool(
-    "sand_rename_workspace",
-    "改工作空间的标题。",
-    { id, title: z.string().min(1).max(200) },
-    async (args) => {
-      const workspace = await manager.rename(
-        args.id as string,
-        args.title as string,
-      );
-      return { id: workspace.id, title: workspace.title };
-    },
-  );
+/**
+ * 切换到另一个工作空间。
+ *
+ * 先打开目标再关当前的：目标打不开时，当前工作空间还在用，不会把人丢在半路。
+ */
+export function switchWorkspace(
+  session: WorkspaceSession,
+  id: string,
+): WorkspaceSession {
+  assertWorkspaceId(session.root, id);
+  const file = join(session.root, id, "workspace.db");
+  if (!existsSync(file))
+    throw new CommandError(
+      "NOT_FOUND",
+      `找不到工作空间「${id}」。请先列出工作空间，再切换到一个存在的。`,
+      null,
+    );
+  const opened = openWorkspace(session.root, id, session.registry);
+  session.db.close();
+  return {
+    registry: session.registry,
+    root: session.root,
+    workspaceId: id,
+    db: opened.db,
+  };
+}
 
-  tool(
-    "sand_delete_workspace",
-    "删除工作空间及其附件。被别的进程占用时会拒绝，并说明是谁在占用。",
-    { id },
-    async (args) => {
-      try {
-        return await manager.delete(args.id as string);
-      } catch (e) {
-        if (e instanceof WorkspaceLockError) throw e;
-        throw e;
-      }
-    },
-  );
+/** 改工作空间标题。 */
+export function renameWorkspace(
+  session: WorkspaceSession,
+  id: string,
+  title: string,
+): { id: string; title: string } {
+  assertWorkspaceId(session.root, id);
+  if (!title.trim())
+    throw new CommandError(
+      "INVALID_DATA",
+      "工作空间标题不能为空。请写一个标题再试。",
+      null,
+    );
+  const own = id === session.workspaceId;
+  const db = own ? session.db : openOther(session, id);
+  try {
+    setMeta(db, "title", title);
+  } finally {
+    if (!own) db.close();
+  }
+  return { id, title };
+}
+
+/** 删除工作空间。当前正在用的不能删。 */
+export function deleteWorkspace(
+  session: WorkspaceSession,
+  id: string,
+): { id: string; deleted: true } {
+  assertWorkspaceId(session.root, id);
+  if (id === session.workspaceId)
+    throw new CommandError(
+      "FORBIDDEN",
+      "不能删除当前正在使用的工作空间。请先切换到别的工作空间，再删除它。",
+      null,
+    );
+  const dir = join(session.root, id);
+  if (!existsSync(dir))
+    throw new CommandError(
+      "NOT_FOUND",
+      `找不到工作空间「${id}」。请先列出工作空间，再删除一个存在的。`,
+      null,
+    );
+  rmSync(dir, { recursive: true, force: true });
+  return { id, deleted: true };
+}
+
+/** 导出当前打开的工作空间。返回文件名和 JSON 文本。 */
+export function exportWorkspace(session: WorkspaceSession): BundleFile {
+  return exportWorkspaceBundle(session.db);
+}
+
+/**
+ * 从 JSON 文本导入一个新的工作空间。
+ *
+ * 不切换过去，也不覆盖已有目录。
+ */
+export function importWorkspace(
+  session: WorkspaceSession,
+  json: string,
+): BundleImportReport {
+  return importWorkspaceBundle(session.root, session.registry, json);
+}
+
+function openOther(session: WorkspaceSession, id: string): Db {
+  const file = join(session.root, id, "workspace.db");
+  if (!existsSync(file))
+    throw new CommandError(
+      "NOT_FOUND",
+      `找不到工作空间「${id}」。请先列出工作空间，再操作一个存在的。`,
+      null,
+    );
+  return openWorkspaceDb(file, { create: false });
 }

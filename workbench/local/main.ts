@@ -1,6 +1,5 @@
 import { resolve, basename } from "node:path";
 import { spawn } from "node:child_process";
-import { bind } from "../connectors/git.ts";
 import { startLocal } from "./service.ts";
 import { defaultSessionFile } from "./session.ts";
 import type { McpEntry } from "./config.ts";
@@ -10,8 +9,7 @@ let open = false,
   workspaceDir: string | undefined = process.env.SAND_WORKSPACE_DIR
     ? resolve(process.env.SAND_WORKSPACE_DIR)
     : undefined,
-  workspaceId: string | undefined = process.env.SAND_WORKSPACE_ID,
-  preset: "blank" | "code" = "blank";
+  workspaceId: string | undefined = process.env.SAND_WORKSPACE_ID;
 let folder = "";
 type LocalRuntime = { serverEnv?: Record<string, string>; mcpEntry?: McpEntry };
 let runtime: LocalRuntime | undefined;
@@ -34,8 +32,7 @@ const embedOrigins: string[] = [];
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
-  if (arg === "--code-board") preset = "code";
-  else if (arg === "--open") open = true;
+  if (arg === "--open") open = true;
   else if (arg === "--no-open") open = false;
   else if (arg === "--runtime") {
     const value = args[++i];
@@ -77,18 +74,12 @@ for (let i = 0; i < args.length; i++) {
     );
   }
 }
-const bindings = roots.length ? bind(roots) : [];
-if (folder) {
-  if (process.env.SAND_KERNEL !== "v3")
-    throw Error("绑定文件夹需要先设置 SAND_KERNEL=v3，再带 --folder 启动。");
-  process.env.SAND_FOLDER = folder;
-}
+if (folder) process.env.SAND_FOLDER = folder;
 try {
   const local = await startLocal({
-    workspaces: bindings.map((w) => `${w.label}=${w.root}`),
+    workspaces: roots,
     sessionFile,
     port,
-    preset,
     workspaceDir,
     workspaceId,
     embedOrigins,

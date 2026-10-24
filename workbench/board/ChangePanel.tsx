@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { Board } from "../core/model.ts";
-import type { ChangeIntent, FileRef, Proposal } from "../core/changes.ts";
+import type { Board } from "./data-client/model.ts";
+import type { ChangeIntent, FileRef, Proposal } from "./data-client/changes.ts";
 const decisions = {
   pending: "待确认",
   accepted: "已确认",

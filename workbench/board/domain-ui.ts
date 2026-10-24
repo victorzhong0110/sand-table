@@ -3,10 +3,10 @@ import {
   registerDomainPack,
   findObjectType,
   listDomainPacks,
-} from "../core/domains.ts";
-import { novelPack } from "../domains/novel/index.ts";
-import { researchPack } from "../domains/research/index.ts";
-import { componentTypes, defaultData } from "../core/spaces.ts";
+} from "./data-client/domains.ts";
+import { novelPack } from "./data-client/novel-pack.ts";
+import { researchPack } from "./data-client/research-pack.ts";
+import { componentTypes, defaultData } from "./data-client/spaces.ts";
 registerDomainPack(novelPack);
 registerDomainPack(researchPack);
 export function paletteTypes(): { type: string; title: string }[] {

@@ -11,7 +11,10 @@ import {
   resolveBridge,
   HOST_BRIDGE_KEY,
 } from "../core/host-bridge.ts";
-import type { HostTaskEvent, HostTaskRequest } from "../core/objects.ts";
+import type {
+  HostTaskEvent,
+  HostTaskRequest,
+} from "../board/data-client/objects.ts";
 
 const request: HostTaskRequest = {
   boardId: "board-1",

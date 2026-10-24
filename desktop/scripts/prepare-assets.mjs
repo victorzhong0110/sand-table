@@ -21,15 +21,13 @@ const workbench = join(repoRoot, "workbench");
 const stage = join(desktopRoot, ".stage", "workbench");
 
 // 运行期需要的目录。board/ 是前端源码，已经构建进 dist/，留一份便于排查。
-// packs/ 是内核的领域包：server/v3/server.ts 会 import 它，
+// packs/ 是内核的领域包：server/server.ts 会 import 它，
 // 少拷这一个目录，打包出来的桌面版起不了本地工作台
 // （报 ERR_MODULE_NOT_FOUND，窗口一直停在加载页）。
 // desktop/tests/stage-layout.test.cjs 会核对这份清单跟运行期真正 import 到的目录一致。
 const runtimeDirs = [
   "board",
-  "connectors",
   "core",
-  "domains",
   "dsh-plugin",
   "kernel",
   "local",
@@ -66,7 +64,7 @@ for (const file of runtimeFiles) {
   if (existsSync(from)) cpSync(from, join(stage, file));
 }
 
-// 只装运行期依赖：TypeScript 是 domains/code/indexer.ts 的运行期依赖，
+// 只装运行期依赖：TypeScript 是 packs/code 索引器的运行期依赖，
 // 因此它留在 dependencies 里，--omit=dev 不会漏掉它。
 // --omit=optional 去掉平台相关的原生包（pdfjs-dist 的 canvas 后端只用于
 // 把页面渲染成图，这里只取文本与指纹，用不上；交叉打包时它们还是错平台的）。
@@ -87,7 +85,7 @@ const install = spawnSync(
 if (install.status !== 0) fail("工作台运行期依赖安装失败。");
 
 // pdfjs-dist 里大部分体积是 sourcemap 和工作台根本没引用的现代版构建。
-// connectors/pdf.ts 只用 legacy/build/pdf.mjs，worker 也在同一个目录里，
+// packs/research/pdf.ts 只用 legacy/build/pdf.mjs，worker 也在同一个目录里，
 // 所以 build/、types/、web/ 与全部 .map 都可以去掉。
 const pdfjs = join(stage, "node_modules", "pdfjs-dist");
 if (existsSync(pdfjs)) {
