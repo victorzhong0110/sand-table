@@ -87,6 +87,21 @@ export { openWorkspace } from "./workspace.ts";
 export type { OpenWorkspaceResult } from "./workspace.ts";
 export { importV2 } from "./legacy/import-v2.ts";
 export type { ImportReport, ImportSkipped } from "./legacy/import-v2.ts";
+export {
+  exportWorkspaceBundle,
+  importWorkspaceBundle,
+  IMPORT_REPORT_FILENAME,
+  MAX_BUNDLE_BLOB_BYTES,
+  MAX_BUNDLE_JSON_BYTES,
+  WORKSPACE_BUNDLE_FORMAT,
+  WORKSPACE_BUNDLE_VERSION,
+} from "./bundle.ts";
+export type {
+  BundleCounts,
+  BundleDegraded,
+  BundleFile,
+  BundleImportReport,
+} from "./bundle.ts";
 export { toObjectRow, toPresentationRow, toRelationRow } from "./rows.ts";
 export { migrateData, migrateRow } from "./migrate.ts";
 export type { MigratedObjectRow, MigrationResult } from "./migrate.ts";

@@ -7,11 +7,15 @@ import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   CommandError,
+  exportWorkspaceBundle,
   getMeta,
+  importWorkspaceBundle,
   newId,
   openWorkspace,
   openWorkspaceDb,
   setMeta,
+  type BundleFile,
+  type BundleImportReport,
   type Db,
   type Registry,
 } from "../../kernel/index.ts";
@@ -206,6 +210,23 @@ export function deleteWorkspace(
     );
   rmSync(dir, { recursive: true, force: true });
   return { id, deleted: true };
+}
+
+/** 导出当前打开的工作空间。返回文件名和 JSON 文本。 */
+export function exportWorkspace(session: WorkspaceSession): BundleFile {
+  return exportWorkspaceBundle(session.db);
+}
+
+/**
+ * 从 JSON 文本导入一个新的工作空间。
+ *
+ * 不切换过去，也不覆盖已有目录。
+ */
+export function importWorkspace(
+  session: WorkspaceSession,
+  json: string,
+): BundleImportReport {
+  return importWorkspaceBundle(session.root, session.registry, json);
 }
 
 function openOther(session: WorkspaceSession, id: string): Db {
