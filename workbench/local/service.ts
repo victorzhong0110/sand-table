@@ -7,7 +7,7 @@ import {
   getDefaultEnvironment,
   StdioClientTransport,
 } from "@modelcontextprotocol/client/stdio";
-import { connectionConfig, type McpEntry } from "./config.ts";
+import { connectionConfig, defaultMcpEntry, type McpEntry } from "./config.ts";
 import {
   readConnection,
   writeConnection,
@@ -15,12 +15,10 @@ import {
 } from "./session.ts";
 
 /**
- * 桥接进程用的 MCP 客户端条目。
- *
- * 桥接由 MCP 客户端启动，它看到的是客户端自己的环境变量，
- * 生成的条目里必须带上内核版本，桥接才会走同一套工具面；
+ * 桥接由 MCP 客户端启动，它看到的是客户端自己的环境变量。
+ * 生成的条目里必须带上内核版本，桥接才会走同一套工具面。
  * 自定义条目自己的环境变量要留着，只补内核版本。
- * 没有自定义条目时用本机的 node 跑 bridge.ts，和 config.ts 的默认一致。
+ * 默认命令和参数来自 config.ts，这里不另写一套。
  */
 export function bridgeEntry(
   kernel: string | undefined,
@@ -28,15 +26,11 @@ export function bridgeEntry(
   sessionFile: string,
 ): McpEntry | undefined {
   if (kernel !== "v3") return entry;
+  const base = entry ?? defaultMcpEntry(sessionFile);
   return {
-    command: entry?.command ?? process.execPath,
-    args: entry?.args ?? [
-      "--experimental-strip-types",
-      fileURLToPath(new URL("./bridge.ts", import.meta.url)),
-      "--session-file",
-      sessionFile,
-    ],
-    env: { ...entry?.env, SAND_KERNEL: "v3" },
+    command: base.command,
+    args: base.args,
+    env: { ...base.env, SAND_KERNEL: "v3" },
   };
 }
 

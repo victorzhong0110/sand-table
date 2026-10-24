@@ -25,6 +25,7 @@
 - 新建 `workbench/server/v3/server.ts`、`workbench/server/v3/core-tools.ts`、`workbench/server/v3/app-tools.ts`、`workbench/server/v3/workspaces.ts`、`workbench/server/v3/output.ts`
 - `workbench/kernel/types.ts`（把 `ToolRegistrar` 从 `unknown` 换成具体类型）
 - `workbench/server/main.ts`、`workbench/local/service.ts`、`workbench/local/bridge.ts`（只加 `SAND_KERNEL=v3` 分支）
+- `workbench/local/config.ts`（默认桥接命令的唯一来源。给默认条目补环境变量时改 `defaultMcpEntry`，不要在 `service.ts` 再写一套 command/args）
 - 新建 `workbench/tests/tools-v3.test.ts`
 - `workbench/tests/architecture.test.ts`（加工具数量规则）
 - `.github/workflows/workbench.yml`（加一步：`SAND_KERNEL=v3 npm test`）
@@ -34,6 +35,7 @@
 - 不改 v2 工具的行为；不设环境变量时一切照旧。
 - 工具层不写业务规则：参数解析 → 调 `kernel` → 整理输出。需要的查询 `kernel/read.ts` 没有时，停下来在 PR 里提“需要架构确认”，不要在工具层拼 SQL。
 - 不注册任何领域包工具（T22、T23 的事）。
+- 不把 `defaultMcpEntry` 的默认命令复制到别的文件。
 
 ## 做法
 

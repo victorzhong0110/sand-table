@@ -12,20 +12,27 @@ export type McpEntry = {
   env?: Record<string, string>;
 };
 
+export function defaultMcpEntry(sessionFile: string): McpEntry {
+  return {
+    command: process.execPath,
+    args: [
+      "--experimental-strip-types",
+      fileURLToPath(new URL("./bridge.ts", import.meta.url)),
+      "--session-file",
+      sessionFile,
+    ],
+  };
+}
+
 export function connectionConfig(
   sessionFile: string,
   entry?: McpEntry,
   platform = process.platform,
 ) {
-  const args = [
-    "--experimental-strip-types",
-    fileURLToPath(new URL("./bridge.ts", import.meta.url)),
-    "--session-file",
-    sessionFile,
-  ];
+  const fallback = defaultMcpEntry(sessionFile);
   const resolved: McpEntry = {
-    command: entry?.command ?? process.execPath,
-    args: entry?.args ?? args,
+    command: entry?.command ?? fallback.command,
+    args: entry?.args ?? fallback.args,
     ...(entry?.env ? { env: entry.env } : {}),
   };
   const cliQuote =
