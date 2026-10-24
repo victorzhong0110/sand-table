@@ -20,6 +20,9 @@ await new Promise((r) => probe.close(r));
 const child = spawn(executable, [`--remote-debugging-port=${port}`], {
   env: {
     ...process.env,
+    /* 桌面主进程的日志默认被这个开关挡掉（main.cjs 的 log()）：
+       打开它，失败时才能看到本地服务自己的 stderr 与就绪信息。 */
+    SAND_DESKTOP_LOG: "1",
     SAND_DESKTOP_USER_DATA: join(output, "user"),
     SAND_WORKSPACE_DIR: join(output, "workspaces"),
   },
