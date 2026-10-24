@@ -20,6 +20,12 @@ await new Promise((r) => probe.close(r));
 const child = spawn(executable, [`--remote-debugging-port=${port}`], {
   env: {
     ...process.env,
+    /* 桌面主进程的日志默认被这个开关挡掉（main.cjs 的 log()）：
+       打开它，失败时才能看到本地服务自己的 stderr 与就绪信息。 */
+    SAND_DESKTOP_LOG: "1",
+    /* 打包后的 Electron 在 Windows 上没有控制台，console.log 落不到 stdout；
+       这个开关把主进程的日志转到 stderr，冒烟脚本才收得到。 */
+    ELECTRON_ENABLE_LOGGING: "1",
     SAND_DESKTOP_USER_DATA: join(output, "user"),
     SAND_WORKSPACE_DIR: join(output, "workspaces"),
   },
@@ -31,9 +37,17 @@ let startupError;
 child.on("error", (error) => {
   startupError = error;
 });
-child.stdout.resume();
-child.stderr.resume();
+// 子进程的输出要留着：失败时「本地服务为什么没就绪」全在这里面。
+const childOutput = { stdout: "", stderr: "" };
+const collect = (key) => (chunk) => {
+  childOutput[key] = (childOutput[key] + String(chunk)).slice(-8000);
+};
+child.stdout.on("data", collect("stdout"));
+child.stderr.on("data", collect("stderr"));
 try {
+  const started = Date.now();
+  let portAt = 0; // 拿到调试端口的时刻
+  let pageAt = 0; // 找到页面的时刻
   const end = Date.now() + 90000;
   let ws;
   while (Date.now() < end) {
@@ -50,15 +64,47 @@ try {
     await new Promise((r) => setTimeout(r, 250));
   }
   assert.ok(ws, "便携窗口未开放调试端口，未能完成真实窗口验收。");
-  browser = await chromium.connectOverCDP(ws);
+  portAt = Date.now();
+  /* 桌面主进程给本地服务 60 秒就绪预算，CDP 握手也得留够时间：
+     慢的 runner 上默认 30 秒会不够。 */
+  browser = await chromium.connectOverCDP(ws, { timeout: 60000 });
   const context = browser.contexts()[0];
   let page;
-  for (let i = 0; i < 120; i++) {
+  /* 等页面的耐心不能比程序自己的就绪预算还短：
+     桌面主进程给本地服务 60 秒，这里给 90 秒。 */
+  const pageDeadline = Date.now() + 90000;
+  while (Date.now() < pageDeadline) {
     page = context
       .pages()
       .find((p) => /^http:\/\/127\.0\.0\.1:\d+/.test(p.url()));
-    if (page) break;
+    if (page) {
+      pageAt = Date.now();
+      break;
+    }
     await new Promise((r) => setTimeout(r, 250));
+  }
+  if (!page) {
+    // 失败时把看到的东西都打出来：窗口里是哪个页面、服务端说了什么。
+    const pages = context
+      .pages()
+      .map((p) => `${p.url()}${p.url() ? "" : ""} | ${p.title?.() ?? ""}`);
+    const body = (
+      await Promise.all(
+        context.pages().map((p) => p.innerText().catch(() => "")),
+      )
+    )
+      .join("\n---\n")
+      .slice(0, 2000);
+    console.error(
+      [
+        "便携窗口没有打开本地工作台。",
+        `各阶段耗时：拿到调试端口 ${portAt ? Math.round((portAt - started) / 1000) + " 秒" : "没拿到"}；再找到页面：${pageAt ? Math.round((pageAt - portAt) / 1000) + " 秒" : "没找到（等了 " + Math.round((Date.now() - portAt) / 1000) + " 秒）"}；合计 ${Math.round((Date.now() - started) / 1000)} 秒。`,
+        `窗口里的页面：${pages.join(" || ") || "(没有页面)"}`,
+        `页面正文：${body || "(空)"}`,
+        `子进程 stdout 尾部：${childOutput.stdout || "(空)"}`,
+        `子进程 stderr 尾部：${childOutput.stderr || "(空)"}`,
+      ].join("\n"),
+    );
   }
   assert.ok(page, "便携窗口没有打开本地工作台");
   const frame = page.frameLocator("iframe");
@@ -95,7 +141,10 @@ try {
   const exited = new Promise((resolve, reject) => {
     if (child.exitCode !== null) return resolve();
     const timer = setTimeout(() => reject(Error("便携窗口关闭超时")), 15000);
-    child.once("exit", () => { clearTimeout(timer); resolve(); });
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
   });
   void session.send("Browser.close").catch(() => {});
   await exited;
