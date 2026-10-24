@@ -1,5 +1,11 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -1162,6 +1168,47 @@ try {
       changes >= 2 && changes <= 5,
       `空闲时每秒一次增量请求（3 秒内 ${changes} 次）。`,
     );
+    /* 导出再导入：文件能下来，导入后能切到新工作空间并看到原来的组件。 */
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await frame.getByRole("button", { name: "设置", exact: true }).click();
+    const settings = frame.getByRole("dialog", { name: "设置" });
+    const downloadPromise = page.waitForEvent("download");
+    await settings
+      .getByRole("button", { name: "导出工作空间", exact: true })
+      .click();
+    const download = await downloadPromise;
+    const exportedText = readFileSync((await download.path())!, "utf8");
+    const exported = JSON.parse(exportedText);
+    assert.equal(exported.format, "sand-table-workspace");
+    const homeId = exported.workspace?.homeBoardId;
+    const onHome = new Set(
+      (exported.presentations ?? [])
+        .filter(
+          (item: { boardId?: string; objectId?: string }) =>
+            item.boardId === homeId,
+        )
+        .map((item: { objectId?: string }) => item.objectId),
+    );
+    const kept = (exported.objects ?? []).find(
+      (object: { id?: string; type?: string; title?: string }) =>
+        object.type === "base.note" &&
+        object.title === "我的计划" &&
+        onHome.has(object.id),
+    );
+    assert.ok(kept?.title, "导出的文件里有首页上的「我的计划」");
+    const bundleFile = join(root, "exported-workspace.json");
+    writeFileSync(bundleFile, exportedText);
+    const chooserPromise = page.waitForEvent("filechooser");
+    await settings.getByRole("button", { name: "导入", exact: true }).click();
+    await (await chooserPromise).setFiles(bundleFile);
+    await settings.getByText(/已导入/).waitFor({ timeout: 30000 });
+    await settings
+      .getByRole("button", { name: "切换到导入的工作空间" })
+      .click();
+    await frame
+      .locator(".component-card", { hasText: kept.title })
+      .first()
+      .waitFor({ timeout: 30000 });
   }
   assert.deepEqual(errors, []);
   console.log(

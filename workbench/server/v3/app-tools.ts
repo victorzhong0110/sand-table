@@ -28,6 +28,8 @@ import { toolValue } from "./output.ts";
 import {
   createWorkspace,
   deleteWorkspace,
+  exportWorkspace,
+  importWorkspace,
   listWorkspaces,
   renameWorkspace,
   switchWorkspace,
@@ -368,11 +370,20 @@ export function registerAppTools(
 
   registrar.tool(
     "app_workspace",
-    "Manage workspaces: list, create, switch, rename or delete them. The workspace in use cannot be deleted.",
+    "Manage workspaces: list, create, switch, rename, delete, export or import them. The workspace in use cannot be deleted. Import never overwrites an existing workspace.",
     {
-      action: z.enum(["list", "create", "switch", "rename", "delete"]),
+      action: z.enum([
+        "list",
+        "create",
+        "switch",
+        "rename",
+        "delete",
+        "export",
+        "import",
+      ]),
       id: z.string().min(1).max(64).optional(),
       title: z.string().min(1).max(200).optional(),
+      json: z.string().optional(),
     },
     (args) => {
       const session = host.session();
@@ -388,6 +399,25 @@ export function registerAppTools(
           ...(args.title ? { title: args.title } : {}),
         });
         return created;
+      }
+      if (args.action === "export") {
+        const exported = exportWorkspace(session);
+        return toolValue(
+          {
+            filename: exported.filename,
+            bytes: Buffer.byteLength(exported.json),
+          },
+          exported,
+        );
+      }
+      if (args.action === "import") {
+        if (!args.json)
+          throw new CommandError(
+            "INVALID_DATA",
+            "导入要给出工作空间文件的 JSON 文本。请先选择导出的文件。",
+            null,
+          );
+        return importWorkspace(session, args.json);
       }
       if (!args.id)
         throw new CommandError(

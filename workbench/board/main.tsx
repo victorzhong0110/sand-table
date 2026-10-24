@@ -1,6 +1,7 @@
 import { blocksCanvasShortcut } from "./keyboard.ts";
 import "./domain-ui.ts";
 import { CanvasShell } from "./CanvasShell.tsx";
+import type { WorkspaceImportReport } from "./WorkspacePanel.tsx";
 import React, { useState, useEffect, useRef, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
@@ -48,6 +49,17 @@ const V3_CORE_TOOLS = new Set([
 function unpack(r: any) {
   if (r.isError) throw Error(r.content?.[0]?.text || "Request failed");
   return resultData(r) ?? JSON.parse(r.content[0].text);
+}
+function readableError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  try {
+    const parsed = JSON.parse(raw) as { message?: unknown };
+    if (typeof parsed.message === "string" && parsed.message)
+      return parsed.message;
+  } catch {
+    /* 工具失败时文本是 JSON；别的错误保持原样。 */
+  }
+  return raw;
 }
 function Workbench() {
   const [viewId] = useState(() => crypto.randomUUID());
@@ -105,6 +117,8 @@ function Workbench() {
   const [workspaceActiveId, setWorkspaceActiveId] = useState<
     string | undefined
   >();
+  const [importReport, setImportReport] =
+    useState<WorkspaceImportReport | null>(null);
   const {
     app,
     error: connectionError,
@@ -336,10 +350,12 @@ function Workbench() {
         refreshV3Board();
         return true;
       }
-      case "sand_export_workspace":
-        throw Error(
-          "v3 内核还没有导出工作空间的工具。要备份请直接复制工作空间目录里的 workspace.db。",
-        );
+      case "sand_export_workspace": {
+        const exported: any = await callTool("app_workspace", {
+          action: "export",
+        });
+        return { filename: exported.filename, json: exported.json };
+      }
       case "sand_reload_workspace":
         throw Error(
           "v3 内核的工作空间就是数据库文件，没有「保留副本并重新加载」这一步。",
@@ -480,7 +496,26 @@ function Workbench() {
       if (result.isError) throw Error("宿主未接受下载，当前编辑仍保留。");
       setRecoveryMessage("已导出当前工作空间。");
     } catch (error) {
-      setError(String(error));
+      setError(readableError(error));
+    }
+  }
+  async function importWorkspace(json: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const report = (await callTool("app_workspace", {
+        action: "import",
+        json,
+      })) as WorkspaceImportReport;
+      if (!report?.workspaceId)
+        throw Error("导入没有返回新的工作空间编号。请重新导出后再试。");
+      setImportReport(report);
+      setRecoveryMessage("");
+      await refreshWorkspaces();
+    } catch (error) {
+      setError(readableError(error));
+    } finally {
+      setBusy(false);
     }
   }
   async function reloadWorkspace() {
@@ -1045,6 +1080,12 @@ function Workbench() {
           busy,
           onExport: () => void exportWorkspace(),
           onReload: () => void reloadWorkspace(),
+          ...(kernel === "v3"
+            ? {
+                onImport: (json: string) => void importWorkspace(json),
+                importReport,
+              }
+            : {}),
           recoveryMessage,
           errors: workspaceErrors,
           onRefresh: () => void refreshWorkspaces(),

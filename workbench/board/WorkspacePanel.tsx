@@ -1,7 +1,21 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Icon } from "./Icon.tsx";
 import type { WorkspaceDescriptor } from "../core/objects.ts";
 import "./workspace.css";
+
+/** 导入完成后给人看的结果。 */
+export type WorkspaceImportReport = {
+  workspaceId: string;
+  title: string;
+  counts: {
+    objects: number;
+    presentations: number;
+    relations: number;
+    blobs: number;
+  };
+  degraded: { id: string; reason: string }[];
+  external: { kind: string; uri: string; fragment?: string }[];
+};
 
 /**
  * 工作空间管理面板。
@@ -32,6 +46,10 @@ export type WorkspacePanelProps = {
   onRefresh?: () => void;
   onExport?: () => void;
   onReload?: () => void;
+  /** 读入一份工作空间 JSON。只在 v3 传入。 */
+  onImport?: (json: string) => void;
+  /** 最近一次导入的结果。 */
+  importReport?: WorkspaceImportReport | null;
   recoveryMessage?: string;
 };
 
@@ -57,13 +75,27 @@ export function WorkspacePanel({
   onRefresh,
   onExport,
   onReload,
+  onImport,
+  importReport,
   recoveryMessage,
 }: WorkspacePanelProps) {
   const [newTitle, setNewTitle] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [importError, setImportError] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
   const disabled = Boolean(busy);
+
+  async function readImportFile(file: File) {
+    setImportError("");
+    try {
+      const text = await file.text();
+      onImport?.(text);
+    } catch {
+      setImportError("这个文件读不出来。请换一个导出的工作空间文件再试。");
+    }
+  }
 
   function submitCreate() {
     const title = newTitle.trim();
@@ -105,12 +137,75 @@ export function WorkspacePanel({
             导出工作空间
           </button>
         )}
+        {onImport && (
+          <>
+            <button
+              disabled={disabled}
+              onClick={() => fileRef.current?.click()}
+            >
+              导入
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/json,.json"
+              hidden
+              aria-label="选择要导入的工作空间文件"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (file) void readImportFile(file);
+              }}
+            />
+          </>
+        )}
         {onReload && (
           <button disabled={disabled} onClick={onReload}>
             保留副本并重新加载
           </button>
         )}
       </div>
+      {importError && (
+        <p className="workspace-errors" role="alert">
+          {importError}
+        </p>
+      )}
+      {importReport && (
+        <div role="status">
+          <p>
+            已导入 {importReport.counts.objects} 个对象、
+            {importReport.counts.presentations} 个展示、
+            {importReport.counts.relations} 条关系、
+            {importReport.counts.blobs} 个附件。
+          </p>
+          {importReport.degraded.length > 0 && (
+            <ul className="workspace-errors">
+              {importReport.degraded.map((item) => (
+                <li key={`${item.id}:${item.reason}`}>{item.reason}</li>
+              ))}
+            </ul>
+          )}
+          {importReport.external.length > 0 && (
+            <>
+              <p>这些外部资源没有随包带走：</p>
+              <ul>
+                {importReport.external.map((item) => (
+                  <li key={`${item.kind}:${item.uri}:${item.fragment ?? ""}`}>
+                    {item.kind} {item.uri}
+                    {item.fragment ? `#${item.fragment}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <button
+            disabled={disabled}
+            onClick={() => onSwitch?.(importReport.workspaceId)}
+          >
+            切换到导入的工作空间
+          </button>
+        </div>
+      )}
       {recoveryMessage && <p role="status">{recoveryMessage}</p>}
       {workspaces.length === 0 ? (
         <p className="workspace-empty">还没有工作空间。</p>
