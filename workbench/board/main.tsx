@@ -279,11 +279,16 @@ function Workbench() {
           action: "switch",
           id: args.id,
         });
-        /* 换工作空间就是换一块数据库：白板要重新装载，不能等下一次增量。 */
+        /* 换工作空间就是换一块数据库：白板要重新装载，不能等下一次增量。
+           缓存也整块换掉 —— store 按工作空间判定，旧库的内容一条都不留下。
+           切换本身就回了新的工作空间编号，状态里的编号只作兜底。 */
+        const switched = result as any;
         const status: any = await callTool("sand_status");
         const home = status?.homeBoardId;
+        const workspaceId: string | undefined =
+          switched?.id ?? status?.workspace?.id;
         if (home) {
-          await storeRef.current?.load(home);
+          await storeRef.current?.load(home, { workspaceId });
           viewRef.current = { ...viewRef.current, spaceId: home };
           refreshV3Board();
         }
@@ -759,7 +764,7 @@ function Workbench() {
       storeRef.current = store;
       viewRef.current = { ...viewRef.current, spaceId: boardId };
       try {
-        await store.load(boardId);
+        await store.load(boardId, { workspaceId: status?.workspace?.id });
         /* 登记视角：内核要先有这条视角，之后的选中与镜头才有地方放。
            app_view 的 select / camera 不带白板编号，视角只能由 navigate 建立。 */
         await callTool("app_view", {

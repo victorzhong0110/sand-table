@@ -230,11 +230,25 @@ export async function detectKernel(
  *
  * 用法：先 load(boardId) 装一次，之后每秒 sync() 一次；
  * 自己写完立刻 sync() 一次，界面不用等下一个整秒。
+ *
+ * **工作空间隔离**：不同工作空间是不同的库，旧库的内容一条都不该留下。
+ * 切工作空间时整块清缓存；在途的响应按「工作空间 + 加载代号 + 修订号」判过期，
+ * 不能把旧库的增量合进新库（那会把新库的修订号也带偏，之后的增量就永远等不到了）。
  */
 export class V3Store {
   readonly cache: V3Cache;
   /** 调用次数，测试用。 */
   readonly stats: V3Stats = { board: 0, changes: 0 };
+  /** 当前工作空间。切换时整个缓存要清空。 */
+  workspaceId: string | undefined;
+  /**
+   * 加载代号：每次 load 换一次。
+   *
+   * 在途的 sync 回来时代号已经变了 ⟹ 那条响应是给上一轮的，丢掉。
+   * 光看工作空间不够：同一个工作空间里连续两次装载，或切走又切回来，
+   * 都会出现「工作空间相同、但响应已过期」。
+   */
+  private generation = 0;
   private readonly tool: V3Tool;
   private loading: Promise<void> | undefined;
 
@@ -245,8 +259,18 @@ export class V3Store {
     (globalThis as { __sandV3Stats?: V3Stats }).__sandV3Stats = this.stats;
   }
 
-  /** 整块装载一次白板：对象、展示、关系、设置与组件包。 */
-  async load(boardId: string): Promise<void> {
+  /**
+   * 整块装载一次白板：对象、展示、关系、设置与组件包。
+   *
+   * `workspaceId` 与当前的不一样 ⟹ 换库了，缓存整块清空再装。
+   */
+  async load(
+    boardId: string,
+    options: { workspaceId?: string } = {},
+  ): Promise<void> {
+    const next = options.workspaceId ?? this.workspaceId;
+    if (next !== this.workspaceId) this.clear();
+    this.workspaceId = next;
     this.loading = this.loadNow(boardId);
     try {
       await this.loading;
@@ -255,11 +279,30 @@ export class V3Store {
     }
   }
 
+  /** 缓存整块清空：换工作空间时旧库的内容一条都不该留下。 */
+  private clear() {
+    this.cache.objects.clear();
+    this.cache.presentations.clear();
+    this.cache.relations.clear();
+    this.cache.settings.clear();
+    this.cache.packs.clear();
+    this.cache.revision = 0;
+    this.cache.boardId = "";
+  }
+
   private async loadNow(boardId: string): Promise<void> {
-    const data = await this.tool("app_board", { boardId });
+    const generation = ++this.generation;
+    const workspaceId = this.workspaceId;
+    const data = await this.tool("app_board", {
+      boardId,
+      ...(workspaceId ? { workspaceId } : {}),
+    });
     this.stats.board += 1;
     if (!data || typeof data.revision !== "number")
       throw Error("服务端没有返回白板内容。请重新连接后再试。");
+    /* 回来时已经不是这一轮了：丢掉。 */
+    if (generation !== this.generation) return;
+    if (!this.acceptWorkspace(data.workspaceId, workspaceId)) return;
     /* 合并而不是整块替换：进到子白板以后，父白板的对象还得留着，
        面包屑与「移动到白板」都要用它们。 */
     const fresh = new Set((data.presentations ?? []).map((p: any) => p.id));
@@ -291,23 +334,49 @@ export class V3Store {
   }
 
   /**
+   * 核对工作空间，顺手把编号学过来。
+   *
+   * **两边都知道才比**：客户端不知道编号的时候，不能判成「不是同一个库」
+   * （那会把服务端刚回带的编号当成不匹配，整条响应白丢）。
+   * 客户端不知道、服务端回带了 ⟹ 采纳它（自愈），下次请求就带得上了。
+   */
+  private acceptWorkspace(
+    returned: unknown,
+    requested: string | undefined,
+  ): boolean {
+    if (typeof returned !== "string" || !returned) return true;
+    if (typeof requested !== "string" || !requested) {
+      this.workspaceId = returned;
+      return true;
+    }
+    return returned === requested;
+  }
+
+  /**
    * 拉一次增量。
    *
    * 返回有没有变化：没变化就不该让界面重画。
    */
   async sync(): Promise<boolean> {
     if (!this.cache.boardId) return false;
-    const data = await this.tool("app_changes", { since: this.cache.revision });
+    const generation = this.generation;
+    const workspaceId = this.workspaceId;
+    const data = await this.tool("app_changes", {
+      since: this.cache.revision,
+      ...(workspaceId ? { workspaceId } : {}),
+    });
     this.stats.changes += 1;
     if (!data) return false;
+    /* 这一轮已经过去了：这条响应是给上一轮的，丢掉。 */
+    if (generation !== this.generation) return false;
+    /* 别的工作空间的增量：不能合进来（会把修订号也带偏）。 */
+    if (!this.acceptWorkspace(data.workspaceId, workspaceId)) return false;
     /* 墓碑已被内核清理：手里的数据已经不可信，整块重来。 */
     if (data.reset) {
-      this.cache.objects.clear();
-      this.cache.presentations.clear();
-      this.cache.relations.clear();
-      this.cache.settings.clear();
-      this.cache.packs.clear();
-      await this.load(this.cache.boardId);
+      const boardId = this.cache.boardId;
+      this.clear();
+      this.workspaceId = workspaceId;
+      await this.load(boardId, { workspaceId });
       return true;
     }
     if (typeof data.revision !== "number") return false;

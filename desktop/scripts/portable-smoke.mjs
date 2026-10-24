@@ -98,7 +98,7 @@ try {
     console.error(
       [
         "便携窗口没有打开本地工作台。",
-        `各阶段耗时：拿到调试端口 ${portAt ? Math.round((portAt - started) / 1000) : "没拿到"} 秒；再找到页面 ${pageAt ? Math.round((pageAt - portAt) / 1000) : "没找到"} 秒；合计 ${Math.round((Date.now() - started) / 1000)} 秒。`,
+        `各阶段耗时：拿到调试端口 ${portAt ? Math.round((portAt - started) / 1000) + " 秒" : "没拿到"}；再找到页面：${pageAt ? Math.round((pageAt - portAt) / 1000) + " 秒" : "没找到（等了 " + Math.round((Date.now() - portAt) / 1000) + " 秒）"}；合计 ${Math.round((Date.now() - started) / 1000)} 秒。`,
         `窗口里的页面：${pages.join(" || ") || "(没有页面)"}`,
         `页面正文：${body || "(空)"}`,
         `子进程 stdout 尾部：${childOutput.stdout || "(空)"}`,
