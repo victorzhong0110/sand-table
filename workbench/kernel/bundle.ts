@@ -26,7 +26,7 @@ import {
 } from "./db.ts";
 import { CommandError } from "./errors.ts";
 import { markFrameCoords } from "./frame-coords.ts";
-import { importV2 } from "./legacy/import-v2.ts";
+import { importV2, type ImportSkipped } from "./legacy/import-v2.ts";
 import { V2MigrationError } from "./legacy/v2-migrate.ts";
 import { createRegistry, PackSpecError, type Registry } from "./registry.ts";
 import { toObjectRow, toPresentationRow, toRelationRow } from "./rows.ts";
@@ -1682,28 +1682,35 @@ function importV2Bundle(
   }
   mkdirSync(root, { recursive: true });
   const preferred = typeof parsed.id === "string" ? parsed.id : "imported";
-  const id = firstFreeId(root, preferred);
-  const dir = join(root, id);
   const jsonFile = join(tmpdir(), `sand-v2-${randomUUID()}.json`);
   writeFileSync(jsonFile, json);
+  let temp: string | undefined;
   try {
+    // 建在自己的临时目录里，不先占用最终编号。失败只删这个目录。
+    temp = mkdtempSync(join(root, ".import-"));
     const imported = importV2(
       jsonFile,
-      join(dir, "workspace.db"),
+      join(temp, "workspace.db"),
       builtinRegistry(registry),
       now,
     );
-    const db = openWorkspaceDb(join(dir, "workspace.db"), { create: false });
+    const required = imported.skipped.filter(isRequiredV2Skip);
+    if (required.length)
+      throw new CommandError(
+        "INVALID_DATA",
+        requiredSkipMessage(required),
+        null,
+      );
+    const db = openWorkspaceDb(join(temp, "workspace.db"), { create: false });
+    let report: BundleImportReport;
     try {
       const title = importedTitle(getMeta(db, "title") ?? "");
       setMeta(db, "title", title);
-      setMeta(db, "workspace_id", id);
-      db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
       const blobs = db.prepare("SELECT COUNT(*) AS n FROM blobs").get() as {
         n: number;
       };
-      return {
-        workspaceId: id,
+      report = {
+        workspaceId: preferred,
         title,
         counts: {
           objects: imported.objects,
@@ -1711,18 +1718,93 @@ function importV2Bundle(
           relations: imported.relations,
           blobs: Number(blobs.n),
         },
-        degraded: [],
-        external: [],
+        degraded: [
+          ...legacyDegraded(db),
+          ...invalidPackDegraded(imported.skipped),
+        ],
+        external: collectExternal(liveObjects(db), liveRelations(db)),
       };
+      db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      writeFileSync(
+        join(temp, IMPORT_REPORT_FILENAME),
+        `${JSON.stringify(
+          {
+            counts: report.counts,
+            degraded: report.degraded,
+            external: report.external,
+            invalidPacks: [],
+          },
+          null,
+          2,
+        )}\n`,
+      );
     } finally {
       db.close();
     }
+    const workspaceId = publishDirectory(temp, root, preferred);
+    temp = undefined;
+    return { ...report, workspaceId };
   } catch (error) {
-    rmSync(dir, { recursive: true, force: true });
+    if (temp) rmSync(temp, { recursive: true, force: true });
     throw asCommandError(error);
   } finally {
     rmSync(jsonFile, { force: true });
   }
+}
+
+/**
+ * v2 导入器会把没映射进去的条目记成 skipped 并继续。
+ * 缺端点、缺附件、结构损坏不能这样留下半份作品。
+ * 组件包没装上、空主题或重复主题不删已经导入的内容。
+ */
+function isRequiredV2Skip(item: ImportSkipped): boolean {
+  if (item.what.startsWith("组件包")) return false;
+  if (item.what === "主题") return false;
+  return true;
+}
+
+function requiredSkipMessage(items: ImportSkipped[]): string {
+  const listed = items
+    .slice(0, 3)
+    .map(
+      (item) => `${item.what}：${item.reason.replaceAll("跳过", "未能纳入")}`,
+    )
+    .join("；");
+  const more = items.length > 3 ? `另有 ${items.length - 3} 处。` : "";
+  return `这份 v2 工作空间有缺失或损坏的内容（${listed}）。${more}整份没有导入。请修好这份文件后再导入。`;
+}
+
+function legacyDegraded(db: Db): BundleDegraded[] {
+  const rows = db
+    .prepare(
+      `SELECT id, type FROM objects
+       WHERE deleted_rev IS NULL AND type LIKE 'legacy.%'
+       ORDER BY id ASC`,
+    )
+    .all() as { id: string; type: string }[];
+  return rows.map((row) => ({
+    kind: "unknown-type" as const,
+    id: String(row.id),
+    reason: `对象「${row.id}」的类型「${row.type}」在本机没有注册，已按原样保留。`,
+  }));
+}
+
+function invalidPackDegraded(skipped: ImportSkipped[]): BundleDegraded[] {
+  return skipped.filter(isInvalidPackSkip).map((item) => ({
+    kind: "invalid-pack" as const,
+    id: quotedName(item.what),
+    reason: `${item.what}没有注册。${item.reason}`,
+  }));
+}
+
+function isInvalidPackSkip(item: ImportSkipped): boolean {
+  if (!item.what.startsWith("组件包")) return false;
+  return !item.reason.includes("只导入了一次");
+}
+
+function quotedName(what: string): string {
+  const match = /「([^」]+)」/.exec(what);
+  return match?.[1] || what;
 }
 
 function publishDirectory(

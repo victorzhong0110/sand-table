@@ -827,13 +827,45 @@ test("未知类型保留，无效包不注册但清单和对象还在，再次�
   }
 });
 
-test("v2 工作空间文件走 importV2", () => {
+test("v2 工作空间文件走 importV2，未知类型和外部资源写进报告", () => {
   const root = mkdtempSync(join(tmpdir(), "sand-bundle-v2-"));
   try {
-    const json = readFileSync(join(FIXTURES, "unknown-type.json"), "utf8");
-    const report = importWorkspaceBundle(root, freshRegistry(), json);
+    const parsed = JSON.parse(
+      readFileSync(join(FIXTURES, "unknown-type.json"), "utf8"),
+    ) as {
+      objects: { source?: Record<string, unknown> }[];
+    };
+    parsed.objects[0]!.source = {
+      ...parsed.objects[0]!.source,
+      external: { kind: "git", uri: "git://example/legacy" },
+    };
+    const report = importWorkspaceBundle(
+      root,
+      freshRegistry(),
+      JSON.stringify(parsed),
+    );
     assert.equal(report.workspaceId, "unknown-type-workspace");
     assert.equal(report.title, "未知类型（导入）");
+    assert.ok(
+      report.degraded.some(
+        (item) =>
+          item.kind === "unknown-type" &&
+          item.id === "obj-foo" &&
+          item.reason.includes("legacy.foo"),
+      ),
+      "未知类型出现在降级条目里",
+    );
+    assert.ok(
+      report.external.some(
+        (item) => item.kind === "git" && item.uri === "git://example/legacy",
+      ),
+      "没带走的外部资源写进报告",
+    );
+    assert.equal(
+      report.degraded.some((item) => item.reason.includes("不存在")),
+      false,
+      "成功报告里不记缺端点",
+    );
     const opened = openWorkspace(root, report.workspaceId, freshRegistry());
     try {
       const foo = contentObjects(opened.db).find(
@@ -842,6 +874,87 @@ test("v2 工作空间文件走 importV2", () => {
       assert.equal(foo?.type, "legacy.foo");
       assert.equal(foo?.data.whatever, "原样");
       assert.equal(foo?.data.count, 0);
+    } finally {
+      opened.db.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("v2 缺端点或缺附件时整份失败，不删已有工作空间，也不留临时目录", () => {
+  const root = mkdtempSync(join(tmpdir(), "sand-bundle-v2-fail-"));
+  try {
+    mkdirSync(join(root, "dangling-workspace"));
+    writeFileSync(join(root, "dangling-workspace", "keep.txt"), "stay");
+    const dangling = readFileSync(join(FIXTURES, "dangling.json"), "utf8");
+    assert.throws(
+      () => importWorkspaceBundle(root, freshRegistry(), dangling),
+      (error: unknown) => {
+        assert.ok(error instanceof CommandError);
+        assert.match(error.message, /obj-vanished/);
+        assert.match(error.message, /整份没有导入/);
+        assert.doesNotMatch(error.message, /跳过/);
+        return true;
+      },
+    );
+    assert.equal(
+      readFileSync(join(root, "dangling-workspace", "keep.txt"), "utf8"),
+      "stay",
+      "失败不能删掉同名的已有目录",
+    );
+    assert.equal(
+      readdirSync(root).some((name) => name.startsWith(".import-")),
+      false,
+      "临时目录已删除",
+    );
+    assert.deepEqual(readdirSync(root).sort(), ["dangling-workspace"]);
+
+    const parsed = JSON.parse(
+      readFileSync(join(FIXTURES, "unknown-type.json"), "utf8"),
+    ) as { boards: { assets?: unknown[] }[] };
+    parsed.boards[0]!.assets = [
+      { id: "missing-file", name: "no-such-file.png", mime: "image/png" },
+    ];
+    assert.throws(
+      () =>
+        importWorkspaceBundle(root, freshRegistry(), JSON.stringify(parsed)),
+      (error: unknown) => {
+        assert.ok(error instanceof CommandError);
+        assert.match(error.message, /附件/);
+        assert.match(error.message, /整份没有导入/);
+        assert.doesNotMatch(error.message, /跳过/);
+        return true;
+      },
+    );
+    assert.equal(
+      readdirSync(root).some((name) => name.startsWith(".import-")),
+      false,
+    );
+    assert.equal(existsSync(join(root, "unknown-type-workspace")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("v2 无效包不让整份失败，降级条目里写明原因", () => {
+  const root = mkdtempSync(join(tmpdir(), "sand-bundle-v2-pack-"));
+  try {
+    const json = readFileSync(join(FIXTURES, "bad-pack.json"), "utf8");
+    const report = importWorkspaceBundle(root, freshRegistry(), json);
+    assert.ok(
+      report.degraded.some(
+        (item) => item.kind === "invalid-pack" && item.reason.includes("清单"),
+      ),
+      "无效包出现在降级条目里",
+    );
+    assert.doesNotMatch(JSON.stringify(report), /跳过/);
+    const opened = openWorkspace(root, report.workspaceId, freshRegistry());
+    try {
+      assert.ok(
+        contentObjects(opened.db).some((object) => object.id === "obj-ok"),
+        "其余对象照常导入",
+      );
     } finally {
       opened.db.close();
     }
