@@ -119,6 +119,13 @@ export function createServerV3(options: ServerOptions) {
             return toolResult(result);
           } catch (error) {
             return toolError(error);
+          } finally {
+            // 包工具可能在这次调用里改了组件包启停，返回前先让工具列表跟上。
+            try {
+              refreshPackTools();
+            } catch {
+              /* 下一秒的计时器会再对一次 */
+            }
           }
         },
       );

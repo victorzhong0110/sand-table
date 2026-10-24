@@ -268,6 +268,12 @@ function checkKernelImports(files: SourceFile[]): Violation[] {
   return violations;
 }
 
+/**
+ * 代码包要解析 TypeScript，并用 zod 描述工具参数。
+ * 这两个依赖的版本钉在 workbench/package.json，不向其他包放开。
+ */
+const PACK_DEPENDENCIES = new Set(["typescript", "zod"]);
+
 /** 规则 2：包只依赖内核。 */
 function checkPackImports(files: SourceFile[]): Violation[] {
   const violations: Violation[] = [];
@@ -279,7 +285,7 @@ function checkPackImports(files: SourceFile[]): Violation[] {
     const isList = segments.length === 2;
     for (const { spec, line } of importSpecifiers(file)) {
       if (!spec.startsWith(".")) {
-        if (!spec.startsWith("node:"))
+        if (!spec.startsWith("node:") && !PACK_DEPENDENCIES.has(spec))
           violations.push({
             file: file.path,
             line,
