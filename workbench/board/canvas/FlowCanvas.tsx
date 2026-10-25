@@ -154,6 +154,7 @@ function FlowSurface({
   const resizing = useRef(new Set<string>());
   const pendingMoves = useRef(new Map<string, CardNodeType>());
   const selectionOverride = useRef<string[] | null>(null);
+  const selectionEcho = useRef(0);
   const selectionServer = useRef<string[]>(view?.selection ?? []);
   selectionServer.current = view?.selection ?? [];
   const viewportRef = useRef(viewport);
@@ -461,6 +462,16 @@ function FlowSurface({
       sameIds(selectionOverride.current, view.selection)
     )
       selectionOverride.current = null;
+    /* 把服务端选区写回节点时，React Flow 会再报一次选区。
+       那次回报不能写回去，否则定位一张卡片会把详情面板关掉。 */
+    const echo = ++selectionEcho.current;
+    queueMicrotask(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (selectionEcho.current === echo) selectionEcho.current = 0;
+        });
+      });
+    });
     const presentations = visible.map(presentationOf);
     const mapped = toFlowNodes(presentations, view.spaceId);
     const keep = new Set([...dragging.current, ...resizing.current]);
@@ -1020,6 +1031,11 @@ function FlowSurface({
               });
             }}
             onSelectionChange={({ nodes: selectedNodes }) => {
+              if (selectionEcho.current) {
+                clearTimeout(selectTimer.current);
+                selectTimer.current = 0;
+                return;
+              }
               const ids = selectedNodes.map((node) => node.id);
               selectionOverride.current = ids;
               /* 先清掉上一次还没发出的选择。拖不动的卡片会先报一次空选区，
