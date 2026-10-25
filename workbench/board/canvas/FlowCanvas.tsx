@@ -36,6 +36,7 @@ import {
   type PlacedItem,
 } from "./clipboard.ts";
 import { ContextMenu, DeleteObjectDialog } from "./ContextMenu.tsx";
+import { selectionForShortcut } from "./selection.ts";
 import {
   alignSelection,
   boardOrigin,
@@ -1229,12 +1230,12 @@ function FlowSurface({
     };
   };
 
-  const selectedIds = (): string[] => {
-    const picked = selectionOverride.current;
-    if (picked && picked.length) return picked;
-    if (selectionServer.current.length) return selectionServer.current;
-    return selectedNodes.current;
-  };
+  const selectedIds = (): string[] =>
+    selectionForShortcut(
+      selectionOverride.current,
+      selectionServer.current,
+      selectedNodes.current,
+    );
 
   const selectedPlaced = (): PlacedItem[] => {
     if (!view) return [];

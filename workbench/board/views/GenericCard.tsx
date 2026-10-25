@@ -1,7 +1,12 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon.tsx";
-import { summaryLines, type TypeSpecView } from "./format.ts";
+import { imageDataUrl, summaryLines, type TypeSpecView } from "./format.ts";
 import { UnknownType } from "./UnknownType.tsx";
+
+type ToolCall = (
+  name: string,
+  args?: Record<string, unknown>,
+) => Promise<unknown>;
 
 export function GenericCard({
   title,
@@ -13,6 +18,7 @@ export function GenericCard({
   catalogReady,
   relationLabels,
   coverBlob,
+  call,
   editor,
   editingField,
   onEnter,
@@ -26,6 +32,7 @@ export function GenericCard({
   catalogReady: boolean;
   relationLabels: { key: string; label: string; titles: string[] }[];
   coverBlob?: string;
+  call?: ToolCall;
   editor?: ReactNode;
   editingField?: "title" | "text";
   onEnter?: () => void;
@@ -58,9 +65,9 @@ export function GenericCard({
     <div
       className={`generic-card material-${spec.display?.material ?? "paper"}`}
     >
-      {cover ? (
+      {cover && coverBlob ? (
         <figure className="card-cover">
-          <span className="card-cover-mark">封面</span>
+          <CoverImage sha={coverBlob} call={call} />
           {editingField === "title" && editor ? (
             editor
           ) : (
@@ -106,4 +113,50 @@ export function GenericCard({
       </span>
     </div>
   );
+}
+
+function CoverImage({ sha, call }: { sha: string; call?: ToolCall }) {
+  const [src, setSrc] = useState("");
+  const [failed, setFailed] = useState(false);
+  const callRef = useRef(call);
+  callRef.current = call;
+  useEffect(() => {
+    let cancelled = false;
+    setFailed(false);
+    setSrc("");
+    const read = callRef.current;
+    if (!read) {
+      setFailed(true);
+      return;
+    }
+    void read("sand_read_asset", { assetId: sha })
+      .then((asset) => {
+        if (cancelled) return;
+        const dataUrl =
+          asset &&
+          typeof asset === "object" &&
+          "dataUrl" in asset &&
+          typeof asset.dataUrl === "string"
+            ? asset.dataUrl
+            : "";
+        const image = imageDataUrl(dataUrl);
+        if (!image) {
+          setFailed(true);
+          return;
+        }
+        setSrc(image);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sha]);
+  if (failed)
+    return (
+      <span className="card-cover-mark">封面读不出来。请确认附件还在。</span>
+    );
+  if (!src) return <span className="card-cover-mark">正在读取封面</span>;
+  return <img className="card-cover-image" alt="封面" src={src} />;
 }

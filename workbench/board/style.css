@@ -2318,3 +2318,10 @@ main.canvas-app {
   margin-right: 8px;
   font-size: 12px;
 }
+.card-cover-image {
+  display: block;
+  width: 100%;
+  max-height: 160px;
+  object-fit: cover;
+  border-radius: 4px;
+}

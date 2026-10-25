@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  commitNumberDraft,
   formatValue,
   hasValue,
+  imageDataUrl,
+  listEditorKind,
+  nextListItem,
+  parseNumberDraft,
+  parseScalar,
   summaryLines,
   type JsonSchema,
 } from "../board/views/format.ts";
 import { planLinkedComponent } from "../board/views/actions.ts";
+import { selectionForShortcut } from "../board/canvas/selection.ts";
 
 const age: JsonSchema = {
   type: "integer",
@@ -63,6 +70,100 @@ test("没填的不显示，0 和枚举、列表按声明显示", () => {
     lines.map((line) => `${line.label} ${line.text}`),
     ["定位 主角", "年龄 0 岁"],
   );
+});
+
+const cell: JsonSchema = {
+  anyOf: [
+    { type: "string" },
+    { type: "number" },
+    { type: "boolean" },
+    { type: "null" },
+  ],
+};
+const row: JsonSchema = { type: "array", items: cell };
+const tableRows: JsonSchema = {
+  type: "array",
+  items: row,
+  "x-sand-label": "数据",
+  "x-sand-widget": "table",
+};
+
+test("表格行保持数组的数组，数字格不被拆成标签", () => {
+  assert.equal(listEditorKind(tableRows), "nested");
+  assert.equal(listEditorKind(traits), "tags");
+  assert.equal(parseScalar("1", cell), 1);
+  assert.equal(parseScalar("a", cell), "a");
+  assert.equal(parseScalar("true", cell), true);
+  const editedRow = nextListItem(["a", 1], 1, parseScalar("3", cell), cell);
+  assert.deepEqual(editedRow, ["a", 3]);
+  assert.deepEqual(
+    nextListItem(
+      [
+        ["a", 1],
+        ["b", 2],
+      ],
+      0,
+      editedRow,
+      row,
+    ),
+    [
+      ["a", 3],
+      ["b", 2],
+    ],
+  );
+  assert.equal(
+    formatValue(
+      [
+        ["a", 1],
+        ["b", 2],
+      ],
+      tableRows,
+    ),
+    "a、1；b、2",
+  );
+  assert.equal(
+    formatValue([["a", 1]], tableRows).includes("[object Object]"),
+    false,
+  );
+});
+
+test("没写完的数字先留在草稿里", () => {
+  assert.deepEqual(parseNumberDraft("0.", false), {
+    complete: false,
+    value: undefined,
+  });
+  assert.deepEqual(parseNumberDraft("-", false), {
+    complete: false,
+    value: undefined,
+  });
+  assert.deepEqual(parseNumberDraft("0.5", false), {
+    complete: true,
+    value: 0.5,
+  });
+  assert.deepEqual(parseNumberDraft("30", true), { complete: true, value: 30 });
+  assert.equal(commitNumberDraft("0.", false), 0);
+  assert.equal(commitNumberDraft("-", false), undefined);
+  assert.equal(commitNumberDraft("", true), undefined);
+});
+
+test("封面附件能认出图片，读失败时没有可用地址", () => {
+  assert.equal(
+    imageDataUrl("data:application/octet-stream;base64,iVBORw0KGgo="),
+    "data:image/png;base64,iVBORw0KGgo=",
+  );
+  assert.equal(imageDataUrl("data:text/plain;base64,aGVsbG8="), undefined);
+  assert.equal(imageDataUrl(""), undefined);
+});
+
+test("清掉的选区不再退回服务器上的旧选区", () => {
+  assert.deepEqual(selectionForShortcut([], ["card-a"], ["card-a"]), []);
+  assert.deepEqual(selectionForShortcut(["card-b"], ["card-a"], ["card-a"]), [
+    "card-b",
+  ]);
+  assert.deepEqual(selectionForShortcut(null, ["card-a"], ["card-b"]), [
+    "card-a",
+  ]);
+  assert.deepEqual(selectionForShortcut(null, [], ["card-b"]), ["card-b"]);
 });
 
 test("新建关联对象前先核对类型和版本", () => {

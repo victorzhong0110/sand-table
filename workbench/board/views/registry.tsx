@@ -1,8 +1,13 @@
-import type { JSX } from "react";
+import { useState, type JSX } from "react";
 import {
+  commitNumberDraft,
   fieldLabel,
   formatValue,
   hasValue,
+  listEditorKind,
+  nextListItem,
+  parseNumberDraft,
+  parseScalar,
   widgetKind,
   type JsonSchema,
 } from "./format.ts";
@@ -96,22 +101,61 @@ function NumberEditor({
   label,
 }: WidgetProps) {
   const integer = widgetKind(schema) === "integer";
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown =
+    draft !== null
+      ? draft
+      : value === undefined || value === null
+        ? ""
+        : String(value);
   return (
     <input
       aria-label={ariaLabel || label}
       inputMode={integer ? "numeric" : "decimal"}
       readOnly={readOnly}
       disabled={readOnly}
-      value={value === undefined || value === null ? "" : String(value)}
+      value={shown}
       onChange={(event) => {
-        const raw = event.target.value.trim();
-        if (!raw) {
-          onChange(undefined);
-          return;
-        }
-        const next = integer ? Number.parseInt(raw, 10) : Number(raw);
-        if (Number.isNaN(next)) return;
-        onChange(next);
+        const next = event.target.value;
+        setDraft(next);
+        const parsed = parseNumberDraft(next, integer);
+        if (parsed.complete) onChange(parsed.value);
+      }}
+      onBlur={() => {
+        const raw = draft ?? shown;
+        setDraft(null);
+        onChange(commitNumberDraft(raw, integer));
+      }}
+    />
+  );
+}
+
+function ScalarEditor({
+  value,
+  schema,
+  readOnly,
+  onChange,
+  ariaLabel,
+  label,
+}: WidgetProps) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown =
+    draft !== null
+      ? draft
+      : value === undefined || value === null
+        ? ""
+        : String(value);
+  return (
+    <input
+      aria-label={ariaLabel || label}
+      readOnly={readOnly}
+      disabled={readOnly}
+      value={shown}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        const raw = draft ?? shown;
+        setDraft(null);
+        onChange(parseScalar(raw, schema));
       }}
     />
   );
@@ -236,20 +280,19 @@ function ListEditor({
 }: WidgetProps) {
   const items = Array.isArray(value) ? value : [];
   const itemSchema = schema.items ?? {};
-  if (itemSchema && widgetKind(itemSchema) === "object") {
+  if (listEditorKind(schema) === "nested") {
+    const Editor = widgetFor(itemSchema).Editor;
     return (
       <div className="nested-fields">
         {items.map((item, index) => (
-          <ObjectEditor
+          <Editor
             key={index}
             value={item}
             schema={itemSchema}
             label={`${label} ${index + 1}`}
             readOnly={readOnly}
             onChange={(next) => {
-              const copy = [...items];
-              if (next === undefined) copy.splice(index, 1);
-              else copy[index] = next;
+              const copy = nextListItem(items, index, next, itemSchema);
               onChange(copy.length ? copy : undefined);
             }}
           />
@@ -289,7 +332,11 @@ const EDITORS: Record<string, Widget["Editor"]> = {
 };
 
 export function widgetFor(schema: JsonSchema): Widget {
-  const Editor = EDITORS[widgetKind(schema)] ?? TextEditor;
+  const kind = widgetKind(schema);
+  const Editor =
+    kind === "text" && schema.anyOf?.length
+      ? ScalarEditor
+      : (EDITORS[kind] ?? TextEditor);
   return {
     display: (value) => formatValue(value, schema),
     Editor,

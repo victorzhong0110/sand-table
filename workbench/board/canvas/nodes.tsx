@@ -464,6 +464,7 @@ export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
             }),
           }))}
           coverBlob={instance.appearance?.coverBlob}
+          call={api.call}
           editor={editor ?? undefined}
           editingField={editingHere?.field}
           onEnter={
