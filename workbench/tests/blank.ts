@@ -1758,6 +1758,462 @@ try {
     await frame
       .getByRole("dialog", { name: "设置" })
       .waitFor({ state: "hidden" });
+    /* T32：对齐、锁定、成框、移除展示、彻底删除和菜单键盘。 */
+    const findVisibleCard = async () =>
+      frame.locator(".canvas").evaluate((canvas) => {
+        const view = canvas.getBoundingClientRect();
+        const cards = [...canvas.querySelectorAll(".component-card")];
+        const hit = cards.find((el) => {
+          const box = el.getBoundingClientRect();
+          return (
+            box.width > 40 &&
+            box.left >= view.left - 1 &&
+            box.right <= view.right + 1 &&
+            box.top >= view.top - 1 &&
+            box.bottom <= view.bottom + 1
+          );
+        });
+        return hit?.getAttribute("data-instance-id") ?? "";
+      });
+    let visibleId = await findVisibleCard();
+    if (!visibleId) {
+      await frame.getByRole("button", { name: "适应" }).click();
+      await page.waitForTimeout(500);
+      visibleId = await findVisibleCard();
+    }
+    assert.ok(visibleId, "Need a visible card to place the arrange fixtures.");
+    const visibleCard = frame.locator(`[data-instance-id="${visibleId}"]`);
+    const visibleBox = await visibleCard.boundingBox();
+    const arrangeCanvas = await frame.locator(".canvas").boundingBox();
+    const visibleBoard = await read();
+    const visibleItem = visibleBoard.instances.find(
+      (item: any) => item.id === visibleId,
+    );
+    assert.ok(visibleBox && arrangeCanvas && visibleItem?.rect?.width);
+    const arrangeScale = visibleBox.width / visibleItem.rect.width;
+    const placeAt = (localX: number, localY: number) => ({
+      x:
+        visibleItem.rect.x +
+        (arrangeCanvas.x + localX - visibleBox.x) / arrangeScale,
+      y:
+        visibleItem.rect.y +
+        (arrangeCanvas.y + localY - visibleBox.y) / arrangeScale,
+    });
+    const spot1 = placeAt(140, 150);
+    const spot2 = placeAt(360, 190);
+    const spot3 = placeAt(580, 240);
+    const arrangeView = await v3View();
+    const seededArrange = await call("app_edit", {
+      intentId: "t32-seed",
+      commands: [
+        {
+          op: "object.create",
+          ref: "a",
+          type: "base.note",
+          title: "对齐甲",
+          data: { body: "甲" },
+        },
+        {
+          op: "presentation.create",
+          ref: "pa",
+          boardId: arrangeView.spaceId,
+          objectId: "@a",
+          x: spot1.x,
+          y: spot1.y,
+          width: 160,
+          height: 100,
+        },
+        {
+          op: "object.create",
+          ref: "b",
+          type: "base.note",
+          title: "对齐乙",
+          data: { body: "乙" },
+        },
+        {
+          op: "presentation.create",
+          ref: "pb",
+          boardId: arrangeView.spaceId,
+          objectId: "@b",
+          x: spot2.x,
+          y: spot2.y,
+          width: 160,
+          height: 100,
+        },
+        {
+          op: "object.create",
+          ref: "c",
+          type: "base.note",
+          title: "对齐丙",
+          data: { body: "丙" },
+        },
+        {
+          op: "presentation.create",
+          ref: "pc",
+          boardId: arrangeView.spaceId,
+          objectId: "@c",
+          x: spot3.x,
+          y: spot3.y,
+          width: 160,
+          height: 100,
+        },
+      ],
+    });
+    const arrangeA = seededArrange.created.a as string;
+    const arrangeC = seededArrange.created.c as string;
+    const arrangePA = seededArrange.created.pa as string;
+    const arrangePB = seededArrange.created.pb as string;
+    const arrangePC = seededArrange.created.pc as string;
+    const arrangeCard = (id: string) =>
+      frame.locator(`[data-instance-id="${id}"]`);
+    await arrangeCard(arrangePA).waitFor();
+    await arrangeCard(arrangePB).waitFor();
+    await arrangeCard(arrangePC).waitFor();
+    const openArrangeMenu = async (id: string) => {
+      await arrangeCard(id).evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        el.dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            clientX: rect.left + Math.min(12, rect.width / 2),
+            clientY: rect.top + Math.min(12, rect.height / 2),
+            button: 2,
+          }),
+        );
+      });
+      await frame.getByRole("menu", { name: "组件菜单" }).waitFor();
+    };
+    const selectArrange = async (ids: string[]) => {
+      await page.keyboard.press("Escape");
+      for (let index = 0; index < ids.length; index += 1) {
+        await clickCard(arrangeCard(ids[index]!), {
+          ...(index > 0 ? { modifiers: ["Control" as const] } : {}),
+        });
+      }
+      await untilUiSelection(ids.length);
+    };
+    const screenBoxes = async (ids: string[]) => {
+      const boxes: Record<string, { x: number; y: number }> = {};
+      for (const id of ids) {
+        const box = await arrangeCard(id).boundingBox();
+        assert.ok(box, id);
+        boxes[id] = { x: box.x, y: box.y };
+      }
+      return boxes;
+    };
+    const sameScreen = (
+      left: { x: number; y: number },
+      right: { x: number; y: number },
+    ) => Math.abs(left.x - right.x) < 2 && Math.abs(left.y - right.y) < 2;
+    const stableScreen = async (ids: string[]) => {
+      let previous = await screenBoxes(ids);
+      for (let i = 0; i < 8; i += 1) {
+        await page.waitForTimeout(150);
+        const next = await screenBoxes(ids);
+        if (ids.every((id) => sameScreen(previous[id]!, next[id]!)))
+          return next;
+        previous = next;
+      }
+      return previous;
+    };
+    await selectArrange([arrangePA, arrangePB, arrangePC]);
+    const beforeAlign = await read();
+    const alignBefore = [arrangePA, arrangePB, arrangePC].map(
+      (id) => beforeAlign.instances.find((item: any) => item.id === id).rect,
+    );
+    const historyBeforeAlign = await readHistory();
+    await openArrangeMenu(arrangePC);
+    await frame.getByRole("menuitem", { name: "左对齐", exact: true }).click();
+    const aligned = await until((board) => {
+      const rows = [arrangePA, arrangePB, arrangePC].map((id) =>
+        board.instances.find((item: any) => item.id === id),
+      );
+      return (
+        rows.every(Boolean) &&
+        rows.every((item) => Math.abs(item.rect.x - rows[0].rect.x) < 0.01)
+      );
+    });
+    assert.equal(
+      freshRecords(historyBeforeAlign, await readHistory()).length,
+      1,
+      "Left align is one history step.",
+    );
+    await undo();
+    const restoredAlign = await until((board) =>
+      [arrangePA, arrangePB, arrangePC].every((id, index) => {
+        const item = board.instances.find((row: any) => row.id === id);
+        return item && Math.abs(item.rect.x - alignBefore[index].x) < 0.01;
+      }),
+    );
+    for (let index = 0; index < 3; index += 1) {
+      const id = [arrangePA, arrangePB, arrangePC][index]!;
+      const item = restoredAlign.instances.find((row: any) => row.id === id);
+      assert.equal(item.rect.y, alignBefore[index].y);
+    }
+    await selectArrange([arrangePB]);
+    await openArrangeMenu(arrangePB);
+    await frame.getByRole("menuitem", { name: "锁定", exact: true }).click();
+    await until((board) =>
+      board.instances.some(
+        (item: any) => item.id === arrangePB && item.rect.pinned === true,
+      ),
+    );
+    await arrangeCard(arrangePB).locator(".pin-badge").waitFor();
+    const lockedBox = (await arrangeCard(arrangePB).boundingBox())!;
+    const lockedRect = (await read()).instances.find(
+      (item: any) => item.id === arrangePB,
+    ).rect;
+    await page.mouse.move(
+      lockedBox.x + lockedBox.width / 2,
+      lockedBox.y + lockedBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      lockedBox.x + lockedBox.width / 2 + 50,
+      lockedBox.y + lockedBox.height / 2 + 30,
+      { steps: 8 },
+    );
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+    const stillLocked = await read();
+    const lockedNow = stillLocked.instances.find(
+      (item: any) => item.id === arrangePB,
+    ).rect;
+    assert.equal(lockedNow.pinned, true);
+    assert.equal(lockedNow.x, lockedRect.x);
+    assert.equal(lockedNow.y, lockedRect.y, "A locked card cannot be dragged.");
+    await openArrangeMenu(arrangePB);
+    await frame.getByRole("menuitem", { name: "解锁", exact: true }).click();
+    await until((board) =>
+      board.instances.some(
+        (item: any) => item.id === arrangePB && item.rect.pinned === false,
+      ),
+    );
+    await arrangeCard(arrangePB)
+      .locator(".pin-badge")
+      .waitFor({ state: "hidden" });
+    const unlockedBox = (await arrangeCard(arrangePB).boundingBox())!;
+    const unlockedRect = (await read()).instances.find(
+      (item: any) => item.id === arrangePB,
+    ).rect;
+    const dragScale = unlockedBox.width / unlockedRect.width;
+    const dragDx = 40 / dragScale;
+    const dragDy = 24 / dragScale;
+    await page.mouse.move(
+      unlockedBox.x + unlockedBox.width / 2,
+      unlockedBox.y + unlockedBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      unlockedBox.x + unlockedBox.width / 2 + 40,
+      unlockedBox.y + unlockedBox.height / 2 + 24,
+      { steps: 8 },
+    );
+    await page.mouse.up();
+    await until((board) => {
+      const item = board.instances.find((row: any) => row.id === arrangePB);
+      return (
+        item &&
+        Math.abs(item.rect.x - (unlockedRect.x + dragDx)) < 3 &&
+        Math.abs(item.rect.y - (unlockedRect.y + dragDy)) < 3
+      );
+    });
+    await selectArrange([arrangePA, arrangePB, arrangePC]);
+    const beforeFrame = await stableScreen([arrangePA, arrangePB, arrangePC]);
+    await openArrangeMenu(arrangePA);
+    await frame.getByRole("menuitem", { name: "成框", exact: true }).click();
+    const framed = await until((board) => {
+      const rows = [arrangePA, arrangePB, arrangePC].map((id) =>
+        board.instances.find((item: any) => item.id === id),
+      );
+      return rows.every((item) => item?.parentId);
+    });
+    const frameId = framed.instances.find(
+      (item: any) => item.id === arrangePA,
+    ).parentId;
+    assert.ok(
+      [arrangePB, arrangePC].every(
+        (id) =>
+          framed.instances.find((item: any) => item.id === id).parentId ===
+          frameId,
+      ),
+      "Framed cards point at the same frame.",
+    );
+    const frameObjectId = framed.instances.find(
+      (item: any) => item.id === frameId,
+    ).objectId;
+    const framedScreen = await stableScreen([arrangePA, arrangePB, arrangePC]);
+    for (const id of [arrangePA, arrangePB, arrangePC])
+      assert.ok(
+        sameScreen(beforeFrame[id]!, framedScreen[id]!),
+        `Framing keeps ${id} on screen. before ${JSON.stringify(beforeFrame[id])} after ${JSON.stringify(framedScreen[id])}`,
+      );
+    await openArrangeMenu(frameId);
+    const beforeUnframe = await stableScreen([arrangePA, arrangePB, arrangePC]);
+    await frame.getByRole("menuitem", { name: "解除框", exact: true }).click();
+    const unframed = await until((board) =>
+      [arrangePA, arrangePB, arrangePC].every((id) => {
+        const item = board.instances.find((row: any) => row.id === id);
+        return item && !item.parentId;
+      }),
+    );
+    assert.equal(
+      unframed.instances.some((item: any) => item.id === frameId),
+      false,
+    );
+    const unframedScreen = await stableScreen([
+      arrangePA,
+      arrangePB,
+      arrangePC,
+    ]);
+    for (const id of [arrangePA, arrangePB, arrangePC])
+      assert.ok(
+        sameScreen(beforeUnframe[id]!, unframedScreen[id]!),
+        `Unframing keeps ${id} on screen. before ${JSON.stringify(beforeUnframe[id])} after ${JSON.stringify(unframedScreen[id])}`,
+      );
+    const frameObject = await call("sand_read", {
+      ids: [frameObjectId],
+      include: ["presentations"],
+    });
+    assert.equal(frameObject.objects?.[0]?.type, "base.frame");
+    assert.equal(frameObject.objects?.[0]?.presentations?.length, 0);
+    await selectArrange([arrangePC]);
+    await openArrangeMenu(arrangePC);
+    await frame
+      .getByRole("menuitem", { name: "移除展示", exact: true })
+      .click();
+    await until(
+      (board) => !board.instances.some((item: any) => item.id === arrangePC),
+    );
+    const removedObject = await call("sand_read", {
+      ids: [arrangeC],
+      include: ["presentations"],
+    });
+    assert.equal(removedObject.objects?.length, 1);
+    assert.equal(removedObject.objects?.[0]?.presentations?.length, 0);
+    const beforeDelete = await call("sand_read", {
+      ids: [arrangeA],
+      include: ["presentations"],
+    });
+    const remote = await call("app_edit", {
+      intentId: "t32-remote",
+      commands: [
+        {
+          op: "object.create",
+          ref: "other",
+          type: "base.board",
+          title: "另一块白板",
+          data: {},
+        },
+        {
+          op: "presentation.create",
+          ref: "otherP",
+          boardId: arrangeView.spaceId,
+          objectId: "@other",
+          x: spot3.x,
+          y: spot3.y + 220,
+          width: 220,
+          height: 120,
+        },
+        {
+          op: "presentation.create",
+          ref: "remote",
+          boardId: "@other",
+          objectId: arrangeA,
+          x: 16,
+          y: 16,
+          width: 160,
+          height: 100,
+        },
+      ],
+    });
+    const remoteId = remote.created.remote as string;
+    const placedCount =
+      (beforeDelete.objects?.[0]?.presentations?.length ?? 0) + 1;
+    await selectArrange([arrangePA]);
+    await openArrangeMenu(arrangePA);
+    await frame
+      .getByRole("menuitem", { name: "彻底删除对象", exact: true })
+      .click();
+    const deleteDialog = frame.getByRole("dialog", { name: "彻底删除对象" });
+    await deleteDialog
+      .getByText(
+        `这个对象还出现在 ${placedCount} 块白板上，删除后都会消失；可以撤销`,
+      )
+      .waitFor();
+    await deleteDialog
+      .getByRole("button", { name: "彻底删除", exact: true })
+      .click();
+    const deleted = await call("sand_read", {
+      ids: [arrangeA],
+      include: ["presentations"],
+    });
+    assert.ok(
+      (deleted.missing ?? []).includes(arrangeA),
+      "Deleting the object removes it.",
+    );
+    await undo();
+    const revived = await call("sand_read", {
+      ids: [arrangeA],
+      include: ["presentations"],
+    });
+    const revivedIds = (revived.objects?.[0]?.presentations ?? []).map(
+      (item: { id?: string }) => item.id,
+    );
+    assert.equal(revivedIds.length, placedCount);
+    assert.ok(revivedIds.includes(remoteId));
+    assert.ok(revivedIds.includes(arrangePA));
+    await arrangeCard(arrangePB).focus();
+    await openArrangeMenu(arrangePB);
+    const menu = frame.getByRole("menu", { name: "组件菜单" });
+    for (let i = 0; i < 20; i += 1) {
+      if (
+        await menu.evaluate((node) =>
+          node.contains(node.ownerDocument.activeElement),
+        )
+      )
+        break;
+      await page.waitForTimeout(50);
+    }
+    await page.keyboard.press("ArrowDown");
+    assert.equal(
+      await frame.locator('[role="menu"] [data-active="true"]').innerText(),
+      "再放一份",
+    );
+    await page.keyboard.press("ArrowUp");
+    assert.equal(
+      await frame.locator('[role="menu"] [data-active="true"]').innerText(),
+      "编辑",
+    );
+    await page.keyboard.press("Enter");
+    await frame.getByRole("textbox", { name: "就地编辑内容" }).waitFor();
+    await page.keyboard.press("Escape");
+    await frame
+      .getByRole("textbox", { name: "就地编辑内容" })
+      .waitFor({ state: "hidden" });
+    await arrangeCard(arrangePB).focus();
+    await openArrangeMenu(arrangePB);
+    for (let i = 0; i < 20; i += 1) {
+      if (
+        await menu.evaluate((node) =>
+          node.contains(node.ownerDocument.activeElement),
+        )
+      )
+        break;
+      await page.waitForTimeout(50);
+    }
+    await page.keyboard.press("Escape");
+    await menu.waitFor({ state: "hidden" });
+    let returned = false;
+    for (let i = 0; i < 20; i += 1) {
+      returned = await arrangeCard(arrangePB).evaluate(
+        (el) => el.ownerDocument.activeElement === el,
+      );
+      if (returned) break;
+      await page.waitForTimeout(50);
+    }
+    assert.equal(returned, true, "Closing the menu returns focus to the card.");
     /* 导出再导入：文件能下来，导入后能切到新工作空间并看到原来的组件。 */
     await page.setViewportSize({ width: 1440, height: 1000 });
     await frame.getByRole("button", { name: "设置", exact: true }).click();
