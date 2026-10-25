@@ -2,9 +2,7 @@ import { paletteTypes, initialData } from "./domain-ui.ts";
 import { Icon } from "./Icon.tsx";
 import { useState } from "react";
 import type { Board, ComponentPack } from "./data-client/model.ts";
-import type { HistorySnapshot } from "./data-client/history.ts";
 import { componentTypes, defaultData } from "./data-client/spaces.ts";
-import { HistoryPanel } from "./HistoryPanel.tsx";
 import "./packs.css";
 const groups = [
   { id: "novel", title: "小说", types: ["character", "event", "chapter"] },
@@ -44,19 +42,10 @@ export function Toolbox({
   activeSection = "tools",
   focusInstance,
   close,
-  history,
-  onUndo,
-  onRedo,
-  onJump,
 }: {
   focusInstance?: (id: string) => void;
   activeSection?: string;
   close?: () => void;
-  /** The board's reversible history, shown in the "历史" tab. */
-  history?: HistorySnapshot;
-  onUndo?: () => void;
-  onRedo?: () => void;
-  onJump?: (recordId: string) => void;
   board: Board;
   viewId: string;
   mode: string;
@@ -221,7 +210,6 @@ export function Toolbox({
               ["components", "组件"],
               ["presets", "场景"],
               ["sources", "仓库"],
-              ["history", "历史"],
             ].map(([id, label]) => (
               <button
                 role="tab"
@@ -453,19 +441,6 @@ export function Toolbox({
               <span>在这张板子里再放一张板子</span>
             </button>
           </>
-        ) : section === "history" ? (
-          <HistoryPanel
-            history={history}
-            busy={busy}
-            /* 撤销、重做、跳转都走 MCP 工具：面板不直接改 store。 */
-            call={call}
-            refreshBoard={async () => {
-              await action("sand_read_board");
-            }}
-            onUndo={() => onUndo?.()}
-            onRedo={() => onRedo?.()}
-            onJump={(id) => onJump?.(id)}
-          />
         ) : (
           <>
             <h2>导入代码仓库</h2>

@@ -82,6 +82,7 @@ export function HistoryPanel({
   const callRef = useRef(call);
   callRef.current = call;
   const listRef = useRef<HTMLOListElement>(null);
+  const rowRefs = useRef<Array<HTMLLIElement | null>>([]);
 
   useEffect(() => {
     if (inFlight.current) return;
@@ -114,8 +115,8 @@ export function HistoryPanel({
   );
   const current = records.find((record) => record.current);
   const canUndo = Boolean(current?.parentId);
-  const canRedo = records.some(
-    (record) => record.onPath && current && record.seq > current.seq,
+  const canRedo = rows.some(
+    (row) => row.kind === "entry" && row.state === "redo",
   );
   const disabled = Boolean(busy) || pending;
   const undoReason = canUndo
@@ -135,6 +136,10 @@ export function HistoryPanel({
     );
     if (index >= 0) setActive(index);
   }, [snapshot?.cursorId]);
+
+  useEffect(() => {
+    rowRefs.current[active]?.scrollIntoView({ block: "nearest" });
+  }, [active, rows]);
 
   async function run(op: "undo" | "redo" | "jump", recordId?: string) {
     if (disabled) return;
@@ -290,6 +295,9 @@ export function HistoryPanel({
               return (
                 <li
                   key={`branches:${row.atId}`}
+                  ref={(node) => {
+                    rowRefs.current[index] = node;
+                  }}
                   className={
                     "history-node history-branch-row" +
                     (index === active ? " is-active" : "")
@@ -316,6 +324,9 @@ export function HistoryPanel({
             return (
               <li
                 key={record.id}
+                ref={(node) => {
+                  rowRefs.current[index] = node;
+                }}
                 className={
                   "history-node is-" +
                   record.authorKind +

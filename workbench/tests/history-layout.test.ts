@@ -27,6 +27,25 @@ test("四十条直线历史全部不缩进", () => {
   }
 });
 
+test("撤销后可重做的子记录仍在当前路径上", () => {
+  // 与内核 historyList 在撤销一步、尚未新编辑时的返回一致：
+  // 光标的子记录 onCurrentPath 仍为 true。
+  const entries: HistoryListEntry[] = [
+    { id: "a", parentId: null, seq: 1, current: false, onCurrentPath: true },
+    { id: "b", parentId: "a", seq: 2, current: true, onCurrentPath: true },
+    { id: "c", parentId: "b", seq: 3, current: false, onCurrentPath: true },
+  ];
+  const rows = layoutHistory(entries, new Set());
+  const child = rows.find((row) => row.kind === "entry" && row.id === "c");
+  assert.ok(child && child.kind === "entry");
+  assert.equal(child.state, "redo");
+  assert.equal(child.indent, 0);
+  assert.equal(
+    rows.some((row) => row.kind === "branches"),
+    false,
+  );
+});
+
 test("撤销三步后再编辑，分叉处只有一个分支", () => {
   const entries: HistoryListEntry[] = [
     { id: "e1", parentId: null, seq: 1, current: false, onCurrentPath: true },

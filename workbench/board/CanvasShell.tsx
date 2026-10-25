@@ -480,10 +480,6 @@ export function CanvasShell({
             create={create}
             action={action}
             call={call}
-            history={history}
-            onUndo={onUndo}
-            onRedo={onRedo}
-            onJump={onJump}
             showPanel={setPanel}
           />
           <PanelResize onResizeStart={resizeFrom} />

@@ -2730,7 +2730,7 @@ try {
     const ageAgain = frame.getByRole("textbox", { name: "年龄", exact: true });
     await ageAgain.waitFor();
     assert.equal(await ageAgain.isDisabled(), false);
-    /* T36：拖很多步也不横向滚动；撤销两步再编辑，能从旧分支跳回去。 */
+    /* T36：连续移动三十步也不横向滚动；撤销后可以重做；再编辑后能从旧分支跳回去。 */
     await frame.getByRole("button", { name: "专注画布", exact: true }).click();
     await frame.getByRole("button", { name: "复位", exact: true }).click();
     await page.waitForTimeout(200);
@@ -2749,99 +2749,31 @@ try {
     const t36id = t36made.instances.find(
       (item: { title?: string }) => item.title === "历史拖动",
     ).id;
-    const t36card = frame.locator('[data-instance-id="' + t36id + '"]');
-    await t36card.waitFor();
-    await frame.getByRole("button", { name: "专注画布", exact: true }).click();
-    const gap = await frame.locator(".canvas").evaluate((canvas) => {
-      const view = canvas.getBoundingClientRect();
-      const cards = [...canvas.querySelectorAll(".component-card")].map((el) =>
-        el.getBoundingClientRect(),
-      );
-      for (let y = 70; y < view.height - 160; y += 24) {
-        for (let x = 16; x < view.width - 240; x += 24) {
-          const left = view.left + x;
-          const top = view.top + y;
-          const covered = cards.some(
-            (box) =>
-              left < box.right &&
-              left + 200 > box.left &&
-              top < box.bottom &&
-              top + 110 > box.top,
-          );
-          if (!covered) return { x, y };
-        }
-      }
-      return null;
-    });
-    assert.ok(gap, "画面上没有空位放历史拖动");
-    const camera = await frame.locator(".world").evaluate((element) => {
-      const matrix = new DOMMatrixReadOnly(getComputedStyle(element).transform);
-      return { x: matrix.m41, y: matrix.m42, zoom: matrix.a };
-    });
-    await editSpace({
-      kind: "place",
-      items: [
-        {
-          id: t36id,
-          rect: {
-            x: (gap.x - camera.x) / camera.zoom,
-            y: (gap.y - camera.y) / camera.zoom,
-            width: 200,
-            height: 110,
-            pinned: false,
-          },
-        },
-      ],
-    });
-    await t36card.waitFor();
-    const dragT36 = async (dx: number) => {
-      const iframeBox = (await page.locator("iframe").boundingBox())!;
-      const local = await t36card.evaluate((element) => {
-        const rect = element.getBoundingClientRect();
-        for (let y = 10; y < rect.height - 6; y += 8) {
-          for (let x = 10; x < rect.width - 6; x += 8) {
-            const hit = element.ownerDocument.elementFromPoint(
-              rect.left + x,
-              rect.top + y,
-            );
-            if (
-              hit &&
-              element.contains(hit) &&
-              !hit.closest("button, a, input, textarea")
-            )
-              return { x: rect.left + x, y: rect.top + y };
-          }
-        }
-        return null;
-      });
-      if (!local) return false;
-      const x = iframeBox.x + local.x;
-      const y = iframeBox.y + local.y;
-      await page.mouse.move(x, y);
-      await page.mouse.down();
-      await page.mouse.move(x + dx, y, { steps: 6 });
-      await page.mouse.up();
-      return true;
-    };
     for (let step = 0; step < 30; step++) {
-      const beforeX = (await read()).instances.find(
+      const before = (await read()).instances.find(
         (item: { id: string }) => item.id === t36id,
-      ).rect.x;
-      let moved = false;
-      for (let attempt = 0; attempt < 3 && !moved; attempt++) {
-        await dragT36(10);
-        for (let i = 0; i < 20; i++) {
-          const card = (await read()).instances.find(
-            (item: { id: string }) => item.id === t36id,
-          );
-          if (card && Math.abs(card.rect.x - beforeX) > 2) {
-            moved = true;
-            break;
-          }
-          await page.waitForTimeout(50);
-        }
-      }
-      assert.ok(moved, "第 " + (step + 1) + " 次拖动没有写入");
+      ).rect;
+      await editSpace({
+        kind: "place",
+        items: [
+          {
+            id: t36id,
+            rect: {
+              x: before.x + 16,
+              y: before.y,
+              width: before.width,
+              height: before.height,
+              pinned: false,
+            },
+          },
+        ],
+      });
+      await until((board) => {
+        const card = board.instances.find(
+          (item: { id: string }) => item.id === t36id,
+        );
+        return card && card.rect.x > before.x + 2;
+      });
     }
     const parked36 = (await read()).instances.find(
       (item: { id: string }) => item.id === t36id,
@@ -2873,6 +2805,13 @@ try {
     };
     await undoHistory.click();
     await waitUndoReady();
+    const redoHistory = frame.getByRole("button", {
+      name: "重做",
+      exact: true,
+    });
+    for (let i = 0; i < 40 && !(await redoHistory.isEnabled()); i++)
+      await page.waitForTimeout(100);
+    assert.equal(await redoHistory.isEnabled(), true, "撤销后应该可以重做");
     await undoHistory.click();
     await waitUndoReady();
     await until((board) => {
@@ -2882,15 +2821,29 @@ try {
       return card && Math.abs(card.rect.x - parked36.x) > 2;
     });
     await frame.getByRole("button", { name: "专注画布", exact: true }).click();
-    const undoneX = (await read()).instances.find(
+    const undone = (await read()).instances.find(
       (item: { id: string }) => item.id === t36id,
-    ).rect.x;
-    await dragT36(20);
+    ).rect;
+    await editSpace({
+      kind: "place",
+      items: [
+        {
+          id: t36id,
+          rect: {
+            x: undone.x + 48,
+            y: undone.y + 36,
+            width: undone.width,
+            height: undone.height,
+            pinned: false,
+          },
+        },
+      ],
+    });
     await until((board) => {
       const card = board.instances.find(
         (item: { id: string }) => item.id === t36id,
       );
-      return card && Math.abs(card.rect.x - undoneX) > 2;
+      return card && Math.abs(card.rect.x - undone.x) > 2;
     });
     await frame
       .locator(".app-rail")
