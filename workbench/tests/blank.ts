@@ -2180,10 +2180,15 @@ try {
     await deleteDialog
       .getByRole("button", { name: "彻底删除", exact: true })
       .click();
-    const deleted = await call("sand_read", {
-      ids: [arrangeA],
-      include: ["presentations"],
-    });
+    let deleted: { missing?: string[] } = {};
+    for (let i = 0; i < 40; i += 1) {
+      deleted = await call("sand_read", {
+        ids: [arrangeA],
+        include: ["presentations"],
+      });
+      if ((deleted.missing ?? []).includes(arrangeA)) break;
+      await page.waitForTimeout(100);
+    }
     assert.ok(
       (deleted.missing ?? []).includes(arrangeA),
       "Deleting the object removes it.",
