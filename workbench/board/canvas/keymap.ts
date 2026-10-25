@@ -11,6 +11,8 @@ export type ShortcutId =
   | "paste-reference"
   | "paste-clone"
   | "nudge"
+  | "enter-board"
+  | "leave-board"
   | "edit"
   | "escape"
   | "zoom-reset"
@@ -139,6 +141,24 @@ export const SHORTCUTS: Shortcut[] = [
     whenTyping: false,
     mac: [...arrows(), ...arrows(true)],
     windows: [...arrows(), ...arrows(true)],
+  },
+  {
+    id: "enter-board",
+    macLabel: "⌘↓",
+    windowsLabel: "Alt+↓",
+    behavior: "进入选中的白板",
+    whenTyping: false,
+    mac: [{ key: "ArrowDown", command: true }],
+    windows: [{ key: "ArrowDown", alt: true }],
+  },
+  {
+    id: "leave-board",
+    macLabel: "⌘↑",
+    windowsLabel: "Alt+↑",
+    behavior: "返回上一层白板",
+    whenTyping: false,
+    mac: [{ key: "ArrowUp", command: true }],
+    windows: [{ key: "ArrowUp", alt: true }],
   },
   {
     id: "edit",

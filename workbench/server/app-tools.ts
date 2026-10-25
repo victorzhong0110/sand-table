@@ -260,6 +260,10 @@ export function registerAppTools(
           viewId: args.viewId,
           ...(args.boardId ? { boardId: args.boardId } : {}),
           ...(args.navStack ? { navStack: args.navStack } : {}),
+          ...(args.camera !== undefined ? { camera: args.camera } : {}),
+          ...(args.selection !== undefined
+            ? { selection: args.selection }
+            : {}),
         },
         Date.now(),
       );

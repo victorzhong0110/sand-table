@@ -45,7 +45,7 @@ export type CanvasApi = {
   focusedGuide: Board["guides"][number] | undefined;
   call: (name: string, args?: Record<string, unknown>) => Promise<any>;
   onOpenLink: (url: string) => void;
-  navigate: (spaceId: string) => void;
+  navigate: (spaceId: string, presentationId?: string) => void;
   operate: (op: any) => Promise<any>;
   beginEdit: (
     instance: ComponentInstance,
@@ -302,7 +302,10 @@ export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
         if (target.closest("button, a, input, textarea, select")) return;
         event.stopPropagation();
         if (instance.type === "board" || instance.type === "space-link") {
-          api.navigate(String(instance.data.spaceId ?? ""));
+          api.navigate(
+            String(instance.data.spaceId ?? instance.objectId ?? ""),
+            instance.id,
+          );
           return;
         }
         const field = editField(instance.type);
@@ -414,7 +417,9 @@ export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
           instance={instance}
           board={api.board}
           call={api.call}
-          onNavigate={(spaceId) => api.navigate(spaceId)}
+          onNavigate={(spaceId, presentationId) =>
+            api.navigate(spaceId, presentationId)
+          }
           onOpenLink={api.onOpenLink}
           editor={editor ?? undefined}
           editingField={editingHere?.field}

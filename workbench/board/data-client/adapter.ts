@@ -398,6 +398,8 @@ export type V3View = {
   selection: string[];
   camera: Camera;
   updatedAt: number;
+  /** 进入子白板时压下的路径。旧数据可能只是白板编号。 */
+  navStack?: unknown[];
 };
 
 const ACTIVITY_STATES = new Set(["running", "waiting", "done", "unknown"]);
@@ -522,6 +524,12 @@ export function toBoard(
     if (!object || !isBoardType(object.type)) continue;
     addSpace(object.id, object.title, instance.spaceId);
   }
+  /* 父级和首页还在缓存里，但当前白板不一定摆着它们。
+     不放进空间列表的话，返回会把还活着的父白板当成已删除。 */
+  for (const object of cache.objects.values()) {
+    if (!isBoardType(object.type) || spaceIds.has(object.id)) continue;
+    addSpace(object.id, object.title, parentOf(object.id));
+  }
   const relations = [...cache.relations.values()].filter(
     (r) => cache.objects.has(r.sourceId) && cache.objects.has(r.targetId),
   );
@@ -562,6 +570,11 @@ export function toBoard(
     guides: [],
     spaces,
     instances,
+    presentationBoards: Object.fromEntries(
+      [...cache.presentations.values()]
+        .filter((row) => !row.deleted)
+        .map((row) => [row.id, row.boardId]),
+    ),
     views: { [options.view.id]: options.view },
     spaceLinks,
     assets: [],
