@@ -155,6 +155,7 @@ function FlowSurface({
   const pendingMoves = useRef(new Map<string, CardNodeType>());
   const selectionOverride = useRef<string[] | null>(null);
   const selectionEcho = useRef(0);
+  const userClearedSelection = useRef(false);
   const selectionServer = useRef<string[]>(view?.selection ?? []);
   selectionServer.current = view?.selection ?? [];
   const viewportRef = useRef(viewport);
@@ -1030,13 +1031,35 @@ function FlowSurface({
                 void commitMove(batch);
               });
             }}
+            onPaneClick={() => {
+              userClearedSelection.current = true;
+              queueMicrotask(() => {
+                requestAnimationFrame(() => {
+                  requestAnimationFrame(() => {
+                    userClearedSelection.current = false;
+                  });
+                });
+              });
+            }}
             onSelectionChange={({ nodes: selectedNodes }) => {
+              const ids = selectedNodes.map((node) => node.id);
+              /* 镜头动画会让 React Flow 反复报选区。没在空白处点击时，
+                 空选区不能写回去，否则定位后的详情面板会被关掉。 */
+              if (
+                ids.length === 0 &&
+                selectionServer.current.length > 0 &&
+                !userClearedSelection.current &&
+                !selectionEcho.current
+              ) {
+                clearTimeout(selectTimer.current);
+                selectTimer.current = 0;
+                return;
+              }
               if (selectionEcho.current) {
                 clearTimeout(selectTimer.current);
                 selectTimer.current = 0;
                 return;
               }
-              const ids = selectedNodes.map((node) => node.id);
               selectionOverride.current = ids;
               /* 先清掉上一次还没发出的选择。拖不动的卡片会先报一次空选区，
                  紧接着又回到原来的选中；那次空选区不能再写出去。 */
