@@ -68,9 +68,18 @@ try {
   await page.goto(connection.url + "#session=" + connection.token);
   const frame = page.frameLocator("iframe");
   await frame.getByRole("heading", { name: "从一块空白开始" }).waitFor();
-  await page.getByRole("button", { name: "连接我的 AI", exact: true }).click();
-  const config = JSON.parse(await page.locator("#json").inputValue())
-    .mcpServers["sand-table"];
+  await frame
+    .locator(".app-rail")
+    .getByRole("button", { name: "帮助", exact: true })
+    .click();
+  const jsonField = frame.locator("#json");
+  let jsonText = "";
+  for (let i = 0; i < 50; i++) {
+    jsonText = await jsonField.inputValue();
+    if (jsonText.includes("mcpServers")) break;
+    await page.waitForTimeout(100);
+  }
+  const config = JSON.parse(jsonText).mcpServers["sand-table"];
   const unpacked = join(root, "standalone-bundle");
   mkdirSync(unpacked);
   execFileSync("python3", [
@@ -128,7 +137,11 @@ try {
       row.title.includes("index.js"),
     ),
   );
-  await page.getByRole("button", { name: "返回白板" }).click();
+  await frame.getByRole("button", { name: "返回白板" }).click();
+  await frame
+    .locator(".app-rail")
+    .getByRole("button", { name: "组件", exact: true })
+    .click();
   await frame
     .getByRole("button", { name: "便签", exact: true })
     .dragTo(frame.locator(".canvas"), { targetPosition: { x: 240, y: 180 } });

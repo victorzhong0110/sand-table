@@ -73,9 +73,20 @@ try {
   assert.equal(await frame.getByText("代码入口", { exact: true }).count(), 0);
   mkdirSync("artifacts", { recursive: true });
   await page.screenshot({ path: "artifacts/blank-canvas.png", fullPage: true });
-  await page.getByRole("button", { name: "连接我的 AI", exact: true }).click();
-  const config = JSON.parse(await page.locator("#json").inputValue())
-    .mcpServers["sand-table"];
+  const help = frame.locator(".app-rail").getByRole("button", {
+    name: "帮助",
+    exact: true,
+  });
+  await help.click();
+  const jsonField = frame.locator("#json");
+  await jsonField.waitFor();
+  let jsonText = "";
+  for (let i = 0; i < 50; i++) {
+    jsonText = await jsonField.inputValue();
+    if (jsonText.includes("mcpServers")) break;
+    await page.waitForTimeout(100);
+  }
+  const config = JSON.parse(jsonText).mcpServers["sand-table"];
   client = new Client({
     name: "Scripted blank-canvas acceptance; not a model",
     version: "1",
@@ -270,7 +281,7 @@ try {
           .selectedInstances,
     0,
   );
-  await page.getByRole("button", { name: "返回白板" }).click();
+  await frame.getByRole("button", { name: "返回白板" }).click();
   /* #10: the zoom bar's five controls stay visible and clickable. */
   await assertZoomBarUsable("default 1440x1000");
   for (let i = 0; i < 3; i++) {
@@ -313,6 +324,10 @@ try {
     await assertZoomBarUsable(`window ${size.width}x${size.height}`);
   }
   const canvasBeforeDrop = await frame.locator(".canvas").boundingBox();
+  await frame
+    .locator(".app-rail")
+    .getByRole("button", { name: "组件", exact: true })
+    .click();
   await frame
     .getByRole("button", { name: "便签", exact: true })
     .dragTo(frame.locator(".canvas"), { targetPosition: { x: 300, y: 240 } });
@@ -745,10 +760,14 @@ try {
   await t02.click();
   b = await until((b) => selectedInstances(b).includes(noteId));
   /* 回到编排态：工具箱开着，和这段测试原本的样子一致。 */
-  await frame.getByRole("button", { name: "编排", exact: true }).click();
-  await frame.getByRole("button", { name: "编排", exact: true }).click();
+  const componentsNav = frame.locator(".app-rail").getByRole("button", {
+    name: "组件",
+    exact: true,
+  });
+  await componentsNav.click();
+  await componentsNav.click();
   assert.equal(await frame.locator(".floating-tool-wrap").isVisible(), false);
-  await frame.getByRole("button", { name: "编排", exact: true }).click();
+  await componentsNav.click();
   await frame.getByRole("button", { name: "关闭详情" }).click();
   /* 工具箱里的「白板」：面包屑里也有一个同名按钮，要限定在工具箱里。 */
   await frame
@@ -787,16 +806,16 @@ try {
       b.instances.filter((i: any) => i.spaceId === "overview").length,
       2,
     );
-  await frame
-    .getByRole("button", { name: "AI 编排", exact: true })
-    .first()
-    .click();
   assert.equal(
     await frame.getByRole("textbox", { name: "给 AI 的编排请求" }).count(),
     0,
     "read-only MCP is not an executable AI channel",
   );
-  await frame.getByRole("heading", { name: "你的 AI 怎么接入" }).waitFor();
+  assert.equal(
+    await frame.getByRole("button", { name: "AI 编排", exact: true }).count(),
+    0,
+    "mcp mode does not offer a fake task composer",
+  );
   // A scripted external MCP client maintains the same board, without a repository.
   b = await read();
   const viewId = Object.keys(b.views)[0];
@@ -813,6 +832,12 @@ try {
   await frame.getByText("AI 搭建的比较", { exact: true }).first().waitFor();
   b = await read();
   const comparison = b.instances.find((i: any) => i.title === "AI 搭建的比较");
+  const cameraOf = () =>
+    frame.locator(".world").evaluate((el) => {
+      const m = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+      return { x: m.m41, y: m.m42, zoom: m.a };
+    });
+  const cameraBeforeActivity = v3 ? await cameraOf() : null;
   if (v3)
     await call("sand_activity", {
       state: "running",
@@ -832,15 +857,25 @@ try {
       state: "running",
     });
   await frame.getByText("● Agent 有活动报告", { exact: true }).waitFor();
-  await frame
-    .getByRole("button", { name: "AI 编排", exact: true })
-    .first()
-    .click();
   await frame.getByText("Arrange the comparison", { exact: true }).waitFor();
+  await frame.locator(".activity-badge").first().waitFor();
+  if (cameraBeforeActivity) {
+    await page.waitForTimeout(600);
+    const cameraAfterActivity = await cameraOf();
+    assert.ok(
+      Math.abs(cameraAfterActivity.x - cameraBeforeActivity.x) < 1 &&
+        Math.abs(cameraAfterActivity.y - cameraBeforeActivity.y) < 1 &&
+        cameraAfterActivity.zoom === cameraBeforeActivity.zoom,
+      "Agent activity does not move the camera",
+    );
+  }
   /* v3 的代码包（仓库导入、源码读取、代码改动）还没有接上：
      这一段只测 v2 的那条路。 */
   if (process.env.SAND_EXTERNAL_REPO && !v3) {
-    await frame.getByRole("button", { name: "编排", exact: true }).click();
+    await frame
+      .locator(".app-rail")
+      .getByRole("button", { name: "组件", exact: true })
+      .click();
     await frame.getByRole("tab", { name: "仓库", exact: true }).click();
     await frame
       .getByRole("textbox", { name: "本机仓库路径" })
@@ -941,7 +976,10 @@ try {
   b = await read();
   const farId = b.instances.find((i: any) => i.title === "远处便签").id;
   await editSpace({ kind: "select", ids: [] }, "Motion probe");
-  await frame.getByRole("button", { name: "画板", exact: true }).click();
+  await frame
+    .locator(".app-rail")
+    .getByRole("button", { name: "白板", exact: true })
+    .click();
   const locate = frame.getByRole("button", {
     name: "定位 远处便签",
     exact: true,
@@ -1066,7 +1104,10 @@ try {
   await frame.getByRole("button", { name: "关闭设置", exact: true }).click();
   /* The toolbox was collapsed for the focus check; open it again for the
      component pack protocol. */
-  await frame.getByRole("button", { name: "编排", exact: true }).click();
+  await frame
+    .locator(".app-rail")
+    .getByRole("button", { name: "组件", exact: true })
+    .click();
   await frame.getByRole("tab", { name: "组件" }).click();
   await frame.locator(".pack-import").waitFor();
   /* v3 的组件包清单格式与这里的不一样（v3 用 format/formatVersion），
@@ -2731,6 +2772,120 @@ try {
       .first()
       .waitFor({ timeout: 30000 });
   }
+  /* T37：导航、Escape、搜索定位、专注画布。 */
+  const railButton = (name: string) =>
+    frame.locator(".app-rail").getByRole("button", { name, exact: true });
+  const panelFocused = () =>
+    frame.locator("body").evaluate(() => {
+      const panel = document.querySelector(".shell-panel:not(.is-hidden)");
+      const active = document.activeElement;
+      return Boolean(
+        panel && active && (panel === active || panel.contains(active)),
+      );
+    });
+  await frame.getByRole("button", { name: "专注画布", exact: true }).click();
+  const navChecks: [string, () => Promise<unknown>][] = [
+    [
+      "白板",
+      () => frame.getByRole("region", { name: "白板", exact: true }).waitFor(),
+    ],
+    [
+      "组件",
+      () => frame.getByRole("complementary", { name: "组件工具箱" }).waitFor(),
+    ],
+    ["历史", () => frame.getByText("历史列表还没接上").waitFor()],
+    ["设置", () => frame.getByRole("dialog", { name: "设置" }).waitFor()],
+    [
+      "帮助",
+      () =>
+        frame
+          .getByRole("heading", { name: "和你自己的 AI 共用这张白板" })
+          .waitFor(),
+    ],
+  ];
+  for (const [name, opened] of navChecks) {
+    const button = railButton(name);
+    await button.click();
+    await opened();
+    for (let i = 0; i < 20 && !(await panelFocused()); i++)
+      await page.waitForTimeout(50);
+    await page.keyboard.press("Escape");
+    let focused = false;
+    for (let i = 0; i < 20; i++) {
+      focused = await button.evaluate(
+        (el) => el === el.ownerDocument.activeElement,
+      );
+      if (focused) break;
+      await page.waitForTimeout(50);
+    }
+    assert.equal(focused, true, name + " regains focus after Escape");
+  }
+  assert.equal(await frame.locator(".shell-card").count(), 0);
+  await editSpace({
+    kind: "create",
+    type: "text",
+    title: "面板外目标",
+    data: { text: "用来检查定位" },
+    rect: { x: 5200, y: 2800, width: 280, height: 180, pinned: false },
+  });
+  await railButton("白板").click();
+  await frame
+    .locator(".boards-panel")
+    .getByRole("textbox", { name: "搜索对象" })
+    .fill("面板外目标");
+  await frame
+    .locator(".boards-panel")
+    .getByRole("button", { name: "搜索", exact: true })
+    .click();
+  const found = frame.getByRole("button", {
+    name: "打开 面板外目标",
+    exact: true,
+  });
+  await found.waitFor();
+  await frame.getByRole("button", { name: "复位", exact: true }).click();
+  await page.waitForTimeout(250);
+  const beforeSearchFocus = await cameraOf();
+  await found.click();
+  const searched = frame
+    .locator(".component-card", { hasText: "面板外目标" })
+    .first();
+  let uncovered = false;
+  for (let i = 0; i < 30; i++) {
+    const panelBox = await frame.locator(".shell-card").boundingBox();
+    const cardBox = await searched.boundingBox();
+    const canvasBox = await frame.locator(".canvas").boundingBox();
+    let right = canvasBox ? canvasBox.x + canvasBox.width : 0;
+    if (await frame.locator(".studio-inspector").isVisible()) {
+      const inspector = await frame.locator(".studio-inspector").boundingBox();
+      if (inspector) right = inspector.x;
+    }
+    if (
+      panelBox &&
+      cardBox &&
+      cardBox.width > 40 &&
+      cardBox.x >= panelBox.x + panelBox.width - 8 &&
+      cardBox.x + cardBox.width <= right + 8
+    ) {
+      uncovered = true;
+      break;
+    }
+    await page.waitForTimeout(80);
+  }
+  assert.ok(uncovered, "Search focus leaves the card outside the open panel");
+  const afterSearchFocus = await cameraOf();
+  assert.ok(
+    Math.abs(afterSearchFocus.x - beforeSearchFocus.x) > 1 ||
+      Math.abs(afterSearchFocus.y - beforeSearchFocus.y) > 1,
+    "Search focus moves the camera onto the card",
+  );
+  await frame.getByRole("button", { name: "专注画布", exact: true }).click();
+  assert.equal(await frame.locator(".shell-card").count(), 0);
+  assert.equal(await frame.locator(".floating-tool-wrap").isVisible(), false);
+  assert.equal(await frame.locator(".studio-inspector").isVisible(), false);
+  await railButton("历史").click();
+  await frame.getByText("历史列表还没接上").waitFor();
+  await page.keyboard.press("f");
+  await frame.getByText("历史列表还没接上").waitFor({ state: "hidden" });
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",

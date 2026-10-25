@@ -205,7 +205,10 @@ try {
     .getByText("Shared through the host tool", { exact: true })
     .waitFor();
   // A non-programmer can create/edit domain components from the actual palette.
-  await board.getByRole("button", { name: "编排", exact: true }).click();
+  await board
+    .locator(".app-rail")
+    .getByRole("button", { name: "组件", exact: true })
+    .click();
   await board.getByRole("button", { name: "小说", exact: true }).click();
   await board.getByRole("button", { name: "人物", exact: true }).click();
   const character = board

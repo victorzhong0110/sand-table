@@ -1,15 +1,20 @@
 import { initialData } from "./domain-ui.ts";
-import { Icon } from "./Icon.tsx";
-import { useState, useEffect, useRef, type CSSProperties } from "react";
-import type { HostTaskEvent } from "./data-client/objects.ts";
-import type { Board, Item } from "./data-client/model.ts";
-import type { HistorySnapshot } from "./data-client/history.ts";
 import {
-  safeUrl,
-  defaultData,
-  componentTypes,
-  findComponentSpec,
-} from "./data-client/spaces.ts";
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import type { HostTaskEvent } from "./data-client/objects.ts";
+import type {
+  Activity,
+  Board,
+  Item,
+  SpaceActivity,
+} from "./data-client/model.ts";
+import type { HistorySnapshot } from "./data-client/history.ts";
+import { safeUrl, findComponentSpec } from "./data-client/spaces.ts";
 import { FlowCanvas } from "./canvas/FlowCanvas.tsx";
 import { Toolbox } from "./Toolbox.tsx";
 import { ThemePanel } from "./ThemePanel.tsx";
@@ -17,7 +22,35 @@ import { Inspector } from "./views/Inspector.tsx";
 import { ChangePanel } from "./ChangePanel.tsx";
 import { WorkspacePanel, type WorkspacePanelProps } from "./WorkspacePanel.tsx";
 import { GuidePanel } from "./GuidePanel.tsx";
+import { Rail } from "./shell/Rail.tsx";
+import { Panel, PanelResize } from "./shell/Panel.tsx";
+import { BoardsPanel } from "./shell/BoardsPanel.tsx";
+import { ActivityLayer } from "./shell/ActivityLayer.tsx";
+import {
+  EMPTY_SHELL,
+  HelpPanel,
+  readShellMessage,
+  type HostShellMessage,
+} from "./shell/HelpPanel.tsx";
+import {
+  clampShellWidth,
+  readShellPanel,
+  readShellWidth,
+  shellOcclusion,
+  writeShellPanel,
+  writeShellWidth,
+  type NavId,
+} from "./shell/nav.ts";
+
 type Action = (name: string, args?: Record<string, unknown>) => Promise<any>;
+
+function typingTarget(target: EventTarget | null) {
+  return (
+    target instanceof HTMLElement &&
+    Boolean(target.closest("input, textarea, select, [contenteditable='true']"))
+  );
+}
+
 export function CanvasShell({
   board: b,
   viewId,
@@ -47,36 +80,22 @@ export function CanvasShell({
   operate: (op: any) => Promise<any>;
   openLink: (url: string) => void;
   sendMessage: (text: string) => Promise<void>;
-  /** The board's reversible history and the moves that change it. */
   history?: HistorySnapshot;
   onUndo?: () => void;
   onRedo?: () => void;
   onJump?: (recordId: string) => void;
-  /**
-   * AI 接入方式：
-   * "host" = 宿主提供了消息桥接，能真的把任务发出去并收到响应；
-   * "mcp"  = 只有 MCP，AI 在你自己的客户端里。
-   * 只有真能发能收时才显示直接对话入口（决策 D7）。
-   */
   aiMode?: "host" | "mcp";
-  /**
-   * 宿主提供的**结构化**任务通道（如 DSH 宿主桥）。
-   * 有它时走它：发对象引用与版本，不塞提示词。
-   * 没有时退回 sendMessage（MCP App 的消息桥）。
-   */
   sendToHost?: (text: string) => Promise<void>;
-  /** 工作空间管理面板的接线。传了就显示「工作空间」入口。 */
   workspacePanel?: WorkspacePanelProps;
   hostTask?: HostTaskEvent;
   onCancelHostTask?: () => Promise<void>;
 }) {
   const [mode, setMode] = useState("browse"),
     [focusRevision, setFocusRevision] = useState(0),
-    [navSection, setNavSection] = useState("tools"),
+    [nav, setNav] = useState<NavId | null>(readShellPanel),
+    [width, setWidth] = useState(readShellWidth),
     [edgePan, setEdgePan] = useState(false),
     [edgeSpeed, setEdgeSpeed] = useState(600),
-    [settingsOpen, setSettingsOpen] = useState(false),
-    [toolsOpen, setToolsOpen] = useState(true),
     [panel, setPanel] = useState(""),
     [query, setQuery] = useState(""),
     [arrows, setArrows] = useState(false),
@@ -84,11 +103,32 @@ export function CanvasShell({
     [name, setName] = useState(b.title),
     [prompt, setPrompt] = useState(""),
     [handoff, setHandoff] = useState(""),
-    [source, setSource] = useState<any>();
+    [source, setSource] = useState<any>(),
+    [shell, setShell] = useState<HostShellMessage>(EMPTY_SHELL);
   const field = useRef<HTMLTextAreaElement>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
+  const railRefs = useRef<Partial<Record<NavId, HTMLButtonElement | null>>>({});
+  const navRef = useRef(nav);
+  const revealSeen = useRef(0);
+  navRef.current = nav;
   const view = b.views[viewId],
     selected = b.instances.find((c) => c.id === view?.selection.at(-1)),
     object = b.objects.find((o) => o.id === selected?.objectId);
+  const shownWidth = nav === "settings" ? Math.max(width, 420) : width;
+
+  const applyNav = (id: NavId | null) => {
+    setNav(id);
+    writeShellPanel(id);
+  };
+  const applyNavRef = useRef(applyNav);
+  applyNavRef.current = applyNav;
+  const collapse = () => {
+    applyNav(null);
+    setPanel("");
+  };
+  const collapseRef = useRef(collapse);
+  collapseRef.current = collapse;
+
   useEffect(() => setName(b.title), [b.title]);
   useEffect(() => {
     if (b.theme) setTheme("custom");
@@ -96,12 +136,69 @@ export function CanvasShell({
   }, [JSON.stringify(b.theme)]);
   useEffect(() => {
     setSource(undefined);
-    // Selecting context or receiving an AI result must not close the conversation.
     if (panel === "ai") return;
     if (selected)
       setPanel(selected.type === "object" ? "source" : "properties");
     else if (panel === "source" || panel === "properties") setPanel("");
   }, [selected?.id]);
+  useEffect(() => {
+    if (!nav || nav === "settings") return;
+    panelRef.current?.focus({ preventScroll: true });
+  }, [nav]);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (
+        (event.key === "f" || event.key === "F") &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.shiftKey
+      ) {
+        if (typingTarget(event.target)) return;
+        event.preventDefault();
+        collapseRef.current();
+        return;
+      }
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (typingTarget(event.target)) return;
+      const host =
+        event.target instanceof Element
+          ? event.target.closest(".shell-panel")
+          : null;
+      if (!host || host.classList.contains("is-hidden")) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[role="dialog"]')
+      )
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      const id = navRef.current;
+      applyNavRef.current(null);
+      if (id) railRefs.current[id]?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== window.parent) return;
+      const next = readShellMessage(event.data);
+      if (next) setShell(next);
+    };
+    window.addEventListener("message", onMessage);
+    if (window.parent !== window)
+      window.parent.postMessage({ type: "sand-table:shell-ready" }, "*");
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+  useEffect(() => {
+    if (shell.revealSeq > revealSeen.current) {
+      revealSeen.current = shell.revealSeq;
+      setNav("help");
+      writeShellPanel("help");
+    }
+  }, [shell.revealSeq]);
+
   const custom = theme === "custom" ? b.theme : undefined;
   const style = custom
     ? ({
@@ -121,6 +218,30 @@ export function CanvasShell({
               : "system-ui,sans-serif",
       } as CSSProperties)
     : undefined;
+  const closeNav = (id: NavId) => {
+    applyNav(null);
+    railRefs.current[id]?.focus();
+  };
+  const toggleNav = (id: NavId) => {
+    setPanel((current) => (current === "ai" ? "" : current));
+    applyNav(nav === id ? null : id);
+  };
+  const resizeFrom = (event: ReactPointerEvent<HTMLElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startW = width;
+    const move = (pointer: PointerEvent) => {
+      const next = clampShellWidth(startW + pointer.clientX - startX);
+      setWidth(next);
+      writeShellWidth(next);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
   const create = (
     type: string,
     title: string,
@@ -132,7 +253,7 @@ export function CanvasShell({
     setMode("arrange");
     const size_ = findComponentSpec(type);
     const narrow = window.innerWidth < 700;
-    if (narrow) setToolsOpen(false);
+    if (narrow) applyNav(null);
     const camera = view?.camera || { x: 24, y: 24, zoom: 1 };
     const offset =
       (b.instances.filter((c) => c.spaceId === view?.spaceId).length % 6) * 24;
@@ -144,8 +265,6 @@ export function CanvasShell({
       rect: {
         x: ((narrow ? 24 : 280) + offset - camera.x) / camera.zoom,
         y: (160 + offset - 36 - camera.y) / camera.zoom,
-        /* A component pack can say how big its preset should be; without one
-           the type's own size is used. */
         width: size?.width || size_?.width || 280,
         height: size?.height || size_?.height || 180,
         pinned: false,
@@ -153,6 +272,58 @@ export function CanvasShell({
       ...(objectId ? { objectId } : {}),
     });
   };
+  const focusInstance = async (id: string) => {
+    await operate({ kind: "select", ids: [id] });
+    setFocusRevision((n) => n + 1);
+  };
+  async function focusObject(objectId: string) {
+    const data = await call("sand_read", {
+      ids: [objectId],
+      include: ["presentations"],
+    });
+    const objectRow = data?.objects?.[0] as
+      | {
+          type?: string;
+          presentations?: { id?: string; boardId?: string }[];
+        }
+      | undefined;
+    const presentations = Array.isArray(objectRow?.presentations)
+      ? objectRow.presentations
+      : [];
+    const current = view?.spaceId || b.id;
+    const here =
+      presentations.find((item) => item.boardId === current) ??
+      presentations[0];
+    if (here?.id && here.boardId) {
+      if (here.boardId !== current)
+        await operate({ kind: "navigate", spaceId: here.boardId });
+      await operate({ kind: "select", ids: [here.id] });
+      setFocusRevision((n) => n + 1);
+      return;
+    }
+    if (objectRow?.type === "base.board")
+      await operate({ kind: "navigate", spaceId: objectId });
+  }
+  async function openActivity(
+    activity: Activity,
+    space: SpaceActivity | undefined,
+  ) {
+    const here = b.instances.find(
+      (item) =>
+        (item.objectId && activity.objectIds.includes(item.objectId)) ||
+        activity.objectIds.includes(item.id),
+    );
+    if (here) {
+      await focusInstance(here.id);
+      return;
+    }
+    if (!space?.spaceId) return;
+    await operate({ kind: "navigate", spaceId: space.spaceId });
+    if (space.instanceIds.length) {
+      await operate({ kind: "select", ids: space.instanceIds });
+      setFocusRevision((n) => n + 1);
+    }
+  }
   async function read(o: Item) {
     const result = await action("sand_read_source", { objectId: o.id });
     if (result) setSource({ ...result, objectId: o.id });
@@ -164,8 +335,6 @@ export function CanvasShell({
         ids: [...view.selection],
         keepGuide: true,
       });
-    /* 宿主提供结构化任务通道时走它：把「选中什么、什么版本」一起发过去，
-       不把上下文拼成提示词塞回去。 */
     if (sendToHost) {
       try {
         await sendToHost(prompt);
@@ -190,8 +359,6 @@ export function CanvasShell({
       await sendMessage(message);
       setHandoff("已交给宿主，等它的回应。");
     } catch (e) {
-      // 发送失败就说发送失败。不要退回到「复制这段提示词」——
-      // 那是把「交给 AI」伪装成复制粘贴，日常用起来只会让人以为 AI 在干活。
       setHandoff(
         "宿主没有接受这条消息（" +
           ((e as Error)?.message || "未知原因") +
@@ -199,6 +366,11 @@ export function CanvasShell({
       );
     }
   }
+  const askSelection = () => {
+    if (window.parent === window) return;
+    window.parent.postMessage({ type: "sand-table:shell-ask" }, "*");
+  };
+
   return (
     <main
       className={
@@ -209,75 +381,15 @@ export function CanvasShell({
       }
       style={style}
     >
-      <nav className="app-rail" aria-label="主导航">
-        <span className="rail-brand" title="Sand Table">
-          S
-        </span>
-        <button
-          aria-label="画板"
-          title="画板"
-          aria-pressed={toolsOpen && navSection === "boards"}
-          onClick={() => {
-            setNavSection("boards");
-            setToolsOpen(true);
-            if (panel === "ai") setPanel("");
-          }}
-        >
-          <Icon name="board" />
-        </button>
-        <button
-          aria-label="浏览"
-          title="浏览"
-          aria-pressed={mode === "browse" && navSection === "browse"}
-          onClick={() => {
-            setMode("browse");
-            setNavSection("browse");
-            setToolsOpen(false);
-            setPanel(
-              selected
-                ? selected.type === "object"
-                  ? "source"
-                  : "properties"
-                : "browse",
-            );
-          }}
-        >
-          <Icon name="browse" />
-        </button>
-        <button
-          aria-label="编排"
-          title="编排"
-          aria-expanded={toolsOpen && navSection === "tools"}
-          aria-pressed={toolsOpen && navSection === "tools"}
-          onClick={() => {
-            setToolsOpen(navSection !== "tools" || !toolsOpen);
-            setMode("arrange");
-            setNavSection("tools");
-            if (panel === "ai") setPanel("");
-          }}
-        >
-          <Icon name="arrange" />
-        </button>
-        <button
-          aria-label="AI 编排"
-          aria-pressed={panel === "ai"}
-          onClick={() => {
-            setMode("ai");
-            setNavSection("ai");
-            setToolsOpen(false);
-            setPanel("ai");
-          }}
-        >
-          <Icon name="ai" />
-        </button>
-        <button
-          className="rail-settings"
-          aria-label="设置"
-          onClick={() => setSettingsOpen(true)}
-        >
-          <Icon name="comparison" />
-        </button>
-      </nav>
+      <Rail
+        open={nav}
+        connected={shell.connected}
+        onToggle={toggleNav}
+        onCollapse={collapse}
+        buttonRef={(id, node) => {
+          railRefs.current[id] = node;
+        }}
+      />
       <header className="canvas-topbar">
         <span className="canvas-brand">
           S<span>Sand Table</span>
@@ -299,29 +411,62 @@ export function CanvasShell({
             if (e.key === "Enter") e.currentTarget.blur();
           }}
         />
+        <div className="canvas-top-actions">
+          <button
+            type="button"
+            onClick={() => {
+              setMode("browse");
+              applyNav(null);
+            }}
+          >
+            浏览
+          </button>
+          {aiMode === "host" && (
+            <button
+              type="button"
+              aria-pressed={panel === "ai"}
+              onClick={() => {
+                setMode("ai");
+                applyNav(null);
+                setPanel("ai");
+              }}
+            >
+              AI 编排
+            </button>
+          )}
+        </div>
       </header>
       {error && (
         <div className="canvas-error" role="alert">
           {error}
           {workspacePanel?.onExport && (
-            <button onClick={workspacePanel.onExport}>导出工作空间</button>
+            <button type="button" onClick={workspacePanel.onExport}>
+              导出工作空间
+            </button>
           )}
           {workspacePanel?.onReload && (
-            <button onClick={workspacePanel.onReload}>
+            <button type="button" onClick={workspacePanel.onReload}>
               保留副本并重新加载
             </button>
           )}
         </div>
       )}
       <div className={"studio-layout " + (panel ? "has-inspector" : "")}>
-        <div className={"floating-tool-wrap " + (toolsOpen ? "" : "is-hidden")}>
+        <div
+          ref={(node) => {
+            if (nav === "components") panelRef.current = node;
+          }}
+          className={
+            "floating-tool-wrap shell-panel" +
+            (nav === "components" ? "" : " is-hidden")
+          }
+          style={{ width }}
+          tabIndex={-1}
+        >
           <Toolbox
-            focusInstance={async (id) => {
-              await operate({ kind: "select", ids: [id] });
-              setFocusRevision((n) => n + 1);
-            }}
-            activeSection={navSection}
-            close={() => setToolsOpen(false)}
+            focusInstance={(id) => void focusInstance(id)}
+            activeSection="tools"
+            close={() => closeNav("components")}
             navigate={(spaceId) => {
               setQuery("");
               void operate({ kind: "navigate", spaceId });
@@ -340,19 +485,153 @@ export function CanvasShell({
             onJump={onJump}
             showPanel={setPanel}
           />
+          <PanelResize onResizeStart={resizeFrom} />
         </div>
+        {nav && nav !== "components" && (
+          <Panel
+            title={
+              nav === "boards"
+                ? "白板"
+                : nav === "history"
+                  ? "历史"
+                  : nav === "settings"
+                    ? "设置"
+                    : "帮助"
+            }
+            dialog={nav === "settings"}
+            width={shownWidth}
+            panelRef={(node) => {
+              panelRef.current = node;
+            }}
+            onClose={() => closeNav(nav)}
+            onResizeStart={resizeFrom}
+          >
+            {nav === "boards" ? (
+              <BoardsPanel
+                board={b}
+                viewId={viewId}
+                call={call}
+                createBoard={() => create("board", "新白板")}
+                onOpenBoard={(id) => {
+                  setQuery("");
+                  void operate({ kind: "navigate", spaceId: id });
+                }}
+                onFocusInstance={(id) => void focusInstance(id)}
+                onFocusObject={focusObject}
+              />
+            ) : nav === "history" ? (
+              <p>历史列表还没接上。撤销和重做可以用快捷键。</p>
+            ) : nav === "settings" ? (
+              <>
+                <section>
+                  <h3>外观</h3>
+                  <div className="settings-presets">
+                    {[
+                      ["paper", "纸张"],
+                      ["mono", "黑白"],
+                      ...(b.theme ? [["custom", "自定义"]] : []),
+                    ].map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        aria-pressed={theme === id}
+                        onClick={() =>
+                          setTheme(id as "paper" | "mono" | "custom")
+                        }
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={arrows}
+                      onChange={(e) => setArrows(e.target.checked)}
+                    />{" "}
+                    显示关系
+                  </label>
+                  <h3>画布</h3>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={edgePan}
+                      onChange={(e) => setEdgePan(e.target.checked)}
+                    />{" "}
+                    边缘移动
+                  </label>
+                  <label>
+                    移动速度
+                    <input
+                      aria-label="边缘移动速度"
+                      type="range"
+                      min="200"
+                      max="1200"
+                      step="100"
+                      value={edgeSpeed}
+                      onChange={(e) => setEdgeSpeed(Number(e.target.value))}
+                    />
+                  </label>
+                  {view && view.selection.length > 0 && (
+                    <>
+                      <h3>选中组件</h3>
+                      <div className="detail-options">
+                        {[
+                          ["full", "完整界面"],
+                          ["label", "图标＋标题"],
+                          ["icon", "仅图标"],
+                        ].map(([detail, label]) => (
+                          <button
+                            key={detail}
+                            type="button"
+                            onClick={async () => {
+                              for (const id of view.selection)
+                                await operate({
+                                  kind: "update",
+                                  instanceId: id,
+                                  appearance: { detail },
+                                });
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </section>
+                {workspacePanel && !shell.embedded && (
+                  <section>
+                    <h3>工作空间</h3>
+                    <p className="settings-hint">
+                      一台机器上可以并存多个工作空间；切换前会先把当前内容落盘。
+                    </p>
+                    <WorkspacePanel {...workspacePanel} />
+                  </section>
+                )}
+                <ThemePanel
+                  board={b}
+                  operate={operate}
+                  onUseCustom={() => setTheme("custom")}
+                />
+              </>
+            ) : (
+              <HelpPanel
+                shell={shell}
+                onAsk={askSelection}
+                onClose={() => closeNav("help")}
+              />
+            )}
+          </Panel>
+        )}
         <section className="studio-stage" aria-label="白板工作区">
           <div className="stage-search">
             <input
-              aria-label="搜索对象"
+              aria-label="在这张白板中查找"
               placeholder="在这张白板中查找…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
-            {(b.activities.some((a) => a.state === "running" && !a.stale) ||
-              b.spaceActivities?.some(
-                (a) => a.state === "running" && !a.stale,
-              )) && <span className="agent-beacon">● Agent 有活动报告</span>}
           </div>
           <FlowCanvas
             board={b}
@@ -361,18 +640,12 @@ export function CanvasShell({
             focusRevision={focusRevision}
             edgePan={edgePan}
             edgeSpeed={edgeSpeed}
-            motionPaused={settingsOpen}
-            insets={{
-              left: toolsOpen
-                ? 256
-                : (panel === "ai" || navSection === "browse") && panel
-                  ? 332
-                  : 16,
-              right:
-                panel && panel !== "ai" && navSection !== "browse" ? 332 : 16,
-              top: 120,
-              bottom: 60,
-            }}
+            motionPaused={nav === "settings"}
+            insets={shellOcclusion({
+              panelWidth: nav ? shownWidth : null,
+              inspectorRight: Boolean(panel) && panel !== "ai",
+              contextLeft: panel === "ai",
+            })}
             query={query}
             kind="all"
             scope="all"
@@ -392,18 +665,23 @@ export function CanvasShell({
               <div className="blank-invitation">
                 <span aria-hidden="true">＋</span>
                 <h1>从一块空白开始</h1>
-
-                <button onClick={() => create("text", "我的第一张便签")}>
+                <button
+                  type="button"
+                  onClick={() => create("text", "我的第一张便签")}
+                >
                   添加第一张便签
                 </button>
               </div>
             )}
+          <ActivityLayer
+            board={b}
+            onOpen={(activity, space) => void openActivity(activity, space)}
+          />
         </section>
         {panel && panel !== "theme" && (
           <aside
             className={
-              "studio-inspector " +
-              (panel === "ai" || navSection === "browse" ? "is-context" : "")
+              "studio-inspector " + (panel === "ai" ? "is-context" : "")
             }
             aria-label="组件详情"
           >
@@ -418,12 +696,13 @@ export function CanvasShell({
                       ai: "和 AI 一起搭",
                       theme: "外观",
                       changes: "代码改动",
-                    } as any
+                    } as Record<string, string>
                   )[panel]
                 }
               </span>
               {object && (panel === "source" || panel === "properties") && (
                 <button
+                  type="button"
                   className="inspector-switch"
                   onClick={() =>
                     setPanel(panel === "source" ? "properties" : "source")
@@ -432,7 +711,11 @@ export function CanvasShell({
                   {panel === "source" ? "组件属性" : "源码与理解"}
                 </button>
               )}
-              <button aria-label="关闭详情" onClick={() => setPanel("")}>
+              <button
+                type="button"
+                aria-label="关闭详情"
+                onClick={() => setPanel("")}
+              >
                 ×
               </button>
             </div>
@@ -444,7 +727,7 @@ export function CanvasShell({
                 viewId={viewId}
                 call={call}
                 operate={operate}
-                onOpenSettings={() => setSettingsOpen(true)}
+                onOpenSettings={() => applyNav("settings")}
                 onOpenLink={(url) => {
                   const safe = safeUrl(url);
                   if (safe) openLink(safe);
@@ -471,6 +754,7 @@ export function CanvasShell({
                       maxLength={8000}
                     />
                     <button
+                      type="button"
                       disabled={!prompt.trim()}
                       onClick={() => void handToAI()}
                     >
@@ -478,17 +762,7 @@ export function CanvasShell({
                     </button>
                   </>
                 ) : (
-                  <>
-                    <h2>你的 AI 怎么接入</h2>
-                    <p>
-                      这张白板通过 <b>MCP</b> 接入：你的 AI
-                      用沙盘工具直接读写这里， 你在它那边说话，它在这里动手。
-                    </p>
-                    <p>
-                      这里不放对话框——只有真能把任务发出去并收到回应时，
-                      才值得在这里直接说话。接入方式见「接入设置」。
-                    </p>
-                  </>
+                  <p>接入方式在「帮助」里。这里不放对话框。</p>
                 )}
                 {handoff && <p role="status">{handoff}</p>}
                 {hostTask && (
@@ -496,6 +770,7 @@ export function CanvasShell({
                     <p>{hostTask.message || hostTask.state}</p>
                     {hostTask.state === "running" && onCancelHostTask && (
                       <button
+                        type="button"
                         onClick={() =>
                           void onCancelHostTask().catch((e) =>
                             setHandoff(String(e)),
@@ -507,50 +782,6 @@ export function CanvasShell({
                     )}
                   </div>
                 )}
-                {(b.spaceActivities?.length || 0) > 0 && (
-                  <>
-                    <h3>Agent 在哪里</h3>
-                    {b.spaceActivities!.map((a) => (
-                      <div className="report" key={a.agentId}>
-                        <b>{a.agentId}</b>
-                        <p>{a.task}</p>
-                        <small>
-                          {a.stale ? "最后已知" : a.state} · {a.action}
-                          <br />
-                          来源：Agent 自报
-                        </small>
-                        <button
-                          onClick={async () => {
-                            await operate({
-                              kind: "navigate",
-                              spaceId: a.spaceId,
-                            });
-                            if (a.instanceIds.length)
-                              await operate({
-                                kind: "select",
-                                ids: a.instanceIds,
-                              });
-                          }}
-                        >
-                          查看：
-                          {b.spaces.find((s) => s.id === a.spaceId)?.title ||
-                            "空间已缺失"}
-                        </button>
-                      </div>
-                    ))}
-                  </>
-                )}
-                <h3>它当前能读取什么</h3>
-                <p>
-                  {b.spaces.find((s) => s.id === view?.spaceId)?.title} ·{" "}
-                  {view?.selection.length || 0} 个选中组件
-                </p>
-                <small>
-                  最近读取：
-                  {b.lastContextRead
-                    ? new Date(b.lastContextRead.at).toLocaleTimeString()
-                    : "尚未读取"}
-                </small>
               </section>
             ) : (
               <section className="source-inspector">
@@ -570,7 +801,11 @@ export function CanvasShell({
                   <>
                     <h2>{object.title}</h2>
                     <small>{object.source?.path}</small>
-                    <button disabled={busy} onClick={() => void read(object)}>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void read(object)}
+                    >
                       查看源码依据
                     </button>
                     {source && (
@@ -581,6 +816,7 @@ export function CanvasShell({
                         <pre className="source">{source.text}</pre>
                         {source.nextLine && (
                           <button
+                            type="button"
                             onClick={async () =>
                               setSource(
                                 await action("sand_read_source", {
@@ -607,18 +843,22 @@ export function CanvasShell({
                       .map((o) => (
                         <button
                           className="source-choice"
+                          type="button"
                           key={o.id}
                           onClick={() => create("object", o.title, {}, o.id)}
                         >
                           {o.title}
                         </button>
                       ))}
-                    <button onClick={() => setPanel("changes")}>
+                    <button type="button" onClick={() => setPanel("changes")}>
                       表达代码改动
                     </button>
                   </>
                 )}
-                <button onClick={() => void action("sand_refresh_board")}>
+                <button
+                  type="button"
+                  onClick={() => void action("sand_refresh_board")}
+                >
                   刷新源码与核对结果
                 </button>
               </section>
@@ -626,145 +866,6 @@ export function CanvasShell({
           </aside>
         )}
       </div>
-      {settingsOpen && (
-        <div
-          className="settings-backdrop"
-          onClick={() => setSettingsOpen(false)}
-        >
-          <section
-            className="settings-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-label="设置"
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              if (e.key === "Escape" && !e.defaultPrevented) {
-                e.preventDefault();
-                e.stopPropagation();
-                setSettingsOpen(false);
-              }
-              if (e.key === "Tab") {
-                const items = [
-                  ...e.currentTarget.querySelectorAll<HTMLElement>(
-                    'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex="0"]',
-                  ),
-                ];
-                const first = items[0],
-                  last = items.at(-1);
-                if (e.shiftKey && document.activeElement === first) {
-                  e.preventDefault();
-                  last?.focus();
-                } else if (!e.shiftKey && document.activeElement === last) {
-                  e.preventDefault();
-                  first?.focus();
-                }
-              }
-            }}
-          >
-            <header>
-              <h2>设置</h2>
-              <button
-                aria-label="关闭设置"
-                autoFocus
-                onClick={() => setSettingsOpen(false)}
-              >
-                ×
-              </button>
-            </header>
-            <div className="settings-body">
-              <section>
-                <h3>外观</h3>
-                <div className="settings-presets">
-                  {[
-                    ["paper", "纸张"],
-                    ["mono", "黑白"],
-                    ...(b.theme ? [["custom", "自定义"]] : []),
-                  ].map(([id, label]) => (
-                    <button
-                      key={id}
-                      aria-pressed={theme === id}
-                      onClick={() =>
-                        setTheme(id as "paper" | "mono" | "custom")
-                      }
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={arrows}
-                    onChange={(e) => setArrows(e.target.checked)}
-                  />{" "}
-                  显示关系
-                </label>
-                <h3>画布</h3>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={edgePan}
-                    onChange={(e) => setEdgePan(e.target.checked)}
-                  />{" "}
-                  边缘移动
-                </label>
-                <label>
-                  移动速度
-                  <input
-                    aria-label="边缘移动速度"
-                    type="range"
-                    min="200"
-                    max="1200"
-                    step="100"
-                    value={edgeSpeed}
-                    onChange={(e) => setEdgeSpeed(Number(e.target.value))}
-                  />
-                </label>
-                {view && view.selection.length > 0 && (
-                  <>
-                    <h3>选中组件</h3>
-                    <div className="detail-options">
-                      {[
-                        ["full", "完整界面"],
-                        ["label", "图标＋标题"],
-                        ["icon", "仅图标"],
-                      ].map(([detail, label]) => (
-                        <button
-                          key={detail}
-                          onClick={async () => {
-                            for (const id of view.selection)
-                              await operate({
-                                kind: "update",
-                                instanceId: id,
-                                appearance: { detail },
-                              });
-                          }}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </section>
-              {workspacePanel && (
-                <section>
-                  <h3>工作空间</h3>
-                  <p className="settings-hint">
-                    一台机器上可以并存多个工作空间；切换前会先把当前内容落盘。
-                  </p>
-                  <WorkspacePanel {...workspacePanel} />
-                </section>
-              )}
-              <ThemePanel
-                board={b}
-                operate={operate}
-                onUseCustom={() => setTheme("custom")}
-              />
-            </div>
-          </section>
-        </div>
-      )}
     </main>
   );
 }
