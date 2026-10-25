@@ -2730,6 +2730,137 @@ try {
     const ageAgain = frame.getByRole("textbox", { name: "年龄", exact: true });
     await ageAgain.waitFor();
     assert.equal(await ageAgain.isDisabled(), false);
+    /* T36：连续移动三十步也不横向滚动；撤销后可以重做；再编辑后能从旧分支跳回去。 */
+    await frame.getByRole("button", { name: "专注画布", exact: true }).click();
+    await frame.getByRole("button", { name: "复位", exact: true }).click();
+    await page.waitForTimeout(200);
+    await editSpace({
+      kind: "create",
+      type: "text",
+      title: "历史拖动",
+      data: { text: "三十步" },
+      rect: { x: 48, y: 220, width: 200, height: 110, pinned: false },
+    });
+    const t36made = await until((board) =>
+      board.instances.some(
+        (item: { title?: string }) => item.title === "历史拖动",
+      ),
+    );
+    const t36id = t36made.instances.find(
+      (item: { title?: string }) => item.title === "历史拖动",
+    ).id;
+    for (let step = 0; step < 30; step++) {
+      const before = (await read()).instances.find(
+        (item: { id: string }) => item.id === t36id,
+      ).rect;
+      await editSpace({
+        kind: "place",
+        items: [
+          {
+            id: t36id,
+            rect: {
+              x: before.x + 16,
+              y: before.y,
+              width: before.width,
+              height: before.height,
+              pinned: false,
+            },
+          },
+        ],
+      });
+      await until((board) => {
+        const card = board.instances.find(
+          (item: { id: string }) => item.id === t36id,
+        );
+        return card && card.rect.x > before.x + 2;
+      });
+    }
+    const parked36 = (await read()).instances.find(
+      (item: { id: string }) => item.id === t36id,
+    ).rect;
+    await frame
+      .locator(".app-rail")
+      .getByRole("button", { name: "历史", exact: true })
+      .click();
+    const timeline = frame.locator(".history-timeline");
+    await timeline.waitFor();
+    const overflow = await timeline.evaluate((element) => {
+      const panel = element.closest(".history-panel");
+      return {
+        list: element.scrollWidth - element.clientWidth,
+        panel: panel ? panel.scrollWidth - panel.clientWidth : 0,
+      };
+    });
+    assert.ok(
+      overflow.list <= 1 && overflow.panel <= 1,
+      "历史列表不应出现横向滚动 " + JSON.stringify(overflow),
+    );
+    const undoHistory = frame.getByRole("button", {
+      name: "撤销",
+      exact: true,
+    });
+    const waitUndoReady = async () => {
+      for (let i = 0; i < 40 && !(await undoHistory.isEnabled()); i++)
+        await page.waitForTimeout(100);
+    };
+    await undoHistory.click();
+    await waitUndoReady();
+    const redoHistory = frame.getByRole("button", {
+      name: "重做",
+      exact: true,
+    });
+    for (let i = 0; i < 40 && !(await redoHistory.isEnabled()); i++)
+      await page.waitForTimeout(100);
+    assert.equal(await redoHistory.isEnabled(), true, "撤销后应该可以重做");
+    await undoHistory.click();
+    await waitUndoReady();
+    await until((board) => {
+      const card = board.instances.find(
+        (item: { id: string }) => item.id === t36id,
+      );
+      return card && Math.abs(card.rect.x - parked36.x) > 2;
+    });
+    await frame.getByRole("button", { name: "专注画布", exact: true }).click();
+    const undone = (await read()).instances.find(
+      (item: { id: string }) => item.id === t36id,
+    ).rect;
+    await editSpace({
+      kind: "place",
+      items: [
+        {
+          id: t36id,
+          rect: {
+            x: undone.x + 48,
+            y: undone.y + 36,
+            width: undone.width,
+            height: undone.height,
+            pinned: false,
+          },
+        },
+      ],
+    });
+    await until((board) => {
+      const card = board.instances.find(
+        (item: { id: string }) => item.id === t36id,
+      );
+      return card && Math.abs(card.rect.x - undone.x) > 2;
+    });
+    await frame
+      .locator(".app-rail")
+      .getByRole("button", { name: "历史", exact: true })
+      .click();
+    await frame.getByRole("button", { name: "1 个分支" }).last().click();
+    await frame.locator('.history-entry[data-state="branch"]').last().click();
+    await until((board) => {
+      const card = board.instances.find(
+        (item: { id: string }) => item.id === t36id,
+      );
+      return (
+        card &&
+        Math.abs(card.rect.x - parked36.x) < 2 &&
+        Math.abs(card.rect.y - parked36.y) < 2
+      );
+    });
     /* 导出再导入：文件能下来，导入后能切到新工作空间并看到原来的组件。 */
     await page.setViewportSize({ width: 1440, height: 1000 });
     await frame.getByRole("button", { name: "设置", exact: true }).click();
@@ -2793,7 +2924,10 @@ try {
       "组件",
       () => frame.getByRole("complementary", { name: "组件工具箱" }).waitFor(),
     ],
-    ["历史", () => frame.getByText("历史列表还没接上").waitFor()],
+    [
+      "历史",
+      () => frame.getByRole("button", { name: "撤销", exact: true }).waitFor(),
+    ],
     ["设置", () => frame.getByRole("dialog", { name: "设置" }).waitFor()],
     [
       "帮助",
@@ -2883,9 +3017,11 @@ try {
   assert.equal(await frame.locator(".floating-tool-wrap").isVisible(), false);
   assert.equal(await frame.locator(".studio-inspector").isVisible(), false);
   await railButton("历史").click();
-  await frame.getByText("历史列表还没接上").waitFor();
+  await frame.getByRole("button", { name: "撤销", exact: true }).waitFor();
   await page.keyboard.press("f");
-  await frame.getByText("历史列表还没接上").waitFor({ state: "hidden" });
+  await frame
+    .getByRole("button", { name: "撤销", exact: true })
+    .waitFor({ state: "hidden" });
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",

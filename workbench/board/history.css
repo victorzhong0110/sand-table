@@ -11,6 +11,8 @@
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
 }
 .history-actions {
   display: flex;
@@ -46,9 +48,13 @@
   overflow: auto;
   overflow-x: hidden;
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
 }
 .history-node {
   position: relative;
+  min-width: 0;
+  max-width: 100%;
 }
 /* The rail: one vertical line, drawn behind the records. A branch that a
    later edit replaced sits one step to the right, on its own line, so it
@@ -69,7 +75,8 @@
   top: 0;
   bottom: 0;
   width: 17px;
-  background: linear-gradient(var(--line), var(--line)) right / 1px 100% no-repeat,
+  background:
+    linear-gradient(var(--line), var(--line)) right / 1px 100% no-repeat,
     linear-gradient(var(--line), var(--line)) 0 11px / 100% 1px no-repeat;
   pointer-events: none;
 }
@@ -87,6 +94,9 @@
   align-items: center;
   gap: 8px;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
   text-align: left;
   padding: 5px 8px 5px 0;
   background: transparent;
@@ -225,4 +235,35 @@
   line-height: 1.5;
   color: var(--muted);
   margin: 0;
+}
+.history-why {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.history-timeline:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.history-branch-row {
+  list-style: none;
+}
+.history-branches {
+  margin: 2px 0 2px 18px;
+  font-size: 12px;
+}
+.history-node.is-active .history-entry,
+.history-node.is-active .history-branches {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.history-entry .history-label {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+.history-entry small {
+  min-width: 0;
+  overflow: hidden;
 }
