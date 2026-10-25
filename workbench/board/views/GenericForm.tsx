@@ -288,9 +288,11 @@ export function GenericForm({
         </div>
       )}
       <label>
-        名称
+        {kernelType === "novel.character" ? "姓名" : "名称"}
         <input
-          aria-label="编辑组件名称"
+          aria-label={
+            kernelType === "novel.character" ? "姓名" : "编辑组件名称"
+          }
           value={title}
           onChange={(event) => {
             hold.current = false;

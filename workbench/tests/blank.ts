@@ -2554,13 +2554,18 @@ try {
       .locator(".slot-search")
       .getByRole("button", { name: "林", exact: true })
       .click();
-    const linked = await call("sand_read", {
-      ids: [eventId],
-      include: ["relations"],
-    });
-    const participation = (linked.objects?.[0]?.relations ?? []).find(
-      (item: { kind?: string }) => item.kind === "novel.participates",
-    );
+    let participation: { kind?: string } | undefined;
+    for (let i = 0; i < 30; i += 1) {
+      const linked = await call("sand_read", {
+        ids: [eventId],
+        include: ["relations"],
+      });
+      participation = (linked.objects?.[0]?.relations ?? []).find(
+        (item: { kind?: string }) => item.kind === "novel.participates",
+      );
+      if (participation) break;
+      await page.waitForTimeout(100);
+    }
     assert.ok(participation, "Adding a participant creates the relation.");
     await frame
       .getByRole("button", { name: "移除参与者 林", exact: true })

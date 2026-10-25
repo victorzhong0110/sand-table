@@ -82,11 +82,17 @@ export function GenericCard({
       {editingField === "text" && editor
         ? editor
         : lines.map((line) => (
-            <p
-              key={line.key}
-              className={`summary-line${line.key === "body" || line.key === "text" ? " component-text" : ""}`}
-            >
-              {line.label} {line.text}
+            <p key={line.key} className="summary-line">
+              <span className="summary-label">{line.label}</span>{" "}
+              <span
+                className={
+                  line.key === "body" || line.key === "text"
+                    ? "component-text"
+                    : undefined
+                }
+              >
+                {line.text}
+              </span>
             </p>
           ))}
       {relationLabels.map((slot) =>
