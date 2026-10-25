@@ -2283,3 +2283,45 @@ main.canvas-app {
   background: #8d2f2f;
   border-color: #8d2f2f;
 }
+.summary-line {
+  margin: 4px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.field-warning,
+.migration-error {
+  color: var(--muted);
+  font-size: 12px;
+}
+.version-conflict {
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.other-fields,
+.unknown-type,
+.relation-slot {
+  margin-top: 8px;
+}
+.nested-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.card-cover {
+  margin: 0;
+  min-height: 72px;
+  display: flex;
+  align-items: flex-end;
+}
+.card-cover-mark {
+  margin-right: 8px;
+  font-size: 12px;
+}
+.card-cover-image {
+  display: block;
+  width: 100%;
+  max-height: 160px;
+  object-fit: cover;
+  border-radius: 4px;
+}

@@ -36,6 +36,7 @@ import {
   type PlacedItem,
 } from "./clipboard.ts";
 import { ContextMenu, DeleteObjectDialog } from "./ContextMenu.tsx";
+import { selectionForShortcut } from "./selection.ts";
 import {
   alignSelection,
   boardOrigin,
@@ -56,6 +57,7 @@ import {
   type ZAction,
 } from "./arrange.ts";
 import { Breadcrumbs } from "./Breadcrumbs.tsx";
+import { TypeCatalogProvider } from "../views/catalog.tsx";
 import { detectPlatform, resolveShortcut, type ShortcutId } from "./keymap.ts";
 import {
   breadcrumbIds,
@@ -231,6 +233,10 @@ function FlowSurface({
   const canvas = useRef<HTMLElement>(null);
   const [viewport, setViewport] = useState<Viewport>({ ...DEFAULT_VIEWPORT });
   const [nodes, setNodes] = useState<CardNodeType[]>([]);
+  const selectedNodes = useRef<string[]>([]);
+  selectedNodes.current = nodes
+    .filter((node) => node.selected)
+    .map((node) => node.id);
   const [edges, setEdges] = useState<RelationEdgeType[]>([]);
   const [editing, setEditing] = useState<InlineEdit>();
   const [notice, setNotice] = useState("");
@@ -1224,10 +1230,16 @@ function FlowSurface({
     };
   };
 
+  const selectedIds = (): string[] =>
+    selectionForShortcut(
+      selectionOverride.current,
+      selectionServer.current,
+      selectedNodes.current,
+    );
+
   const selectedPlaced = (): PlacedItem[] => {
     if (!view) return [];
-    const picked = selectionOverride.current;
-    const ids = picked && picked.length ? picked : selectionServer.current;
+    const ids = selectedIds();
     return ids.flatMap((id) => {
       const instance = b.instances.find(
         (item) => item.id === id && item.spaceId === view.spaceId,
@@ -1303,7 +1315,7 @@ function FlowSurface({
               ? { x: 0, y: step }
               : null;
     if (!delta) return;
-    const selected = selectionOverride.current ?? selectionServer.current;
+    const selected = selectedIds();
     const state = nudgeState.current;
     let moved = 0;
     for (const id of selected) {
@@ -2212,342 +2224,344 @@ function FlowSurface({
   }));
 
   return (
-    <CanvasApiProvider value={api}>
-      <div className="space-shell">
-        <Breadcrumbs
-          items={crumbs}
-          canReturn={stack.length > 0}
-          detail={`${filtered.length} 个组件 · 本视图选中 ${view.selection.length}`}
-          onOpen={(id) => jumpRef.current(id)}
-          onReturn={() => backRef.current()}
-        />
-        <section
-          ref={canvas}
-          className="canvas flow-canvas"
-          aria-label="项目白板"
-          onDragOver={(event) => {
-            if (
-              [...event.dataTransfer.types].includes(
-                "application/x-sand-component",
-              )
-            ) {
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "copy";
-            }
-          }}
-          onDrop={(event) => {
-            const raw = event.dataTransfer.getData(
-              "application/x-sand-component",
-            );
-            if (!raw) return;
-            event.preventDefault();
-            try {
-              const item = JSON.parse(raw);
+    <TypeCatalogProvider call={call} revision={b.revision}>
+      <CanvasApiProvider value={api}>
+        <div className="space-shell">
+          <Breadcrumbs
+            items={crumbs}
+            canReturn={stack.length > 0}
+            detail={`${filtered.length} 个组件 · 本视图选中 ${view.selection.length}`}
+            onOpen={(id) => jumpRef.current(id)}
+            onReturn={() => backRef.current()}
+          />
+          <section
+            ref={canvas}
+            className="canvas flow-canvas"
+            aria-label="项目白板"
+            onDragOver={(event) => {
               if (
-                typeof item.type !== "string" ||
-                typeof item.title !== "string"
-              )
-                return;
-              const size = componentTypes.find(
-                (entry) => entry.type === item.type,
-              );
-              const position = flow.screenToFlowPosition({
-                x: event.clientX,
-                y: event.clientY,
-              });
-              void operate({
-                kind: "create",
-                type: item.type,
-                title: item.title,
-                data: item.data || {},
-                ...(item.objectId ? { objectId: item.objectId } : {}),
-                rect: {
-                  x: position.x,
-                  y: position.y,
-                  width: size?.width || 280,
-                  height: size?.height || 180,
-                  pinned: false,
-                },
-              });
-              clearFilters();
-            } catch {
-              showNotice("这块组件没有放上去。请从工具箱再拖一次。");
-            }
-          }}
-          onPointerDownCapture={(event) => {
-            pointerClient.current = { x: event.clientX, y: event.clientY };
-            touched.current = true;
-            stopAnimation(true);
-            stopEdge();
-          }}
-          onPointerLeave={() => stopEdge()}
-          onPointerMove={(event) => {
-            pointerClient.current = { x: event.clientX, y: event.clientY };
-            trackEdge(event);
-          }}
-        >
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            viewport={viewport}
-            onMove={(_event, next: FlowViewport) => {
-              if (
-                ignoreMove.current ||
-                animation.current ||
-                !isUserViewportEvent(_event)
-              )
-                return;
-              touched.current = true;
-              stopAnimation(false);
-              setViewport(next);
-            }}
-            onMoveEnd={(_event, next: FlowViewport) => {
-              if (
-                ignoreMove.current ||
-                animation.current ||
-                !isUserViewportEvent(_event)
-              )
-                return;
-              touched.current = true;
-              setViewport(next);
-              scheduleCamera(next);
-            }}
-            onNodesChange={(changes: NodeChange<CardNodeType>[]) => {
-              setNodes((current) => applyNodeChanges(changes, current));
-            }}
-            onNodeDragStart={(_event, _node, dragged) => {
-              for (const node of dragged) dragging.current.add(node.id);
-            }}
-            onNodeDragStop={(_event, _node, dragged) => {
-              for (const node of dragged)
-                pendingMoves.current.set(node.id, node);
-              queueMicrotask(() => {
-                const batch = [...pendingMoves.current.values()];
-                pendingMoves.current.clear();
-                for (const node of batch) dragging.current.delete(node.id);
-                void commitMove(batch);
-              });
-            }}
-            onPaneClick={() => {
-              if (menu) {
-                setMenu(null);
-                focusReturn.current = null;
+                [...event.dataTransfer.types].includes(
+                  "application/x-sand-component",
+                )
+              ) {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
               }
-              userClearedSelection.current = true;
-              queueMicrotask(() => {
-                requestAnimationFrame(() => {
+            }}
+            onDrop={(event) => {
+              const raw = event.dataTransfer.getData(
+                "application/x-sand-component",
+              );
+              if (!raw) return;
+              event.preventDefault();
+              try {
+                const item = JSON.parse(raw);
+                if (
+                  typeof item.type !== "string" ||
+                  typeof item.title !== "string"
+                )
+                  return;
+                const size = componentTypes.find(
+                  (entry) => entry.type === item.type,
+                );
+                const position = flow.screenToFlowPosition({
+                  x: event.clientX,
+                  y: event.clientY,
+                });
+                void operate({
+                  kind: "create",
+                  type: item.type,
+                  title: item.title,
+                  data: item.data || {},
+                  ...(item.objectId ? { objectId: item.objectId } : {}),
+                  rect: {
+                    x: position.x,
+                    y: position.y,
+                    width: size?.width || 280,
+                    height: size?.height || 180,
+                    pinned: false,
+                  },
+                });
+                clearFilters();
+              } catch {
+                showNotice("这块组件没有放上去。请从工具箱再拖一次。");
+              }
+            }}
+            onPointerDownCapture={(event) => {
+              pointerClient.current = { x: event.clientX, y: event.clientY };
+              touched.current = true;
+              stopAnimation(true);
+              stopEdge();
+            }}
+            onPointerLeave={() => stopEdge()}
+            onPointerMove={(event) => {
+              pointerClient.current = { x: event.clientX, y: event.clientY };
+              trackEdge(event);
+            }}
+          >
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              viewport={viewport}
+              onMove={(_event, next: FlowViewport) => {
+                if (
+                  ignoreMove.current ||
+                  animation.current ||
+                  !isUserViewportEvent(_event)
+                )
+                  return;
+                touched.current = true;
+                stopAnimation(false);
+                setViewport(next);
+              }}
+              onMoveEnd={(_event, next: FlowViewport) => {
+                if (
+                  ignoreMove.current ||
+                  animation.current ||
+                  !isUserViewportEvent(_event)
+                )
+                  return;
+                touched.current = true;
+                setViewport(next);
+                scheduleCamera(next);
+              }}
+              onNodesChange={(changes: NodeChange<CardNodeType>[]) => {
+                setNodes((current) => applyNodeChanges(changes, current));
+              }}
+              onNodeDragStart={(_event, _node, dragged) => {
+                for (const node of dragged) dragging.current.add(node.id);
+              }}
+              onNodeDragStop={(_event, _node, dragged) => {
+                for (const node of dragged)
+                  pendingMoves.current.set(node.id, node);
+                queueMicrotask(() => {
+                  const batch = [...pendingMoves.current.values()];
+                  pendingMoves.current.clear();
+                  for (const node of batch) dragging.current.delete(node.id);
+                  void commitMove(batch);
+                });
+              }}
+              onPaneClick={() => {
+                if (menu) {
+                  setMenu(null);
+                  focusReturn.current = null;
+                }
+                userClearedSelection.current = true;
+                queueMicrotask(() => {
                   requestAnimationFrame(() => {
-                    userClearedSelection.current = false;
+                    requestAnimationFrame(() => {
+                      userClearedSelection.current = false;
+                    });
                   });
                 });
-              });
-            }}
-            onSelectionChange={({ nodes: selectedNodes }) => {
-              const ids = selectedNodes.map((node) => node.id);
-              /* 动画每帧都会把当前选区再报一遍，空报不能把还没写走的选择清掉。
+              }}
+              onSelectionChange={({ nodes: selectedNodes }) => {
+                const ids = selectedNodes.map((node) => node.id);
+                /* 动画每帧都会把当前选区再报一遍，空报不能把还没写走的选择清掉。
                  人在动画里新选中的卡片仍然要留下，否则方向键和复制会落空。 */
-              if (animation.current) {
-                const known =
-                  selectionOverride.current ?? selectionServer.current;
-                if (ids.length === 0 || sameIds(ids, known)) return;
-              }
-              /* 镜头动画会让 React Flow 反复报选区。没在空白处点击时，
+                if (animation.current) {
+                  const known =
+                    selectionOverride.current ?? selectionServer.current;
+                  if (ids.length === 0 || sameIds(ids, known)) return;
+                }
+                /* 镜头动画会让 React Flow 反复报选区。没在空白处点击时，
                  空选区不能写回去，否则定位后的详情面板会被关掉。 */
-              if (
-                ids.length === 0 &&
-                selectionServer.current.length > 0 &&
-                !userClearedSelection.current &&
-                !selectionEcho.current
-              ) {
-                clearTimeout(selectTimer.current);
-                selectTimer.current = 0;
-                return;
-              }
-              if (selectionEcho.current) {
-                clearTimeout(selectTimer.current);
-                selectTimer.current = 0;
-                return;
-              }
-              selectionOverride.current = ids;
-              /* 先清掉上一次还没发出的选择。拖不动的卡片会先报一次空选区，
+                if (
+                  ids.length === 0 &&
+                  selectionServer.current.length > 0 &&
+                  !userClearedSelection.current &&
+                  !selectionEcho.current
+                ) {
+                  clearTimeout(selectTimer.current);
+                  selectTimer.current = 0;
+                  return;
+                }
+                if (selectionEcho.current) {
+                  clearTimeout(selectTimer.current);
+                  selectTimer.current = 0;
+                  return;
+                }
+                selectionOverride.current = ids;
+                /* 先清掉上一次还没发出的选择。拖不动的卡片会先报一次空选区，
                  紧接着又回到原来的选中；那次空选区不能再写出去。 */
-              clearTimeout(selectTimer.current);
-              selectTimer.current = 0;
-              if (sameIds(ids, selectionServer.current)) return;
-              const epoch = boardEpoch.current;
-              selectTimer.current = window.setTimeout(() => {
-                if (!viewWriteStillCurrent(epoch, boardEpoch.current)) return;
-                void operateRef.current({ kind: "select", ids });
-              }, 300);
-            }}
-            onConnect={(connection) => {
-              void openLinkDialog(connection);
-            }}
-            onConnectEnd={(event, state) => {
-              /* 默认只在离把手 20px 内才算连上。拖到卡片上时这里补一次。 */
-              if (!state.fromNode || state.toNode) return;
-              const point = releasePoint(event);
-              if (!point) return;
-              const targetId = nodeIdAtPoint(point.x, point.y);
-              if (!targetId || targetId === state.fromNode.id) return;
-              void openLinkDialog({
-                source: state.fromNode.id,
-                target: targetId,
-                sourceHandle: state.fromHandle?.id ?? null,
-                targetHandle: null,
-              });
-            }}
-            onNodeContextMenu={(event, node) => {
-              event.preventDefault();
-              openNodeMenu(node.id, { x: event.clientX, y: event.clientY });
-            }}
-            onPaneContextMenu={(event) => {
-              event.preventDefault();
-              rememberFocus(null);
-              setMenu({
-                x: event.clientX,
-                y: event.clientY,
-                targetId: null,
-                ids: selectionOverride.current ?? selectionServer.current,
-              });
-            }}
-            onNodesDelete={(deleted) => {
-              if (!deleted.length) return;
-              const intentId = `remove:${Date.now()}:${++removalSeq}`;
-              void operateRef
-                .current({
-                  kind: "remove",
-                  instanceIds: deleted.map((node) => node.id),
-                  intentId,
-                })
-                .then((result) => {
-                  if (result === undefined)
-                    showNotice("没有删掉这些组件。请看页面上方的说明。");
+                clearTimeout(selectTimer.current);
+                selectTimer.current = 0;
+                if (sameIds(ids, selectionServer.current)) return;
+                const epoch = boardEpoch.current;
+                selectTimer.current = window.setTimeout(() => {
+                  if (!viewWriteStillCurrent(epoch, boardEpoch.current)) return;
+                  void operateRef.current({ kind: "select", ids });
+                }, 300);
+              }}
+              onConnect={(connection) => {
+                void openLinkDialog(connection);
+              }}
+              onConnectEnd={(event, state) => {
+                /* 默认只在离把手 20px 内才算连上。拖到卡片上时这里补一次。 */
+                if (!state.fromNode || state.toNode) return;
+                const point = releasePoint(event);
+                if (!point) return;
+                const targetId = nodeIdAtPoint(point.x, point.y);
+                if (!targetId || targetId === state.fromNode.id) return;
+                void openLinkDialog({
+                  source: state.fromNode.id,
+                  target: targetId,
+                  sourceHandle: state.fromHandle?.id ?? null,
+                  targetHandle: null,
                 });
-            }}
-            connectionMode={ConnectionMode.Loose}
-            nodeDragThreshold={0}
-            autoPanOnNodeDrag={false}
-            deleteKeyCode={deleteEnabled ? ["Delete", "Backspace"] : null}
-            minZoom={0.05}
-            maxZoom={3}
-            onlyRenderVisibleElements={onBoard.length > 200}
-            panOnScroll={false}
-            zoomOnDoubleClick={false}
-            nodesConnectable
-            elementsSelectable
-            selectNodesOnDrag={false}
-            selectionOnDrag={false}
-            panOnDrag
-            selectionKeyCode="Shift"
-            multiSelectionKeyCode={["Meta", "Control"]}
-            proOptions={{ hideAttribution: true }}
-            colorMode="light"
-          />
-          {!filtered.length && (query || onBoard.length > 0) && (
-            <p className="empty">
-              没有匹配对象。尝试切换到文件或清除筛选，或从组件面板添加内容。
-            </p>
-          )}
-          {notice && (
-            <p className="canvas-notice" role="status">
-              {notice}
-            </p>
-          )}
-          {link && (
-            <div
-              className="relation-picker"
-              role="dialog"
-              aria-label="选择关系"
-            >
-              <p>选择要建立的关系</p>
-              {link.kinds.map((kindChoice) => (
-                <button
-                  key={kindChoice.kind}
-                  onClick={() => chooseRelation(kindChoice)}
-                >
-                  {kindChoice.title}
-                </button>
-              ))}
-              <button onClick={() => setLink(undefined)}>取消</button>
+              }}
+              onNodeContextMenu={(event, node) => {
+                event.preventDefault();
+                openNodeMenu(node.id, { x: event.clientX, y: event.clientY });
+              }}
+              onPaneContextMenu={(event) => {
+                event.preventDefault();
+                rememberFocus(null);
+                setMenu({
+                  x: event.clientX,
+                  y: event.clientY,
+                  targetId: null,
+                  ids: selectionOverride.current ?? selectionServer.current,
+                });
+              }}
+              onNodesDelete={(deleted) => {
+                if (!deleted.length) return;
+                const intentId = `remove:${Date.now()}:${++removalSeq}`;
+                void operateRef
+                  .current({
+                    kind: "remove",
+                    instanceIds: deleted.map((node) => node.id),
+                    intentId,
+                  })
+                  .then((result) => {
+                    if (result === undefined)
+                      showNotice("没有删掉这些组件。请看页面上方的说明。");
+                  });
+              }}
+              connectionMode={ConnectionMode.Loose}
+              nodeDragThreshold={0}
+              autoPanOnNodeDrag={false}
+              deleteKeyCode={deleteEnabled ? ["Delete", "Backspace"] : null}
+              minZoom={0.05}
+              maxZoom={3}
+              onlyRenderVisibleElements={onBoard.length > 200}
+              panOnScroll={false}
+              zoomOnDoubleClick={false}
+              nodesConnectable
+              elementsSelectable
+              selectNodesOnDrag={false}
+              selectionOnDrag={false}
+              panOnDrag
+              selectionKeyCode="Shift"
+              multiSelectionKeyCode={["Meta", "Control"]}
+              proOptions={{ hideAttribution: true }}
+              colorMode="light"
+            />
+            {!filtered.length && (query || onBoard.length > 0) && (
+              <p className="empty">
+                没有匹配对象。尝试切换到文件或清除筛选，或从组件面板添加内容。
+              </p>
+            )}
+            {notice && (
+              <p className="canvas-notice" role="status">
+                {notice}
+              </p>
+            )}
+            {link && (
+              <div
+                className="relation-picker"
+                role="dialog"
+                aria-label="选择关系"
+              >
+                <p>选择要建立的关系</p>
+                {link.kinds.map((kindChoice) => (
+                  <button
+                    key={kindChoice.kind}
+                    onClick={() => chooseRelation(kindChoice)}
+                  >
+                    {kindChoice.title}
+                  </button>
+                ))}
+                <button onClick={() => setLink(undefined)}>取消</button>
+              </div>
+            )}
+            <div className="zoom">
+              <button
+                aria-label="缩小"
+                onClick={() => {
+                  const next = {
+                    ...viewport,
+                    zoom: Math.max(0.05, viewport.zoom - 0.1),
+                  };
+                  setView(next, true);
+                }}
+              >
+                −
+              </button>
+              <span>{Math.round(viewport.zoom * 100)}%</span>
+              <button
+                aria-label="放大"
+                onClick={() => {
+                  const next = {
+                    ...viewport,
+                    zoom: Math.min(3, viewport.zoom + 0.1),
+                  };
+                  setView(next, true);
+                }}
+              >
+                +
+              </button>
+              <button onClick={() => fit(filtered)}>适应</button>
+              <button
+                onClick={() => {
+                  setView({ ...DEFAULT_VIEWPORT }, true);
+                }}
+              >
+                复位
+              </button>
             </div>
-          )}
-          <div className="zoom">
-            <button
-              aria-label="缩小"
-              onClick={() => {
-                const next = {
-                  ...viewport,
-                  zoom: Math.max(0.05, viewport.zoom - 0.1),
-                };
-                setView(next, true);
-              }}
-            >
-              −
-            </button>
-            <span>{Math.round(viewport.zoom * 100)}%</span>
-            <button
-              aria-label="放大"
-              onClick={() => {
-                const next = {
-                  ...viewport,
-                  zoom: Math.min(3, viewport.zoom + 0.1),
-                };
-                setView(next, true);
-              }}
-            >
-              +
-            </button>
-            <button onClick={() => fit(filtered)}>适应</button>
-            <button
-              onClick={() => {
-                setView({ ...DEFAULT_VIEWPORT }, true);
-              }}
-            >
-              复位
-            </button>
-          </div>
-        </section>
-      </div>
-      {menu && (
-        <ContextMenu
-          x={menu.x}
-          y={menu.y}
-          label={menu.targetId ? "组件菜单" : "白板菜单"}
-          items={menuItems}
-          onSelect={(id) => performMenu(id)}
-          onClose={() => {
-            closeMenu();
-            restoreFocus();
-          }}
-        />
-      )}
-      {deleteConfirm && (
-        <DeleteObjectDialog
-          count={deleteConfirm.count}
-          onCancel={() => {
-            setDeleteConfirm(null);
-            restoreFocus();
-          }}
-          onConfirm={() => {
-            const pending = deleteConfirm;
-            setDeleteConfirm(null);
-            focusReturn.current = canvas.current;
-            restoreFocus();
-            void commitArrange(
-              {
-                kind: "deleteObject",
-                objectId: pending.objectId,
-                intentId: arrangeIntent("delete-object"),
-              },
-              "没有删除这个对象。请看页面上方的说明。",
-            );
-          }}
-        />
-      )}
-      {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
-    </CanvasApiProvider>
+          </section>
+        </div>
+        {menu && (
+          <ContextMenu
+            x={menu.x}
+            y={menu.y}
+            label={menu.targetId ? "组件菜单" : "白板菜单"}
+            items={menuItems}
+            onSelect={(id) => performMenu(id)}
+            onClose={() => {
+              closeMenu();
+              restoreFocus();
+            }}
+          />
+        )}
+        {deleteConfirm && (
+          <DeleteObjectDialog
+            count={deleteConfirm.count}
+            onCancel={() => {
+              setDeleteConfirm(null);
+              restoreFocus();
+            }}
+            onConfirm={() => {
+              const pending = deleteConfirm;
+              setDeleteConfirm(null);
+              focusReturn.current = canvas.current;
+              restoreFocus();
+              void commitArrange(
+                {
+                  kind: "deleteObject",
+                  objectId: pending.objectId,
+                  intentId: arrangeIntent("delete-object"),
+                },
+                "没有删除这个对象。请看页面上方的说明。",
+              );
+            }}
+          />
+        )}
+        {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
+      </CanvasApiProvider>
+    </TypeCatalogProvider>
   );
 }

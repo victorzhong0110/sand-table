@@ -12,7 +12,8 @@ import {
 } from "./data-client/spaces.ts";
 import { FlowCanvas } from "./canvas/FlowCanvas.tsx";
 import { Toolbox } from "./Toolbox.tsx";
-import { ComponentPanel, ThemePanel } from "./ComponentPanel.tsx";
+import { ThemePanel } from "./ThemePanel.tsx";
+import { Inspector } from "./views/Inspector.tsx";
 import { ChangePanel } from "./ChangePanel.tsx";
 import { WorkspacePanel, type WorkspacePanelProps } from "./WorkspacePanel.tsx";
 import { GuidePanel } from "./GuidePanel.tsx";
@@ -438,14 +439,12 @@ export function CanvasShell({
             {panel === "browse" ? (
               <p>选择组件</p>
             ) : panel === "properties" ? (
-              <ComponentPanel
+              <Inspector
                 board={b}
                 viewId={viewId}
-                busy={busy}
+                call={call}
                 operate={operate}
-                action={action}
-                selectNew={() => setQuery("")}
-                detailsOnly
+                onOpenSettings={() => setSettingsOpen(true)}
               />
             ) : panel === "changes" ? (
               <ChangePanel

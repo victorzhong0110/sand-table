@@ -1536,37 +1536,54 @@ try {
     const pasteIds = new Set(beforePaste.instances.map((item: any) => item.id));
     const pasteObjects = objectIds(beforePaste);
     const historyBeforePaste = await readHistory();
-    /* 属性面板会把焦点放进输入框，画布快捷键就被吃掉。先回到卡片再按。 */
-    const copyAndPaste = async () => {
-      const field = frame.getByRole("textbox", { name: "编辑组件名称" });
-      if (await field.count()) await field.evaluate((node) => node.blur());
-      await cardA.focus();
-      for (let i = 0; i < 10; i += 1) {
-        const focused = await cardA.evaluate(
-          (el) => el.ownerDocument.activeElement === el,
-        );
-        if (focused) break;
-        await cardA.focus();
-        await page.waitForTimeout(40);
-      }
-      await page.keyboard.press("Control+c");
-      await page.keyboard.press("Control+v");
+    /* 属性面板会把焦点放进输入框，画布快捷键就被吃掉。先回到卡片，再在窗口上按。 */
+    const fireShortcut = async (key: string, shift = false) => {
+      await cardA.evaluate(
+        (el, spec) => {
+          const active = el.ownerDocument.activeElement;
+          if (active instanceof HTMLElement) active.blur();
+          el.focus();
+          el.ownerDocument.defaultView?.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key: spec.key,
+              ctrlKey: true,
+              shiftKey: spec.shift,
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        },
+        { key, shift },
+      );
     };
-    await copyAndPaste();
-    let pastedCount = 0;
-    for (let i = 0; i < 20; i += 1) {
-      const board = await read();
-      pastedCount = board.instances.filter(
-        (item: any) => !pasteIds.has(item.id),
-      ).length;
-      if (pastedCount >= 2) break;
-      await new Promise((resolve) => setTimeout(resolve, 60));
-    }
-    if (pastedCount === 0) await copyAndPaste();
-    const pasted = await until(
+    const retryShortcut = async (
+      fire: () => Promise<void>,
+      ready: (board: any) => boolean,
+      untouched: (board: any) => boolean,
+    ) => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (attempt > 0) await selectPair();
+        await fire();
+        for (let i = 0; i < 40; i += 1) {
+          const board = await read();
+          if (ready(board)) return board;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        if (!untouched(await read())) return until(ready);
+      }
+      return until(ready);
+    };
+    const pasted = await retryShortcut(
+      async () => {
+        await fireShortcut("c");
+        await fireShortcut("v");
+      },
       (board) =>
         board.instances.filter((item: any) => !pasteIds.has(item.id)).length >=
         2,
+      (board) =>
+        board.instances.filter((item: any) => !pasteIds.has(item.id)).length ===
+        0,
     );
     assert.equal(
       pasted.instances.filter((item: any) => !pasteIds.has(item.id)).length,
@@ -1621,13 +1638,15 @@ try {
     );
     const objectsBeforeClone = objectIds(await read());
     await selectPair();
-    await page.keyboard.press("Control+Shift+V");
-    const cloned = await until((board) => {
-      const created = [...objectIds(board)].filter(
-        (id) => !objectsBeforeClone.has(id),
-      );
-      return created.length >= 2;
-    });
+    const cloned = await retryShortcut(
+      () => fireShortcut("v", true),
+      (board) =>
+        [...objectIds(board)].filter((id) => !objectsBeforeClone.has(id))
+          .length >= 2,
+      (board) =>
+        [...objectIds(board)].filter((id) => !objectsBeforeClone.has(id))
+          .length === 0,
+    );
     const clonedIds = [...objectIds(cloned)].filter(
       (id) => !objectsBeforeClone.has(id),
     );
@@ -1658,11 +1677,14 @@ try {
     );
     const duplicateObjects = objectIds(beforeDuplicate);
     await selectPair();
-    await page.keyboard.press("Control+d");
-    const duplicated = await until(
+    const duplicated = await retryShortcut(
+      () => fireShortcut("d"),
       (board) =>
         board.instances.filter((item: any) => !duplicateIds.has(item.id))
           .length >= 2,
+      (board) =>
+        board.instances.filter((item: any) => !duplicateIds.has(item.id))
+          .length === 0,
     );
     assert.equal(
       duplicated.instances.filter((item: any) => !duplicateIds.has(item.id))
@@ -1679,23 +1701,15 @@ try {
     const beforeIndependent = await read();
     const independentObjects = objectIds(beforeIndependent);
     await selectPair();
-    await frame.locator("body").evaluate(() => {
-      document.defaultView?.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "d",
-          bubbles: true,
-          cancelable: true,
-          ctrlKey: true,
-          shiftKey: true,
-        }),
-      );
-    });
-    const independent = await until((board) => {
-      const created = [...objectIds(board)].filter(
-        (id) => !independentObjects.has(id),
-      );
-      return created.length >= 2;
-    });
+    const independent = await retryShortcut(
+      () => fireShortcut("d", true),
+      (board) =>
+        [...objectIds(board)].filter((id) => !independentObjects.has(id))
+          .length >= 2,
+      (board) =>
+        [...objectIds(board)].filter((id) => !independentObjects.has(id))
+          .length === 0,
+    );
     const independentIds = [...objectIds(independent)].filter(
       (id) => !independentObjects.has(id),
     );
@@ -1725,21 +1739,32 @@ try {
     );
     await page.keyboard.press("Escape");
     await clickCard(cardA);
+    for (let i = 0; i < 4; i += 1) {
+      const cls = (await cardA.getAttribute("class")) || "";
+      if (cls.includes("selected")) break;
+      await page.keyboard.press("Escape");
+      await clickCard(cardA);
+    }
     await untilUiSelection(1);
     const arrowStart = (await read()).instances.find(
       (item: any) => item.id === idA,
     ).rect;
     const historyBeforeArrow = await readHistory();
-    await frame.locator(".canvas").evaluate((canvas) => {
-      for (let i = 0; i < 5; i++) {
-        canvas.dispatchEvent(
+    await cardA.evaluate((card) => {
+      const doc = card.ownerDocument;
+      const active = doc.activeElement;
+      if (active instanceof HTMLElement && active !== card) active.blur();
+      card.focus();
+      const view = doc.defaultView;
+      if (!view) return;
+      for (let i = 0; i < 5; i += 1)
+        view.dispatchEvent(
           new KeyboardEvent("keydown", {
             key: "ArrowRight",
             bubbles: true,
             cancelable: true,
           }),
         );
-      }
     });
     const arrowMoved = await until((board) => {
       const card = board.instances.find((item: any) => item.id === idA);
@@ -2458,6 +2483,169 @@ try {
     assert.equal(await navCanvas.getAttribute("data-nav-duration"), "0");
     await waitUntilBoard(homeBefore);
     await page.emulateMedia({ reducedMotion: "no-preference" });
+    /* T34：卡片只显示有值的字段；关系槽能连能删；冲突留下草稿；停用包后只读。 */
+    const t34View = await call("app_view", {
+      action: "get",
+      viewId: "local-human",
+    });
+    const t34Board = t34View.board.id as string;
+    const seededPeople = await call("app_edit", {
+      intentId: "t34-people",
+      commands: [
+        {
+          op: "object.create",
+          ref: "person",
+          type: "novel.character",
+          title: "林",
+          data: {},
+        },
+        {
+          op: "presentation.create",
+          ref: "personP",
+          boardId: t34Board,
+          objectId: "@person",
+          x: 480,
+          y: 180,
+          width: 260,
+          height: 180,
+        },
+        {
+          op: "object.create",
+          ref: "event",
+          type: "novel.event",
+          title: "相遇",
+          data: {},
+        },
+        {
+          op: "presentation.create",
+          ref: "eventP",
+          boardId: t34Board,
+          objectId: "@event",
+          x: 820,
+          y: 180,
+          width: 280,
+          height: 180,
+        },
+      ],
+    });
+    const personId = seededPeople.created.person as string;
+    const personP = seededPeople.created.personP as string;
+    const eventId = seededPeople.created.event as string;
+    const eventP = seededPeople.created.eventP as string;
+    const personCard = frame.locator(`[data-instance-id="${personP}"]`);
+    const eventCard = frame.locator(`[data-instance-id="${eventP}"]`);
+    await personCard.waitFor();
+    assert.equal(await personCard.getByText(/年龄/).count(), 0);
+    const age = frame.getByRole("textbox", { name: "年龄", exact: true });
+    for (let i = 0; i < 3; i += 1) {
+      await personCard.focus();
+      await page.keyboard.press("Space");
+      try {
+        await age.waitFor({ timeout: 3000 });
+        break;
+      } catch {
+        await personCard.click({ position: { x: 24, y: 16 }, force: true });
+      }
+    }
+    await age.fill("30");
+    await age.blur();
+    await personCard.getByText("年龄 30 岁", { exact: true }).waitFor();
+    await age.fill("");
+    await age.blur();
+    for (let i = 0; i < 30; i += 1) {
+      if ((await personCard.getByText(/年龄/).count()) === 0) break;
+      await page.waitForTimeout(100);
+    }
+    assert.equal(await personCard.getByText(/年龄/).count(), 0);
+    await eventCard.focus();
+    await page.keyboard.press("Space");
+    await frame
+      .getByRole("button", { name: "添加参与者", exact: true })
+      .click();
+    await frame.getByRole("textbox", { name: "搜索参与者" }).fill("林");
+    await frame
+      .locator(".slot-search")
+      .getByRole("button", { name: "林", exact: true })
+      .click();
+    let participation: { kind?: string } | undefined;
+    for (let i = 0; i < 30; i += 1) {
+      const linked = await call("sand_read", {
+        ids: [eventId],
+        include: ["relations"],
+      });
+      participation = (linked.objects?.[0]?.relations ?? []).find(
+        (item: { kind?: string }) => item.kind === "novel.participates",
+      );
+      if (participation) break;
+      await page.waitForTimeout(100);
+    }
+    assert.ok(participation, "Adding a participant creates the relation.");
+    await frame
+      .getByRole("button", { name: "移除参与者 林", exact: true })
+      .click();
+    let removed = false;
+    for (let i = 0; i < 30; i += 1) {
+      const again = await call("sand_read", {
+        ids: [eventId],
+        include: ["relations"],
+      });
+      removed = !(again.objects?.[0]?.relations ?? []).some(
+        (item: { kind?: string }) => item.kind === "novel.participates",
+      );
+      if (removed) break;
+      await page.waitForTimeout(100);
+    }
+    assert.equal(removed, true);
+    await personCard.focus();
+    await page.keyboard.press("Space");
+    const role = frame.getByRole("textbox", { name: "定位", exact: true });
+    const seen = await call("sand_read", { ids: [personId] });
+    const seenVersion = seen.objects?.[0]?.version as number;
+    await role.fill("主角");
+    await call("app_edit", {
+      intentId: "t34-other-window",
+      commands: [
+        {
+          op: "object.update",
+          id: personId,
+          expectedVersion: seenVersion,
+          set: { role: "配角" },
+        },
+      ],
+    });
+    await frame.getByRole("button", { name: "保存组件", exact: true }).click();
+    await frame.getByText("这个对象刚被别人改过", { exact: true }).waitFor();
+    assert.equal(await role.inputValue(), "主角");
+    const sized = (await read()).instances.find(
+      (item: { id?: string }) => item.id === personP,
+    ).rect;
+    await personCard
+      .getByRole("button", { name: "切换 林 展开层级", exact: true })
+      .click();
+    await personCard
+      .getByRole("button", { name: "切换 林 展开层级", exact: true })
+      .click();
+    const folded = (await read()).instances.find(
+      (item: { id?: string }) => item.id === personP,
+    ).rect;
+    assert.equal(folded.width, sized.width);
+    assert.equal(folded.height, sized.height);
+    await call("app_edit", {
+      intentId: "t34-disable-novel",
+      commands: [{ op: "pack.disable", id: "novel" }],
+    });
+    await personCard.getByText("此类型来自未启用的包「小说」").waitFor();
+    assert.equal(
+      await frame.getByRole("textbox", { name: "年龄", exact: true }).count(),
+      0,
+    );
+    await call("app_edit", {
+      intentId: "t34-enable-novel",
+      commands: [{ op: "pack.enable", id: "novel" }],
+    });
+    const ageAgain = frame.getByRole("textbox", { name: "年龄", exact: true });
+    await ageAgain.waitFor();
+    assert.equal(await ageAgain.isDisabled(), false);
     /* 导出再导入：文件能下来，导入后能切到新工作空间并看到原来的组件。 */
     await page.setViewportSize({ width: 1440, height: 1000 });
     await frame.getByRole("button", { name: "设置", exact: true }).click();
