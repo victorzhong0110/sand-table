@@ -1519,9 +1519,16 @@ try {
       if (add) await page.keyboard.up("Control");
     };
     const selectPair = async () => {
-      await page.keyboard.press("Escape");
-      await clickCard(cardA);
-      await clickCard(cardB, { modifiers: ["Control"] });
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await page.keyboard.press("Escape");
+        await clickCard(cardA);
+        await clickCard(cardB, { modifiers: ["Control"] });
+        for (let i = 0; i < 25; i += 1) {
+          if ((await frame.locator(".component-card.selected").count()) === 2)
+            return;
+          await new Promise((resolve) => setTimeout(resolve, 60));
+        }
+      }
       await untilUiSelection(2);
     };
     await selectPair();
@@ -1529,8 +1536,13 @@ try {
     const pasteIds = new Set(beforePaste.instances.map((item: any) => item.id));
     const pasteObjects = objectIds(beforePaste);
     const historyBeforePaste = await readHistory();
-    await page.keyboard.press("Control+c");
-    await page.keyboard.press("Control+v");
+    /* 属性面板会把焦点放进输入框，画布快捷键就被吃掉。先回到卡片再按。 */
+    const copyAndPaste = async () => {
+      await cardA.focus();
+      await page.keyboard.press("Control+c");
+      await page.keyboard.press("Control+v");
+    };
+    await copyAndPaste();
     const pasted = await until(
       (board) =>
         board.instances.filter((item: any) => !pasteIds.has(item.id)).length >=
