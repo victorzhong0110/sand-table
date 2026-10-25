@@ -1,58 +1,59 @@
-import { useEffect, useRef, useState } from "react";
-import { Icon } from "./Icon.tsx";
-import { indentOf } from "./history-layout.ts";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import type { HistorySnapshot, TimelineRecord } from "./data-client/history.ts";
+import { Icon } from "./Icon.tsx";
+import {
+  layoutHistory,
+  type HistoryListEntry,
+  type HistoryRow,
+} from "./history-layout.ts";
 import "./history.css";
 
-/** MCP 工具调用：与 board/main.tsx 的 call 同签名。 */
 type ToolCall = (name: string, args?: Record<string, unknown>) => Promise<any>;
 
 function clock(at: number) {
-  const d = new Date(at);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(
-    d.getMinutes(),
-  ).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+  const date = new Date(at);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(
+    date.getMinutes(),
+  ).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
 }
 
-/**
- * 这一条在时间线上的位置标签。
- *
- * - 当前：板面正停在这里。
- * - 旧分支：被后来的编辑分叉取代了，但**仍然可达**（可以跳回去）。
- * - 可重做：在游标之后，还能前滚回去。
- */
-function stateTag(record: TimelineRecord) {
-  if (record.current) return { text: "当前", className: "is-current" };
-  if (record.branch) return { text: "旧分支", className: "is-branch" };
-  if (record.ahead) return { text: "可重做", className: "is-ahead" };
-  return undefined;
+function explain(error: unknown) {
+  const raw = error instanceof Error ? error.message : String(error);
+  try {
+    const parsed = JSON.parse(raw) as { code?: unknown; message?: unknown };
+    if (typeof parsed.message === "string" && parsed.message)
+      return {
+        code: typeof parsed.code === "string" ? parsed.code : "",
+        message: parsed.message,
+      };
+  } catch {
+    /* 工具失败时文本是 JSON；别的错误保持原样。 */
+  }
+  return { code: "", message: raw || "这一步没有完成。请再试一次。" };
 }
 
-/** 作者是人还是 Agent：一眼看得出。 */
-function authorBadge(record: TimelineRecord) {
-  const agent = record.authorKind === "agent";
-  return (
-    <span className={"history-author is-" + record.authorKind}>
-      {agent ? (
-        <Icon name="ai" size={11} />
-      ) : (
-        <span className="history-human-dot" aria-hidden="true" />
-      )}
-      {agent ? "Agent" : "人"}
-    </span>
-  );
+function toEntries(records: readonly TimelineRecord[]): HistoryListEntry[] {
+  return records.map((record) => ({
+    id: record.id,
+    parentId: record.parentId ?? null,
+    seq: record.seq,
+    current: record.current,
+    onCurrentPath: record.onPath,
+  }));
 }
 
-/**
- * 白板的时间线历史。
- *
- * 面板只读服务端给的历史快照（core/history.ts 的 HistorySnapshot），
- * 并且只通过 MCP 工具改历史：sand_undo / sand_redo / sand_undo_to。
- * 面板不直接碰 store，也不自己维护历史状态。
- *
- * 记录是一条**时间线**（不是两列）：按创建顺序排成一条线，
- * 当前位置高亮，被分叉取代但仍可达的旧分支照样显示、也能跳过去。
- */
+const STATE_LABEL: Record<string, string> = {
+  current: "当前",
+  redo: "可重做",
+  branch: "旧分支",
+};
+
 export function HistoryPanel({
   history,
   busy,
@@ -62,56 +63,37 @@ export function HistoryPanel({
   onRedo,
   onJump,
 }: {
-  /** 服务端给的历史快照。 */
   history?: HistorySnapshot;
   busy?: boolean;
-  /** MCP 工具调用：撤销、重做、跳转都走这里。 */
   call?: ToolCall;
-  /** 历史改完把板面拉回来，画布才跟上（不提供就只更新面板）。 */
   refreshBoard?: () => unknown;
-  /** 没有工具桥时的回退：上层用同一批 MCP 工具接上。 */
   onUndo?: () => void;
   onRedo?: () => void;
   onJump?: (recordId: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const [snapshot, setSnapshot] = useState<HistorySnapshot | undefined>(
     history,
   );
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [active, setActive] = useState(0);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const inFlight = useRef(false);
-  /* 上层每次渲染都会传一个新的 call 下来，放进 ref 里才不会把读取的时机搅乱。 */
   const callRef = useRef(call);
   callRef.current = call;
-  /* 当前位置那一行：展开时把它滚进视野，省得自己找。 */
-  const currentRef = useRef<HTMLLIElement | null>(null);
+  const listRef = useRef<HTMLOListElement>(null);
 
-  /* 上层给的新快照：没有本地改动在飞的时候才采纳——
-     自己刚改完历史时，本地拉回来的快照更新鲜，不能被旧快照盖掉。 */
   useEffect(() => {
     if (inFlight.current) return;
     setSnapshot(history);
   }, [history]);
 
-  const records = snapshot?.records ?? [];
-  /* 折叠时只留最近的一段：时间线是按时间正序的，最近的在末尾。 */
-  const visible = expanded ? records : records.slice(-10);
   const boardId = snapshot?.boardId ?? history?.boardId;
-  const disabled = Boolean(busy) || pending;
-
-  useEffect(() => {
-    if (!expanded) return;
-    currentRef.current?.scrollIntoView({ block: "nearest" });
-  }, [expanded, snapshot?.cursorId]);
-
-  /* 打开面板时从服务端拉一次：上层给的快照最多滞后几秒，
-     而面板是「现在能撤什么」的唯一去处，不能拿旧的糊弄人。 */
   useEffect(() => {
     const tool = callRef.current;
     if (!tool || !boardId) return;
     let alive = true;
-    void tool("sand_history", { boardId })
+    void tool("sand_history", { boardId, limit: 100 })
       .then((data) => {
         if (alive && data?.records) setSnapshot(data as HistorySnapshot);
       })
@@ -121,6 +103,39 @@ export function HistoryPanel({
     };
   }, [boardId]);
 
+  const records = snapshot?.records ?? [];
+  const byId = useMemo(
+    () => new Map(records.map((record) => [record.id, record])),
+    [records],
+  );
+  const rows = useMemo(
+    () => layoutHistory(toEntries(records), expanded),
+    [records, expanded],
+  );
+  const current = records.find((record) => record.current);
+  const canUndo = Boolean(current?.parentId);
+  const canRedo = records.some(
+    (record) => record.onPath && current && record.seq > current.seq,
+  );
+  const disabled = Boolean(busy) || pending;
+  const undoReason = canUndo
+    ? disabled
+      ? "正在处理上一步，请稍候再撤销。"
+      : "撤销上一步"
+    : "已经是最早的一步，没有可以撤销的操作。";
+  const redoReason = canRedo
+    ? disabled
+      ? "正在处理上一步，请稍候再重做。"
+      : "重做下一步"
+    : "没有可以重做的步骤。";
+
+  useEffect(() => {
+    const index = rows.findIndex(
+      (row) => row.kind === "entry" && byId.get(row.id)?.current,
+    );
+    if (index >= 0) setActive(index);
+  }, [snapshot?.cursorId]);
+
   async function run(op: "undo" | "redo" | "jump", recordId?: string) {
     if (disabled) return;
     setPending(true);
@@ -128,96 +143,223 @@ export function HistoryPanel({
     setError("");
     try {
       if (!call) {
-        /* 没有工具桥：回退到上层给的回调（它们同样走 MCP 工具）。 */
         if (op === "undo") onUndo?.();
         else if (op === "redo") onRedo?.();
         else if (recordId) onJump?.(recordId);
         return;
       }
-      if (!boardId) throw new Error("还不知道白板编号，无法操作历史。");
-      if (op === "undo") await call("sand_undo", { boardId });
-      else if (op === "redo") await call("sand_redo", { boardId });
-      else await call("sand_undo_to", { boardId, recordId: recordId ?? "" });
-      /* 历史改完：自己拉一次快照，再把板面拉回来。 */
-      const fresh = await call("sand_history", { boardId });
+      if (!boardId) throw new Error("还不知道是哪张白板，暂时不能改历史。");
+      const fresh =
+        op === "undo"
+          ? await call("sand_undo", { boardId })
+          : op === "redo"
+            ? await call("sand_redo", { boardId })
+            : await call("sand_undo_to", { boardId, recordId: recordId ?? "" });
       if (fresh?.records) setSnapshot(fresh as HistorySnapshot);
       if (refreshBoard) await refreshBoard();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+    } catch (caught) {
+      const described = explain(caught);
+      setError(
+        described.code === "HISTORY_CONFLICT"
+          ? described.message
+          : described.message,
+      );
     } finally {
       inFlight.current = false;
       setPending(false);
     }
   }
 
+  function toggleBranch(atId: string) {
+    setExpanded((currentSet) => {
+      const next = new Set(currentSet);
+      if (next.has(atId)) next.delete(atId);
+      else next.add(atId);
+      return next;
+    });
+  }
+
+  function move(delta: number) {
+    if (!rows.length) return;
+    setActive((index) => Math.min(rows.length - 1, Math.max(0, index + delta)));
+  }
+
+  function branchNear(
+    index: number,
+  ): Extract<HistoryRow, { kind: "branches" }> | undefined {
+    const row = rows[index];
+    if (row?.kind === "branches") return row;
+    const next = rows[index + 1];
+    if (
+      row?.kind === "entry" &&
+      next?.kind === "branches" &&
+      next.atId === row.id
+    )
+      return next;
+    return undefined;
+  }
+
+  function onListKey(event: ReactKeyboardEvent) {
+    if (
+      event.target instanceof HTMLElement &&
+      event.target.closest("input, textarea")
+    )
+      return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      event.stopPropagation();
+      move(1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      event.stopPropagation();
+      move(-1);
+      return;
+    }
+    if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      const marker = branchNear(active);
+      if (!marker) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "ArrowRight" && !marker.expanded)
+        toggleBranch(marker.atId);
+      if (event.key === "ArrowLeft" && marker.expanded)
+        toggleBranch(marker.atId);
+      return;
+    }
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const row = rows[active];
+    if (!row) return;
+    if (row.kind === "branches") toggleBranch(row.atId);
+    else void run("jump", row.id);
+  }
+
   return (
     <section className="history-panel">
-      <div className="history-actions">
-        <button
-          disabled={disabled || !snapshot?.canUndo}
-          onClick={() => void run("undo")}
-          title="撤销上一步（Cmd+Z / Ctrl+Z）"
-        >
-          <Icon name="undo" size={16} />
-          撤销
-        </button>
-        <button
-          className="is-redo"
-          disabled={disabled || !snapshot?.canRedo}
-          onClick={() => void run("redo")}
-          title="重做（Cmd+Shift+Z / Ctrl+Shift+Z）"
-        >
-          <Icon name="undo" size={16} />
-          重做
-        </button>
-      </div>
       {error && (
         <p className="history-error" role="alert">
           {error}
         </p>
       )}
+      <div className="history-actions">
+        <button
+          type="button"
+          disabled={disabled || !canUndo}
+          title={undoReason}
+          onClick={() => void run("undo")}
+        >
+          <Icon name="undo" size={16} />
+          撤销
+        </button>
+        <button
+          type="button"
+          className="is-redo"
+          disabled={disabled || !canRedo}
+          title={redoReason}
+          onClick={() => void run("redo")}
+        >
+          <Icon name="undo" size={16} />
+          重做
+        </button>
+      </div>
+      {(!canUndo || !canRedo) && records.length > 0 && (
+        <p className="history-why">
+          {!canUndo && undoReason}
+          {!canUndo && !canRedo && " "}
+          {!canRedo && redoReason}
+        </p>
+      )}
       {!snapshot ? (
         <p className="history-empty">正在读取历史…</p>
       ) : records.length === 0 ? (
-        <p className="history-empty">还没有可回退的操作。</p>
+        <p className="history-empty">还没有可以回退的操作。</p>
       ) : (
-        <ol className="history-timeline">
-          {visible.map((record) => {
-            const tag = stateTag(record);
+        <ol
+          className="history-timeline"
+          ref={listRef}
+          tabIndex={0}
+          autoFocus
+          aria-label="历史"
+          onKeyDown={onListKey}
+        >
+          {rows.map((row, index) => {
+            if (row.kind === "branches") {
+              return (
+                <li
+                  key={`branches:${row.atId}`}
+                  className={
+                    "history-node history-branch-row" +
+                    (index === active ? " is-active" : "")
+                  }
+                >
+                  <button
+                    type="button"
+                    className="history-branches"
+                    aria-expanded={row.expanded}
+                    onClick={() => {
+                      setActive(index);
+                      toggleBranch(row.atId);
+                    }}
+                  >
+                    {row.count} 个分支
+                  </button>
+                </li>
+              );
+            }
+            const record = byId.get(row.id);
+            if (!record) return null;
+            const label = STATE_LABEL[row.state];
+            const agent = record.authorKind === "agent";
             return (
               <li
                 key={record.id}
-                ref={record.current ? currentRef : undefined}
                 className={
                   "history-node is-" +
                   record.authorKind +
-                  (tag ? " " + tag.className : "")
+                  " is-" +
+                  row.state +
+                  (index === active ? " is-active" : "")
                 }
-                style={{ paddingLeft: `${indentOf(record) * 16}px` }}
+                style={{ paddingLeft: row.indent * 16 }}
               >
                 <button
+                  type="button"
                   className="history-entry"
+                  data-state={row.state}
                   disabled={disabled}
-                  onClick={() => void run("jump", record.id)}
-                  aria-current={record.current ? "true" : undefined}
-                  title={
-                    record.current
-                      ? "板面现在停在这一步"
-                      : "回到这一步之后的内容"
-                  }
+                  aria-current={row.state === "current" ? "true" : undefined}
+                  title={record.label}
+                  onClick={() => {
+                    setActive(index);
+                    void run("jump", record.id);
+                  }}
                 >
                   <span className="history-dot" aria-hidden="true" />
                   <span className="history-body">
-                    <span className="history-label" title={record.label}>
-                      {record.label}
-                    </span>
+                    <span className="history-label">{record.label}</span>
                     <small>
-                      {clock(record.at)} · {authorBadge(record)} {record.author}
+                      {clock(record.at)}
+                      <span
+                        className={"history-author is-" + record.authorKind}
+                      >
+                        {agent ? (
+                          <Icon name="ai" size={11} />
+                        ) : (
+                          <span
+                            className="history-human-dot"
+                            aria-hidden="true"
+                          />
+                        )}
+                        {agent ? "Agent" : "人"}
+                      </span>
                     </small>
                   </span>
-                  {tag && (
-                    <span className={"history-tag " + tag.className}>
-                      {tag.text}
+                  {label && (
+                    <span className={"history-tag is-" + row.state}>
+                      {label}
                     </span>
                   )}
                 </button>
@@ -225,20 +367,6 @@ export function HistoryPanel({
             );
           })}
         </ol>
-      )}
-      {records.length > 10 && (
-        <button
-          className="history-more"
-          onClick={() => setExpanded(!expanded)}
-          aria-expanded={expanded}
-        >
-          {expanded ? "收起" : `显示全部 ${records.length} 条`}
-        </button>
-      )}
-      {snapshot?.note && (
-        <p className="history-note" title={snapshot.note}>
-          {snapshot.note}
-        </p>
       )}
     </section>
   );

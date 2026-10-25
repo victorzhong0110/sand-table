@@ -22,6 +22,7 @@ import { Inspector } from "./views/Inspector.tsx";
 import { ChangePanel } from "./ChangePanel.tsx";
 import { WorkspacePanel, type WorkspacePanelProps } from "./WorkspacePanel.tsx";
 import { GuidePanel } from "./GuidePanel.tsx";
+import { HistoryPanel } from "./HistoryPanel.tsx";
 import { Rail } from "./shell/Rail.tsx";
 import { Panel, PanelResize } from "./shell/Panel.tsx";
 import { BoardsPanel } from "./shell/BoardsPanel.tsx";
@@ -142,7 +143,7 @@ export function CanvasShell({
     else if (panel === "source" || panel === "properties") setPanel("");
   }, [selected?.id]);
   useEffect(() => {
-    if (!nav || nav === "settings") return;
+    if (!nav || nav === "settings" || nav === "history") return;
     panelRef.current?.focus({ preventScroll: true });
   }, [nav]);
   useEffect(() => {
@@ -520,7 +521,15 @@ export function CanvasShell({
                 onFocusObject={focusObject}
               />
             ) : nav === "history" ? (
-              <p>历史列表还没接上。撤销和重做可以用快捷键。</p>
+              <HistoryPanel
+                history={history}
+                busy={busy}
+                call={call}
+                refreshBoard={() => action("sand_read_board")}
+                onUndo={onUndo}
+                onRedo={onRedo}
+                onJump={onJump}
+              />
             ) : nav === "settings" ? (
               <>
                 <section>
