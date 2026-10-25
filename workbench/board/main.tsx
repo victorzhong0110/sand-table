@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
 import type { Board, Item, GuideFocus } from "./data-client/model.ts";
 import "./style.css";
-import { SpaceCanvas } from "./SpaceCanvas.tsx";
+import { FlowCanvas } from "./canvas/FlowCanvas.tsx";
 import { ChangePanel } from "./ChangePanel.tsx";
 import { ComponentPanel, ThemePanel } from "./ComponentPanel.tsx";
 import { safeUrl } from "./data-client/spaces.ts";
@@ -65,8 +65,27 @@ function readableError(error: unknown): string {
   }
   return raw;
 }
+const SANDBOX_VIEW_ID = "local-human";
+
+function storedViewId() {
+  /* 沙箱 iframe 没有同源权限，sessionStorage 随页面一起丢掉。
+     同一份工作空间用固定视角编号，重新打开才能读回白板和镜头。 */
+  if (window.origin === "null") return SANDBOX_VIEW_ID;
+  const key = "sand-table-view";
+  try {
+    const existing = sessionStorage.getItem(key);
+    if (existing) return existing;
+    const created = crypto.randomUUID();
+    sessionStorage.setItem(key, created);
+    return created;
+  } catch {
+    return SANDBOX_VIEW_ID;
+  }
+}
+
 function Workbench() {
-  const [viewId] = useState(() => crypto.randomUUID());
+  /* 同一浏览器会话复用视角编号。沙箱里没有可持久的 sessionStorage，用固定编号。 */
+  const [viewId] = useState(storedViewId);
   const [tab, setTab] = useState("inspect");
   const [, hostChanged] = useState(0);
   const [hostTask, setHostTask] = useState<HostTaskEvent>();
@@ -359,6 +378,8 @@ function Workbench() {
         throw Error(
           "v3 内核的工作空间就是数据库文件，没有「保留副本并重新加载」这一步。",
         );
+      case "app_view":
+        return callTool("app_view", args);
       case "sand_open_view":
         /* 视角由界面自己掌握：v3 的 app_view 只在没有 app_view 接口时用。 */
         return { viewId };
@@ -795,20 +816,87 @@ function Workbench() {
       }
       const store = new V3Store(callTool);
       storeRef.current = store;
-      viewRef.current = { ...viewRef.current, spaceId: boardId };
+      let opened = String(boardId);
+      let knownView = false;
+      try {
+        /* 同一个会话再打开时，视角里已经记下白板和镜头。
+           不能先导航回首页，否则会把这次看到的白板冲掉。 */
+        const existing: any = await callTool("app_view", {
+          action: "get",
+          viewId,
+        });
+        knownView = true;
+        const savedId = existing?.board?.id;
+        if (typeof savedId === "string" && savedId) opened = savedId;
+        if (Array.isArray(existing?.navStack)) {
+          navStackRef.current = existing.navStack.filter(
+            (item: unknown): item is string => typeof item === "string",
+          );
+        }
+        const camera = existing?.camera;
+        const selection = Array.isArray(existing?.selection)
+          ? existing.selection.flatMap((item: unknown) => {
+              if (typeof item === "string") return [item];
+              if (
+                item &&
+                typeof item === "object" &&
+                typeof (item as { presentationId?: unknown }).presentationId ===
+                  "string"
+              )
+                return [(item as { presentationId: string }).presentationId];
+              return [];
+            })
+          : [];
+        viewRef.current = {
+          ...viewRef.current,
+          spaceId: opened,
+          selection,
+          ...(camera &&
+          typeof camera === "object" &&
+          typeof (camera as { x?: unknown }).x === "number" &&
+          typeof (camera as { y?: unknown }).y === "number" &&
+          typeof (camera as { zoom?: unknown }).zoom === "number"
+            ? {
+                camera: {
+                  x: (camera as { x: number }).x,
+                  y: (camera as { y: number }).y,
+                  zoom: (camera as { zoom: number }).zoom,
+                },
+              }
+            : {}),
+        };
+      } catch {
+        knownView = false;
+        viewRef.current = { ...viewRef.current, spaceId: opened };
+      }
       try {
         /* 不把状态里的工作空间编号传进去：那是库内记录的旧编号，
            和这次打开用的目录名不一定相同。第一次装载不带编号，
            服务端回什么就认什么。 */
-        await store.load(boardId);
-        /* 登记视角：内核要先有这条视角，之后的选中与镜头才有地方放。
-           app_view 的 select / camera 不带白板编号，视角只能由 navigate 建立。 */
-        await callTool("app_view", {
-          action: "navigate",
-          viewId,
-          boardId,
-          navStack: [],
-        });
+        try {
+          await store.load(opened);
+        } catch (loadError) {
+          if (opened === boardId) throw loadError;
+          opened = String(boardId);
+          knownView = false;
+          navStackRef.current = [];
+          viewRef.current = {
+            ...viewRef.current,
+            spaceId: opened,
+            selection: [],
+          };
+          await store.load(opened);
+        }
+        if (!knownView) {
+          /* 登记视角：内核要先有这条视角，之后的选中与镜头才有地方放。
+             app_view 的 select / camera 不带白板编号，视角只能由 navigate 建立。 */
+          await callTool("app_view", {
+            action: "navigate",
+            viewId,
+            boardId: opened,
+            navStack: [],
+          });
+        }
         if (!alive) return;
         refreshV3Board();
         setError("");
@@ -1233,7 +1321,7 @@ function Workbench() {
         </div>
       )}
       <div className="layout">
-        <SpaceCanvas
+        <FlowCanvas
           board={board}
           viewId={viewId}
           mode={mode}

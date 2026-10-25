@@ -82,6 +82,8 @@ export type TypesResult =
         inverseTitle: string;
         allowsInferred: boolean;
         requiresBasis: boolean;
+        sourceTypes?: string[];
+        targetTypes?: string[];
       }[];
       templates: { id: string; title: string; pack: string }[];
     }
@@ -321,6 +323,12 @@ export function listTypes(
           inverseTitle: kind.inverseTitle,
           allowsInferred: kind.allowsInferred,
           requiresBasis: kind.requiresBasis === true,
+          ...(kind.sourceTypes?.length
+            ? { sourceTypes: [...kind.sourceTypes] }
+            : {}),
+          ...(kind.targetTypes?.length
+            ? { targetTypes: [...kind.targetTypes] }
+            : {}),
         })),
       ),
       templates: enabledPacks(registry, enabled).flatMap((pack) =>

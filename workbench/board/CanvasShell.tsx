@@ -10,7 +10,7 @@ import {
   componentTypes,
   findComponentSpec,
 } from "./data-client/spaces.ts";
-import { SpaceCanvas } from "./SpaceCanvas.tsx";
+import { FlowCanvas } from "./canvas/FlowCanvas.tsx";
 import { Toolbox } from "./Toolbox.tsx";
 import { ComponentPanel, ThemePanel } from "./ComponentPanel.tsx";
 import { ChangePanel } from "./ChangePanel.tsx";
@@ -353,7 +353,7 @@ export function CanvasShell({
                 (a) => a.state === "running" && !a.stale,
               )) && <span className="agent-beacon">● Agent 有活动报告</span>}
           </div>
-          <SpaceCanvas
+          <FlowCanvas
             board={b}
             viewId={viewId}
             mode={mode}

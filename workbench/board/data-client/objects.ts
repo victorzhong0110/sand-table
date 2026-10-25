@@ -115,6 +115,13 @@ export type Presentation = {
   /** 未绑定对象时的本地内容 / 视图配置。 */
   data: Record<string, unknown>;
   rect: Rect;
+  /**
+   * 所在框的展示编号。有值时 rect 的 x、y 是相对该框左上角的坐标。
+   * 没有父框时不写。
+   */
+  parentId?: string | null;
+  /** 叠放次序。没写按 0。 */
+  z?: number;
   updatedAt: number;
   author: string;
 };

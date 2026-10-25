@@ -348,29 +348,54 @@ try {
     await page.mouse.up();
   };
   const beforeDrag = b.instances[0].rect;
+  const historyBeforeDrag = await readHistory();
+  const pathBeforeDrag = historyBeforeDrag.records.filter(
+    (record: { onPath?: boolean }) => record.onPath,
+  ).length;
   await dragTo(60, 40);
-  b = await until((b) => b.instances[0].rect.x !== beforeDrag.x);
-  assert.notEqual(
-    b.instances[0].rect.x,
-    beforeDrag.x,
-    "Dragging on the canvas moves the component.",
+  b = await until(
+    (board) =>
+      Math.abs(board.instances[0].rect.x - (beforeDrag.x + 60)) < 2 &&
+      Math.abs(board.instances[0].rect.y - (beforeDrag.y + 40)) < 2,
+  );
+  const historyAfterDrag = await readHistory();
+  assert.equal(
+    historyAfterDrag.records.filter(
+      (record: { onPath?: boolean }) => record.onPath,
+    ).length,
+    pathBeforeDrag + 1,
+    "Dragging a card adds one history record.",
+  );
+  assert.ok(
+    Math.abs(b.instances[0].rect.x - (beforeDrag.x + 60)) < 2 &&
+      Math.abs(b.instances[0].rect.y - (beforeDrag.y + 40)) < 2,
+    "The card lands where the pointer was released.",
+  );
+  await undo();
+  b = await until(
+    (board) => Math.abs(board.instances[0].rect.x - beforeDrag.x) < 0.6,
+  );
+  await redo();
+  b = await until(
+    (board) => Math.abs(board.instances[0].rect.x - (beforeDrag.x + 60)) < 2,
   );
 
-  /* #9.2: a pinned component can still be moved, and moving it un-pins it. */
+  /* 锁住的展示不能被拖走，位置和锁定都保持。 */
   await frame.getByRole("button", { name: "固定位置", exact: true }).click();
-  b = await until((b) => b.instances[0].rect.pinned === true);
+  b = await until((board) => board.instances[0].rect.pinned === true);
   const pinned = b.instances[0].rect;
   await dragTo(-50, 30);
-  b = await until(
-    (b) =>
-      b.instances[0].rect.pinned === false &&
-      b.instances[0].rect.x !== pinned.x,
+  await page.waitForTimeout(400);
+  b = await read();
+  assert.equal(b.instances[0].rect.pinned, true);
+  assert.equal(b.instances[0].rect.x, pinned.x);
+  assert.equal(
+    b.instances[0].rect.y,
+    pinned.y,
+    "A locked card stays where it is.",
   );
-  assert.notEqual(
-    b.instances[0].rect.x,
-    pinned.x,
-    "Moving a pinned component moves it and releases the pin.",
-  );
+  await frame.getByRole("button", { name: "取消固定", exact: true }).click();
+  b = await until((board) => board.instances[0].rect.pinned === false);
 
   /* 拖出视口再拖回来时，同一张卡片的 DOM 节点必须还在。
      选中项不参与裁剪，所以先点空白处取消选择。再把画布收窄，
@@ -475,6 +500,27 @@ try {
     contentText(b, b.instances[0]),
     "就地改过的内容",
     "Editing on the canvas writes the component back.",
+  );
+  const beforeTyping = { ...b.instances[0].rect };
+  await card.dblclick();
+  const composing = frame.getByRole("textbox", { name: "就地编辑内容" });
+  await composing.waitFor();
+  await composing.evaluate((el) => {
+    el.dispatchEvent(new CompositionEvent("compositionstart"));
+    el.dispatchEvent(new CompositionEvent("compositionupdate", { data: "测" }));
+  });
+  const typingBox = (await composing.boundingBox())!;
+  await page.mouse.move(typingBox.x + 8, typingBox.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(typingBox.x + 48, typingBox.y + 36, { steps: 6 });
+  await page.mouse.up();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+  b = await read();
+  assert.ok(
+    Math.abs(b.instances[0].rect.x - beforeTyping.x) < 0.6 &&
+      Math.abs(b.instances[0].rect.y - beforeTyping.y) < 0.6,
+    "Typing and IME composition do not drag the card.",
   );
 
   await frame.getByRole("textbox", { name: "编辑组件名称" }).fill("我的计划");
@@ -625,10 +671,22 @@ try {
     0,
     "Selecting/resizing must not flash disabled toolbox controls.",
   );
-  /* Delete 移除选中的组件，撤销一次把它带回来。 */
+  /* Delete 移除选中的展示，对象还在。撤销一次把展示带回来。 */
   await untilUiSelection(1);
+  const removedObjectId = b.instances.find(
+    (i: any) => i.id === noteId,
+  )?.objectId;
   await page.keyboard.press("Delete");
   b = await until((b) => !b.instances.some((i: any) => i.id === noteId));
+  if (v3 && removedObjectId) {
+    const still = await call("sand_read", { ids: [removedObjectId] });
+    assert.ok(
+      (still.objects ?? []).some(
+        (object: any) => object.id === removedObjectId,
+      ),
+      "Delete removes the presentation, not the object.",
+    );
+  }
   assert.equal(
     b.instances.filter((i: any) => i.id === noteId).length,
     0,
@@ -919,16 +977,31 @@ try {
       "Focusing preserves zoom",
     );
   }
-  const targetBox = await frame
-    .locator('[data-instance-id="' + farId + '"]')
-    .boundingBox();
-  const viewport = await frame.locator(".canvas").boundingBox();
-  assert.ok(targetBox && viewport);
-  const expectedCenter = viewport.x + (256 + viewport.width - 332) / 2;
+  let centered = false;
+  let lastDelta = Number.NaN;
+  for (let i = 0; i < 25; i++) {
+    const targetBox = await frame
+      .locator('[data-instance-id="' + farId + '"]')
+      .boundingBox();
+    const viewport = await frame.locator(".canvas").boundingBox();
+    if (targetBox && viewport) {
+      const expectedCenter = viewport.x + (256 + viewport.width - 332) / 2;
+      lastDelta = Math.abs(targetBox.x + targetBox.width / 2 - expectedCenter);
+      if (lastDelta < 8) {
+        centered = true;
+        break;
+      }
+    }
+    await page.waitForTimeout(80);
+  }
   assert.ok(
-    Math.abs(targetBox.x + targetBox.width / 2 - expectedCenter) < 8,
-    "Focus centers inside the area between floating panels",
+    centered,
+    "Focus centers inside the area between floating panels (off by " +
+      lastDelta +
+      "px).",
   );
+  const viewport = await frame.locator(".canvas").boundingBox();
+  assert.ok(viewport);
   await frame.getByRole("button", { name: "收起面板", exact: true }).click();
   await frame.getByRole("button", { name: "关闭详情", exact: true }).click();
   await page.mouse.move(
@@ -1168,6 +1241,174 @@ try {
       changes >= 2 && changes <= 5,
       `空闲时每秒一次增量请求（3 秒内 ${changes} 次）。`,
     );
+    /* 此时窗口还是 390 宽，镜头停在远处便签上。先回到宽窗口和默认镜头。
+       比较卡片紧挨在第一张便签右边，会挡住句柄；空位按现有矩形找。 */
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await frame.getByRole("button", { name: "复位", exact: true }).click();
+    for (let i = 0; i < 30; i++) {
+      const camera = await frame.locator(".world").evaluate((el) => {
+        const matrix = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+        return { x: matrix.m41, y: matrix.m42, zoom: matrix.a };
+      });
+      if (
+        Math.abs(camera.x - 24) < 1 &&
+        Math.abs(camera.y - 24) < 1 &&
+        Math.abs(camera.zoom - 1) < 0.02
+      )
+        break;
+      await page.waitForTimeout(50);
+    }
+    const reset = await frame.locator(".world").evaluate((el) => {
+      const matrix = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+      return { x: matrix.m41, y: matrix.m42, zoom: matrix.a };
+    });
+    assert.ok(
+      Math.abs(reset.x - 24) < 1 &&
+        Math.abs(reset.y - 24) < 1 &&
+        Math.abs(reset.zoom - 1) < 0.02,
+      "复位后镜头应回到默认位置：" + JSON.stringify(reset),
+    );
+    const overlaps = (
+      a: { x: number; y: number; width: number; height: number },
+      c: { x: number; y: number; width: number; height: number },
+    ) =>
+      a.x < c.x + c.width &&
+      a.x + a.width > c.x &&
+      a.y < c.y + c.height &&
+      a.y + a.height > c.y;
+    let sourceAt: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      pinned: false;
+    } | null = null;
+    let targetAt: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      pinned: false;
+    } | null = null;
+    for (let y = 420; y <= 720; y += 30) {
+      const pair = { x: 320, y, width: 540, height: 140 };
+      const blocked = b.instances.some(
+        (item: {
+          rect: { x: number; y: number; width: number; height: number };
+        }) => overlaps(pair, item.rect),
+      );
+      if (blocked) continue;
+      sourceAt = { x: 320, y, width: 220, height: 140, pinned: false };
+      targetAt = { x: 640, y, width: 220, height: 140, pinned: false };
+      break;
+    }
+    assert.ok(
+      sourceAt && targetAt,
+      "视口里没有空位放两张要连线的便签：" +
+        JSON.stringify(
+          b.instances.map((item: { title?: string; rect?: unknown }) => ({
+            title: item.title,
+            rect: item.rect,
+          })),
+        ),
+    );
+    await editSpace({
+      kind: "create",
+      type: "text",
+      title: "连线甲",
+      data: { text: "从这里拖出" },
+      rect: sourceAt,
+    });
+    await editSpace({
+      kind: "create",
+      type: "text",
+      title: "连线乙",
+      data: { text: "接到这里" },
+      rect: targetAt,
+    });
+    b = await until(
+      (board) =>
+        board.instances.some((item: any) => item.title === "连线甲") &&
+        board.instances.some((item: any) => item.title === "连线乙"),
+    );
+    const sourceNote = b.instances.find((item: any) => item.title === "连线甲");
+    const targetNote = b.instances.find((item: any) => item.title === "连线乙");
+    const sourceCard = frame.locator(
+      '[data-instance-id="' + sourceNote.id + '"]',
+    );
+    const targetCard = frame.locator(
+      '[data-instance-id="' + targetNote.id + '"]',
+    );
+    const handle = sourceCard.locator('[aria-label="拖出关系"]');
+    const size = page.viewportSize();
+    assert.ok(size, "浏览器窗口尺寸还在。");
+    const inside = (
+      box: { x: number; y: number; width: number; height: number } | null,
+    ) =>
+      !!box &&
+      box.x >= 1 &&
+      box.y >= 1 &&
+      box.x + box.width <= size.width - 1 &&
+      box.y + box.height <= size.height - 1;
+    let sourceBox: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    } | null = null;
+    let targetBox: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    } | null = null;
+    for (let i = 0; i < 50; i++) {
+      sourceBox = await handle.boundingBox();
+      targetBox = await targetCard.boundingBox();
+      if (inside(sourceBox) && inside(targetBox)) break;
+      await page.waitForTimeout(100);
+    }
+    assert.ok(
+      inside(sourceBox) && inside(targetBox),
+      "两张便签都要在视口里才能连线：" +
+        JSON.stringify({ sourceBox, targetBox, size }),
+    );
+    await handle.dragTo(targetCard);
+    await frame
+      .getByRole("dialog", { name: "选择关系" })
+      .getByRole("button", { name: "相关", exact: true })
+      .click();
+    const related = await call("sand_read", {
+      ids: [sourceNote.objectId],
+      include: ["relations"],
+    });
+    assert.ok(
+      (related.objects?.[0]?.relations ?? []).some(
+        (relation: { kind?: string; otherId?: string }) =>
+          relation.kind === "base.related" &&
+          relation.otherId === targetNote.objectId,
+      ),
+      "Connecting two cards and choosing 相关 creates base.related.",
+    );
+    await frame.getByRole("button", { name: "缩小", exact: true }).click();
+    await frame.getByRole("button", { name: "缩小", exact: true }).click();
+    await page.waitForTimeout(1200);
+    const zoomLabel = (await frame.locator(".zoom span").innerText()).trim();
+    await page.reload();
+    await frame.locator(".zoom span").waitFor();
+    await frame.locator(".component-card").first().waitFor({ timeout: 30000 });
+    let restored = "";
+    for (let i = 0; i < 40; i++) {
+      restored = (await frame.locator(".zoom span").innerText()).trim();
+      if (restored === zoomLabel) break;
+      await page.waitForTimeout(150);
+    }
+    assert.equal(
+      restored,
+      zoomLabel,
+      "Reopening the board restores the viewport.",
+    );
+    await page.setViewportSize({ width: 1440, height: 1000 });
     /* 导出再导入：文件能下来，导入后能切到新工作空间并看到原来的组件。 */
     await page.setViewportSize({ width: 1440, height: 1000 });
     await frame.getByRole("button", { name: "设置", exact: true }).click();

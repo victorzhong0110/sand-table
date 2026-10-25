@@ -804,6 +804,22 @@ test("sand_types 的精简列表带上工具箱要的 icon、capabilities 和 pr
     assert.ok(Array.isArray(board!.presets), "预填条目是个列表");
     const note = list.find((item) => item.type === "base.note");
     assert.equal(note!.capabilities.container, undefined, "没声明的能力不出现");
+    const kinds = types.data.relationKinds as {
+      kind: string;
+      sourceTypes?: string[];
+      targetTypes?: string[];
+    }[];
+    const participates = kinds.find(
+      (item) => item.kind === "novel.participates",
+    );
+    assert.deepEqual(participates?.sourceTypes, ["novel.event"]);
+    assert.deepEqual(participates?.targetTypes, ["novel.character"]);
+    const related = kinds.find((item) => item.kind === "base.related");
+    assert.equal(
+      related?.sourceTypes,
+      undefined,
+      "没有端点限制的关系不带 sourceTypes",
+    );
   } finally {
     await session.close();
   }
