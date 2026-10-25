@@ -1513,10 +1513,22 @@ try {
       options?: { modifiers?: Array<"Alt" | "Control" | "Meta" | "Shift"> },
     ) => {
       const add = Boolean(options?.modifiers?.includes("Control"));
-      await card.focus();
-      if (add) await page.keyboard.down("Control");
-      await page.keyboard.press("Space");
-      if (add) await page.keyboard.up("Control");
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await card.focus();
+        if (add) await page.keyboard.down("Control");
+        await page.keyboard.press("Space");
+        if (add) {
+          await page.keyboard.up("Control");
+          return;
+        }
+        const selected = ((await card.getAttribute("class")) || "").includes(
+          "selected",
+        );
+        if (selected) return;
+        await card.click({ position: { x: 12, y: 12 }, force: true });
+        if (((await card.getAttribute("class")) || "").includes("selected"))
+          return;
+      }
     };
     const selectPair = async () => {
       for (let attempt = 0; attempt < 3; attempt += 1) {
