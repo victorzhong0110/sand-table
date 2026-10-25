@@ -25,6 +25,7 @@ import type {
   V3PresentationRow,
   V3RelationRow,
 } from "./store.ts";
+import { detachChildren, type ArrangeItem } from "../canvas/arrange.ts";
 
 /** v3 类型 → 现有组件类型。 */
 const V2_TYPE_BY_V3: Record<string, string> = {
@@ -594,6 +595,53 @@ export type WriteContext = {
   presentations: Map<string, V3PresentationRow>;
 };
 
+function arrangeItemsOf(ctx: WriteContext): ArrangeItem[] {
+  return [...ctx.presentations.values()].flatMap((row) => {
+    if (row.deleted || !row.id) return [];
+    return [
+      {
+        id: row.id,
+        parentId: row.parentId ?? null,
+        x: Number.isFinite(row.x) ? row.x : 0,
+        y: Number.isFinite(row.y) ? row.y : 0,
+        width: Number.isFinite(row.width) ? row.width : 0,
+        height: Number.isFinite(row.height) ? row.height : 0,
+        z: Number.isFinite(row.z) ? row.z : 0,
+        locked: Boolean(row.locked),
+      },
+    ];
+  });
+}
+
+/** 锁定时不能直接改坐标。先解锁，改父框和位置，再锁回去。 */
+function pushReparent(
+  commands: V3Command[],
+  ctx: WriteContext,
+  child: { id: string; parentId: string | null; x: number; y: number },
+) {
+  const presentation = ctx.presentations.get(child.id);
+  if (!presentation) return;
+  if (presentation.locked)
+    commands.push({
+      op: "presentation.update",
+      id: presentation.id,
+      locked: false,
+    });
+  commands.push({
+    op: "presentation.update",
+    id: presentation.id,
+    parentId: child.parentId,
+    x: child.x,
+    y: child.y,
+  });
+  if (presentation.locked)
+    commands.push({
+      op: "presentation.update",
+      id: presentation.id,
+      locked: true,
+    });
+}
+
 /** 白板预设：新建一块白板时里面先放什么。 */
 const BOARD_PRESETS: Record<string, [string, string][]> = {
   bug: [
@@ -657,6 +705,22 @@ function pasteNumber(value: unknown, label: string): number {
     throw Error(`粘贴用的${label}不是有效数字。请重新复制后再试。`);
   return number;
 }
+
+function arrangeNumber(value: unknown, label: string): number {
+  const number = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(number))
+    throw Error(`排列用的${label}不是有效数字。请重试。`);
+  return number;
+}
+
+function arrangeInteger(value: unknown, label: string): number {
+  const number = arrangeNumber(value, label);
+  if (!Number.isInteger(number))
+    throw Error(`排列用的${label}必须是整数。请重试。`);
+  return number;
+}
+
+const ARRANGE_LIMIT_MESSAGE = "一次最多写入 200 条命令。请缩小选择后再试。";
 
 function pasteAppearance(value: unknown):
   | {
@@ -841,11 +905,13 @@ export function toCommands(op: any, ctx: WriteContext): V3Command[] {
         : op.instanceId !== undefined
           ? [String(op.instanceId)]
           : [];
-      for (const id of ids) {
-        const presentation = ctx.presentations.get(id);
-        if (!presentation) continue;
-        commands.push({ op: "presentation.delete", id: presentation.id });
-      }
+      const removing = ids.filter((id: string) => ctx.presentations.has(id));
+      const next: V3Command[] = [];
+      for (const child of detachChildren(arrangeItemsOf(ctx), removing))
+        pushReparent(next, ctx, child);
+      for (const id of removing) next.push({ op: "presentation.delete", id });
+      if (next.length > 200) throw Error(ARRANGE_LIMIT_MESSAGE);
+      commands.push(...next);
       break;
     }
     case "link": {
@@ -1039,6 +1105,165 @@ export function toCommands(op: any, ctx: WriteContext): V3Command[] {
           id: member.id,
           parentId: "@frame",
         });
+      break;
+    }
+    case "arrange": {
+      const items = Array.isArray(op.items) ? op.items : [];
+      const next: V3Command[] = [];
+      for (const item of items) {
+        const presentation = ctx.presentations.get(String(item?.id ?? ""));
+        if (!presentation || presentation.locked) continue;
+        const x = arrangeNumber(item?.x, "横坐标");
+        const y = arrangeNumber(item?.y, "纵坐标");
+        if (x === presentation.x && y === presentation.y) continue;
+        next.push({
+          op: "presentation.update",
+          id: presentation.id,
+          x,
+          y,
+        });
+      }
+      if (next.length > 200) throw Error(ARRANGE_LIMIT_MESSAGE);
+      commands.push(...next);
+      break;
+    }
+    case "restack": {
+      const items = Array.isArray(op.items) ? op.items : [];
+      const next: V3Command[] = [];
+      for (const item of items) {
+        const presentation = ctx.presentations.get(String(item?.id ?? ""));
+        if (!presentation) continue;
+        const z = arrangeInteger(item?.z, "层");
+        if (z === presentation.z) continue;
+        next.push({ op: "presentation.update", id: presentation.id, z });
+      }
+      if (next.length > 200) throw Error(ARRANGE_LIMIT_MESSAGE);
+      commands.push(...next);
+      break;
+    }
+    case "lock": {
+      if (typeof op.locked !== "boolean")
+        throw Error("锁定状态必须是是否。请重试。");
+      const ids = Array.isArray(op.ids) ? op.ids : [];
+      const next: V3Command[] = [];
+      for (const id of ids) {
+        const presentation = ctx.presentations.get(String(id));
+        if (!presentation || presentation.locked === op.locked) continue;
+        next.push({
+          op: "presentation.update",
+          id: presentation.id,
+          locked: op.locked,
+        });
+      }
+      if (next.length > 200) throw Error(ARRANGE_LIMIT_MESSAGE);
+      commands.push(...next);
+      break;
+    }
+    case "frame": {
+      const rawChildren = Array.isArray(op.children) ? op.children : [];
+      const frame = (op.frame ?? {}) as Record<string, unknown>;
+      const x = arrangeNumber(frame.x, "横坐标");
+      const y = arrangeNumber(frame.y, "纵坐标");
+      const width = arrangeNumber(frame.width, "宽度");
+      const height = arrangeNumber(frame.height, "高度");
+      if (width <= 0 || height <= 0)
+        throw Error("框的宽高必须大于 0。请重新选择后再试。");
+      const children: { id: string; x: number; y: number }[] = [];
+      for (const child of rawChildren) {
+        const presentation = ctx.presentations.get(String(child?.id ?? ""));
+        /* 锁定的展示不能被成框间接移动，这一批里直接跳过。 */
+        if (!presentation || presentation.locked) continue;
+        children.push({
+          id: presentation.id,
+          x: arrangeNumber(child?.x, "横坐标"),
+          y: arrangeNumber(child?.y, "纵坐标"),
+        });
+      }
+      if (!children.length)
+        throw Error("没有能放进框的展示。锁定的展示会留在原地。");
+      if (2 + children.length > 200) throw Error(ARRANGE_LIMIT_MESSAGE);
+      /* 引用名在同一批里必须唯一，框对象和框展示不能共用一个。 */
+      commands.push({
+        op: "object.create",
+        ref: "frameObject",
+        type: "base.frame",
+        title: "框",
+        data: {},
+      });
+      commands.push({
+        op: "presentation.create",
+        ref: "frameView",
+        boardId: ctx.boardId,
+        objectId: "@frameObject",
+        x,
+        y,
+        width,
+        height,
+      });
+      for (const child of children)
+        commands.push({
+          op: "presentation.update",
+          id: child.id,
+          parentId: "@frameView",
+          x: child.x,
+          y: child.y,
+        });
+      break;
+    }
+    case "unframe": {
+      const frame = ctx.presentations.get(String(op.frameId ?? ""));
+      if (!frame) throw Error("这个框已经不在白板上了。请刷新后再试。");
+      const rawChildren = Array.isArray(op.children) ? op.children : [];
+      const next: V3Command[] = [];
+      for (const child of rawChildren) {
+        const presentation = ctx.presentations.get(String(child?.id ?? ""));
+        if (!presentation || presentation.id === frame.id) continue;
+        const parentId =
+          child?.parentId === null ? null : String(child?.parentId ?? "");
+        if (parentId === "")
+          throw Error("解除框时没有给出原来的父框。请重试。");
+        const x = arrangeNumber(child?.x, "横坐标");
+        const y = arrangeNumber(child?.y, "纵坐标");
+        /* 锁定时内核拒绝改坐标。先解锁，改父框和坐标，再锁回去。屏幕位置不变。 */
+        if (presentation.locked)
+          next.push({
+            op: "presentation.update",
+            id: presentation.id,
+            locked: false,
+          });
+        next.push({
+          op: "presentation.update",
+          id: presentation.id,
+          parentId,
+          x,
+          y,
+        });
+        if (presentation.locked)
+          next.push({
+            op: "presentation.update",
+            id: presentation.id,
+            locked: true,
+          });
+      }
+      next.push({ op: "presentation.delete", id: frame.id });
+      if (next.length > 200) throw Error(ARRANGE_LIMIT_MESSAGE);
+      commands.push(...next);
+      break;
+    }
+    case "deleteObject": {
+      const objectId = String(op.objectId ?? "");
+      if (!objectId) throw Error("没有要删除的对象。请重新选择后再试。");
+      if (!ctx.objects.get(objectId))
+        throw Error("这个对象已经不在了。请刷新后再试。");
+      const removing = [...ctx.presentations.values()]
+        .filter((row) => !row.deleted && row.objectId === objectId)
+        .map((row) => row.id);
+      const next: V3Command[] = [];
+      for (const child of detachChildren(arrangeItemsOf(ctx), removing))
+        pushReparent(next, ctx, child);
+      next.push({ op: "object.delete", id: objectId });
+      if (next.length > 200) throw Error(ARRANGE_LIMIT_MESSAGE);
+      commands.push(...next);
       break;
     }
     default:

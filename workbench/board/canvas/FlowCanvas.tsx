@@ -19,6 +19,7 @@ import {
   DUPLICATE_OFFSET,
   EMPTY_CLIPBOARD_MESSAGE,
   OTHER_WORKSPACE_MESSAGE,
+  TOO_MANY_MESSAGE,
   captureClipboard,
   clearClipboard,
   clipboardPlainText,
@@ -34,6 +35,26 @@ import {
   type PasteMode,
   type PlacedItem,
 } from "./clipboard.ts";
+import { ContextMenu, DeleteObjectDialog } from "./ContextMenu.tsx";
+import {
+  alignSelection,
+  boardOrigin,
+  componentMenu,
+  distributeSelection,
+  frameCommandCount,
+  framePlan,
+  paneMenu,
+  restack,
+  topLevelIds,
+  unframeCommandCount,
+  unframePlan,
+  withinCommandLimit,
+  type AlignEdge,
+  type ArrangeItem,
+  type DistributeAxis,
+  type MenuAction,
+  type ZAction,
+} from "./arrange.ts";
 import { detectPlatform, resolveShortcut, type ShortcutId } from "./keymap.ts";
 import { v3TypeOf } from "../data-client/adapter.ts";
 import {
@@ -200,6 +221,16 @@ function FlowSurface({
   const [editing, setEditing] = useState<InlineEdit>();
   const [notice, setNotice] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    targetId: string | null;
+    ids: string[];
+  } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    objectId: string;
+    count: number;
+  } | null>(null);
   const [link, setLink] = useState<{
     source: string;
     target: string;
@@ -230,6 +261,8 @@ function FlowSurface({
     token: 0,
   });
   const shortcutRef = useRef<(event: KeyboardEvent) => void>(() => {});
+  const focusReturn = useRef<HTMLElement | null>(null);
+  const arrangeSeq = useRef(0);
   const boardRef = useRef(b);
   boardRef.current = b;
   const viewportRef = useRef(viewport);
@@ -907,7 +940,7 @@ function FlowSurface({
         routeIds.has(item.objectId),
     );
     if (targets[0]) {
-      const rect = displayRect(targets[0]);
+      const rect = placedRect(targets[0]);
       animateTo(
         centerCamera(viewportRef.current, { ...rect, pinned: false }, area()),
       );
@@ -919,6 +952,30 @@ function FlowSurface({
     const timer = window.setTimeout(() => fit(filtered.slice(0, 30)), 160);
     return () => clearTimeout(timer);
   }, [query, kind, scope, view?.spaceId]);
+
+  const placedRect = (instance: Board["instances"][number]) => {
+    const rect = displayRect(instance);
+    if (!view || !instance.parentId) return rect;
+    const items: ArrangeItem[] = [];
+    for (const item of b.instances) {
+      if (item.spaceId !== view.spaceId) continue;
+      items.push({
+        id: item.id,
+        parentId: item.parentId ?? null,
+        x: item.rect.x,
+        y: item.rect.y,
+        width: item.rect.width,
+        height: item.rect.height,
+        z: item.z ?? 0,
+        locked: item.rect.pinned,
+      });
+    }
+    const origin = boardOrigin(
+      instance.id,
+      new Map(items.map((item) => [item.id, item])),
+    );
+    return { ...rect, x: origin.x, y: origin.y };
+  };
 
   const area = () => {
     const element = canvas.current;
@@ -945,7 +1002,7 @@ function FlowSurface({
         item.id === view.selection.at(-1) && item.spaceId === view.spaceId,
     );
     if (!instance) return;
-    const rect = displayRect(instance);
+    const rect = placedRect(instance);
     const current = viewportRef.current;
     const bounds = area();
     const x = rect.x * current.zoom + current.x;
@@ -1433,12 +1490,418 @@ function FlowSurface({
     runShortcut(id, event);
   };
 
+  const closeMenu = () => setMenu(null);
+
+  const restoreFocus = () => {
+    const back = focusReturn.current;
+    focusReturn.current = null;
+    if (!back?.isConnected) return;
+    requestAnimationFrame(() => {
+      if (back.isConnected) back.focus({ preventScroll: true });
+    });
+  };
+
+  const rememberFocus = (instanceId: string | null) => {
+    const article = instanceId
+      ? document.querySelector<HTMLElement>(
+          `[data-instance-id="${CSS.escape(instanceId)}"]`,
+        )
+      : null;
+    const active =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    focusReturn.current = article ?? active ?? canvas.current;
+  };
+
+  const itemsOnBoard = (): ArrangeItem[] => {
+    if (!view) return [];
+    return b.instances
+      .filter((item) => item.spaceId === view.spaceId)
+      .map((item) => ({
+        id: item.id,
+        parentId: item.parentId ?? null,
+        x: item.rect.x,
+        y: item.rect.y,
+        width: item.rect.width,
+        height: item.rect.height,
+        z: item.z ?? 0,
+        locked: item.rect.pinned,
+      }));
+  };
+
+  const arrangeIntent = (name: string) =>
+    `${name}:${Date.now()}:${++arrangeSeq.current}`;
+
+  const commitArrange = async (
+    op: Record<string, unknown>,
+    failure: string,
+  ) => {
+    const result = await operate(op);
+    if (result === undefined) showNotice(failure);
+  };
+
+  const placedFor = (ids: string[]): PlacedItem[] => {
+    if (!view) return [];
+    return ids.flatMap((id) => {
+      const instance = b.instances.find(
+        (item) => item.id === id && item.spaceId === view.spaceId,
+      );
+      const placed = instance ? placedOf(instance) : null;
+      return placed ? [placed] : [];
+    });
+  };
+
+  const alignBy = async (ids: string[], edge: AlignEdge) => {
+    const updates = alignSelection(itemsOnBoard(), ids, edge);
+    if (!updates.length) {
+      showNotice("没有移动。锁定的展示会留在原地，已经对齐的也不会再写一次。");
+      return;
+    }
+    if (!withinCommandLimit(updates.length)) {
+      showNotice(TOO_MANY_MESSAGE);
+      return;
+    }
+    await commitArrange(
+      { kind: "arrange", items: updates, intentId: arrangeIntent("align") },
+      "没有对齐。请看页面上方的说明。",
+    );
+  };
+
+  const distributeBy = async (ids: string[], axis: DistributeAxis) => {
+    const updates = distributeSelection(itemsOnBoard(), ids, axis);
+    if (!updates) {
+      showNotice("至少选中 3 个展示才能等间距分布。");
+      return;
+    }
+    if (!updates.length) {
+      showNotice("没有移动。锁定的展示会留在原地，首尾也不会动。");
+      return;
+    }
+    if (!withinCommandLimit(updates.length)) {
+      showNotice(TOO_MANY_MESSAGE);
+      return;
+    }
+    await commitArrange(
+      {
+        kind: "arrange",
+        items: updates,
+        intentId: arrangeIntent("distribute"),
+      },
+      "没有分布。请看页面上方的说明。",
+    );
+  };
+
+  const stackBy = async (ids: string[], action: ZAction) => {
+    const items = itemsOnBoard();
+    const updates = restack(
+      items.map((item) => ({ id: item.id, z: item.z })),
+      ids,
+      action,
+    );
+    if (!updates.length) {
+      showNotice("这些展示已经在这一层了。");
+      return;
+    }
+    if (!withinCommandLimit(updates.length)) {
+      showNotice(TOO_MANY_MESSAGE);
+      return;
+    }
+    await commitArrange(
+      { kind: "restack", items: updates, intentId: arrangeIntent("z") },
+      "没有调整层级。请看页面上方的说明。",
+    );
+  };
+
+  const lockBy = async (ids: string[], locked: boolean) => {
+    if (!withinCommandLimit(ids.length)) {
+      showNotice(TOO_MANY_MESSAGE);
+      return;
+    }
+    await commitArrange(
+      {
+        kind: "lock",
+        ids,
+        locked,
+        intentId: arrangeIntent(locked ? "lock" : "unlock"),
+      },
+      locked
+        ? "没有锁定。请看页面上方的说明。"
+        : "没有解锁。请看页面上方的说明。",
+    );
+  };
+
+  const frameBy = async (ids: string[]) => {
+    const plan = framePlan(itemsOnBoard(), ids);
+    if (!plan) {
+      showNotice("没有能放进框的展示。锁定的展示会留在原地。");
+      return;
+    }
+    if (!withinCommandLimit(frameCommandCount(plan.children.length))) {
+      showNotice(TOO_MANY_MESSAGE);
+      return;
+    }
+    await commitArrange(
+      {
+        kind: "frame",
+        frame: plan.frame,
+        children: plan.children,
+        intentId: arrangeIntent("frame"),
+      },
+      "没有放进框。请看页面上方的说明。",
+    );
+  };
+
+  const unframeBy = async (frameId: string) => {
+    const plan = unframePlan(itemsOnBoard(), frameId);
+    if (!plan) {
+      showNotice("这个框已经不在白板上了。请刷新后再试。");
+      return;
+    }
+    if (!withinCommandLimit(unframeCommandCount(plan.children))) {
+      showNotice(TOO_MANY_MESSAGE);
+      return;
+    }
+    await commitArrange(
+      {
+        kind: "unframe",
+        frameId: plan.frameId,
+        children: plan.children,
+        intentId: arrangeIntent("unframe"),
+      },
+      "没有解除框。请看页面上方的说明。",
+    );
+  };
+
+  const removeBy = async (ids: string[]) => {
+    if (!ids.length) {
+      showNotice("请先选中要移除的展示。");
+      return;
+    }
+    if (!withinCommandLimit(ids.length)) {
+      showNotice(TOO_MANY_MESSAGE);
+      return;
+    }
+    await commitArrange(
+      {
+        kind: "remove",
+        instanceIds: ids,
+        intentId: arrangeIntent("remove"),
+      },
+      "没有移除展示。请看页面上方的说明。",
+    );
+  };
+
+  const askDeleteObject = async (objectId: string) => {
+    try {
+      const data = await call("sand_read", {
+        ids: [objectId],
+        include: ["presentations"],
+      });
+      const objects = Array.isArray(data?.objects) ? data.objects : [];
+      const found = objects.find(
+        (item: { id?: string; presentations?: unknown }) =>
+          item?.id === objectId,
+      );
+      if (!found) {
+        showNotice("没有读到这个对象。请刷新后再删除。");
+        return;
+      }
+      const count = Array.isArray(found.presentations)
+        ? found.presentations.length
+        : 0;
+      setDeleteConfirm({ objectId, count });
+    } catch (error) {
+      showNotice(
+        error instanceof Error
+          ? error.message
+          : "没能读到这个对象还出现在哪些白板上。请稍后再试。",
+      );
+    }
+  };
+
+  const openNodeMenu = (id: string, point: { x: number; y: number }) => {
+    if (!view) return;
+    const current = selectionOverride.current ?? selectionServer.current;
+    const ids = current.includes(id)
+      ? current.filter((item) =>
+          b.instances.some(
+            (instance) =>
+              instance.id === item && instance.spaceId === view.spaceId,
+          ),
+        )
+      : [id];
+    if (!current.includes(id)) publishSelection([id]);
+    rememberFocus(id);
+    setMenu({ x: point.x, y: point.y, targetId: id, ids });
+  };
+
+  const performMenu = (action: MenuAction) => {
+    const current = menu;
+    if (!current || !view) return;
+    const ids = current.ids;
+    const target = current.targetId
+      ? b.instances.find(
+          (item) =>
+            item.id === current.targetId && item.spaceId === view.spaceId,
+        )
+      : undefined;
+    closeMenu();
+    if (action !== "edit" && action !== "delete-object") restoreFocus();
+    switch (action) {
+      case "edit": {
+        focusReturn.current = null;
+        if (!target) {
+          showNotice("请先选中要编辑的组件。");
+          return;
+        }
+        const field = editField(target.type);
+        const content = b.contentObjects.find(
+          (object) => object.id === target.objectId,
+        );
+        const value =
+          field === "text"
+            ? String((content?.data ?? target.data).text ?? "")
+            : (content?.title ?? target.title);
+        beginEdit(target, { start: value.length, end: value.length });
+        return;
+      }
+      case "duplicate":
+      case "clone": {
+        const placed = placedFor(ids);
+        if (!placed.length) {
+          showNotice("请先选中要再放一份的展示。");
+          return;
+        }
+        void writePaste(
+          action === "clone" ? "clone" : "reference",
+          layoutOffset(placed, DUPLICATE_OFFSET),
+        );
+        return;
+      }
+      case "align-left":
+        void alignBy(ids, "left");
+        return;
+      case "align-center-x":
+        void alignBy(ids, "center-x");
+        return;
+      case "align-right":
+        void alignBy(ids, "right");
+        return;
+      case "align-top":
+        void alignBy(ids, "top");
+        return;
+      case "align-center-y":
+        void alignBy(ids, "center-y");
+        return;
+      case "align-bottom":
+        void alignBy(ids, "bottom");
+        return;
+      case "distribute-x":
+        void distributeBy(ids, "x");
+        return;
+      case "distribute-y":
+        void distributeBy(ids, "y");
+        return;
+      case "front":
+      case "back":
+      case "forward":
+      case "backward":
+        void stackBy(ids, action);
+        return;
+      case "lock":
+        void lockBy(ids, true);
+        return;
+      case "unlock":
+        void lockBy(ids, false);
+        return;
+      case "frame":
+        void frameBy(ids);
+        return;
+      case "unframe":
+        if (!current.targetId) return;
+        void unframeBy(current.targetId);
+        return;
+      case "remove":
+        void removeBy(ids);
+        return;
+      case "delete-object": {
+        const objectId = target?.objectId;
+        if (!objectId) {
+          focusReturn.current = null;
+          showNotice("这个展示没有绑定对象，没法删除对象。");
+          return;
+        }
+        void askDeleteObject(objectId);
+        return;
+      }
+      case "paste":
+      case "paste-clone": {
+        const clipboard = readClipboard();
+        if (!clipboard?.items.length) {
+          showNotice(EMPTY_CLIPBOARD_MESSAGE);
+          return;
+        }
+        void ensureWorkspace().then((workspaceId) => {
+          if (!workspaceId) {
+            showNotice("还不知道当前是哪个工作空间，粘贴已取消。请稍后再试。");
+            return;
+          }
+          if (clipboard.workspaceId !== workspaceId) {
+            clearClipboard();
+            showNotice(OTHER_WORKSPACE_MESSAGE);
+            return;
+          }
+          const origin = flow.screenToFlowPosition({
+            x: current.x,
+            y: current.y,
+          });
+          void writePaste(
+            action === "paste-clone" ? "clone" : "reference",
+            layoutAt(clipboard.items, origin),
+          );
+        });
+        return;
+      }
+      case "select-all": {
+        const all = b.instances
+          .filter((item) => item.spaceId === view.spaceId)
+          .map((item) => item.id);
+        publishSelection(all);
+        return;
+      }
+      default: {
+        const unreachable: never = action;
+        return unreachable;
+      }
+    }
+  };
+
   if (!view)
     return (
       <section className="canvas">
         <p>正在打开视图…</p>
       </section>
     );
+
+  const boardItems = itemsOnBoard();
+  const menuItems = !menu
+    ? []
+    : menu.targetId
+      ? componentMenu({
+          alignCount: topLevelIds(
+            menu.ids,
+            (id) => boardItems.find((item) => item.id === id)?.parentId ?? null,
+          ).length,
+          targetLocked: Boolean(
+            b.instances.find((item) => item.id === menu.targetId)?.rect.pinned,
+          ),
+          targetIsFrame:
+            b.instances.find((item) => item.id === menu.targetId)?.type ===
+            "base.frame",
+          canFrame: framePlan(boardItems, menu.ids) !== null,
+        })
+      : paneMenu();
 
   const parents = [];
   let space = b.spaces.find((item) => item.id === view.spaceId);
@@ -1570,6 +2033,10 @@ function FlowSurface({
               });
             }}
             onPaneClick={() => {
+              if (menu) {
+                setMenu(null);
+                focusReturn.current = null;
+              }
               userClearedSelection.current = true;
               queueMicrotask(() => {
                 requestAnimationFrame(() => {
@@ -1632,6 +2099,20 @@ function FlowSurface({
                 target: targetId,
                 sourceHandle: state.fromHandle?.id ?? null,
                 targetHandle: null,
+              });
+            }}
+            onNodeContextMenu={(event, node) => {
+              event.preventDefault();
+              openNodeMenu(node.id, { x: event.clientX, y: event.clientY });
+            }}
+            onPaneContextMenu={(event) => {
+              event.preventDefault();
+              rememberFocus(null);
+              setMenu({
+                x: event.clientX,
+                y: event.clientY,
+                targetId: null,
+                ids: selectionOverride.current ?? selectionServer.current,
               });
             }}
             onNodesDelete={(deleted) => {
@@ -1732,6 +2213,42 @@ function FlowSurface({
           </div>
         </section>
       </div>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label={menu.targetId ? "组件菜单" : "白板菜单"}
+          items={menuItems}
+          onSelect={(id) => performMenu(id)}
+          onClose={() => {
+            closeMenu();
+            restoreFocus();
+          }}
+        />
+      )}
+      {deleteConfirm && (
+        <DeleteObjectDialog
+          count={deleteConfirm.count}
+          onCancel={() => {
+            setDeleteConfirm(null);
+            restoreFocus();
+          }}
+          onConfirm={() => {
+            const pending = deleteConfirm;
+            setDeleteConfirm(null);
+            focusReturn.current = canvas.current;
+            restoreFocus();
+            void commitArrange(
+              {
+                kind: "deleteObject",
+                objectId: pending.objectId,
+                intentId: arrangeIntent("delete-object"),
+              },
+              "没有删除这个对象。请看页面上方的说明。",
+            );
+          }}
+        />
+      )}
       {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
     </CanvasApiProvider>
   );

@@ -2213,3 +2213,73 @@ main.canvas-app {
   border-radius: 8px;
   pointer-events: none;
 }
+.arrange-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 188px;
+  max-height: calc(100vh - 16px);
+  margin: 0;
+  padding: 4px;
+  overflow: auto;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(50, 47, 40, 0.12);
+}
+.arrange-menu button {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.arrange-menu button[aria-disabled="true"] {
+  opacity: 0.45;
+}
+.arrange-menu button:focus,
+.arrange-menu button[data-active="true"] {
+  background: var(--soft);
+  outline: none;
+}
+.arrange-confirm {
+  position: fixed;
+  z-index: 41;
+  top: 28%;
+  left: 50%;
+  width: min(420px, calc(100vw - 32px));
+  margin: 0;
+  padding: 16px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(50, 47, 40, 0.16);
+  transform: translateX(-50%);
+}
+.arrange-confirm p {
+  margin: 0 0 12px;
+}
+.arrange-confirm .row {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.arrange-confirm button {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+.arrange-confirm button.danger {
+  color: #fffdf7;
+  background: #8d2f2f;
+  border-color: #8d2f2f;
+}
