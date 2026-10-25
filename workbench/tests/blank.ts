@@ -1226,28 +1226,109 @@ try {
       changes >= 2 && changes <= 5,
       `空闲时每秒一次增量请求（3 秒内 ${changes} 次）。`,
     );
-    const notes = b.instances.filter((item: any) => item.type === "text");
-    assert.ok(notes.length >= 2, "连线需要两张便签。");
+    /* 此时窗口还是 390 宽，镜头停在远处便签上。句柄在 DOM 里，
+       但中心点在视口外，拖动会一直等到超时。先回到宽窗口和默认镜头，
+       再放两张挨在一起的便签。 */
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await frame.getByRole("button", { name: "复位", exact: true }).click();
+    for (let i = 0; i < 30; i++) {
+      const camera = await frame.locator(".world").evaluate((el) => {
+        const matrix = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+        return { x: matrix.m41, y: matrix.m42, zoom: matrix.a };
+      });
+      if (
+        Math.abs(camera.x - 24) < 1 &&
+        Math.abs(camera.y - 24) < 1 &&
+        Math.abs(camera.zoom - 1) < 0.02
+      )
+        break;
+      await page.waitForTimeout(50);
+    }
+    const reset = await frame.locator(".world").evaluate((el) => {
+      const matrix = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+      return { x: matrix.m41, y: matrix.m42, zoom: matrix.a };
+    });
+    assert.ok(
+      Math.abs(reset.x - 24) < 1 &&
+        Math.abs(reset.y - 24) < 1 &&
+        Math.abs(reset.zoom - 1) < 0.02,
+      "复位后镜头应回到默认位置：" + JSON.stringify(reset),
+    );
+    await editSpace({
+      kind: "create",
+      type: "text",
+      title: "连线甲",
+      data: { text: "从这里拖出" },
+      rect: { x: 400, y: 200, width: 220, height: 140, pinned: false },
+    });
+    await editSpace({
+      kind: "create",
+      type: "text",
+      title: "连线乙",
+      data: { text: "接到这里" },
+      rect: { x: 700, y: 200, width: 220, height: 140, pinned: false },
+    });
+    b = await until(
+      (board) =>
+        board.instances.some((item: any) => item.title === "连线甲") &&
+        board.instances.some((item: any) => item.title === "连线乙"),
+    );
+    const sourceNote = b.instances.find((item: any) => item.title === "连线甲");
+    const targetNote = b.instances.find((item: any) => item.title === "连线乙");
     const sourceCard = frame.locator(
-      '[data-instance-id="' + notes[0].id + '"]',
+      '[data-instance-id="' + sourceNote.id + '"]',
     );
     const targetCard = frame.locator(
-      '[data-instance-id="' + notes[1].id + '"]',
+      '[data-instance-id="' + targetNote.id + '"]',
     );
-    await sourceCard.locator('[aria-label="拖出关系"]').dragTo(targetCard);
+    const handle = sourceCard.locator('[aria-label="拖出关系"]');
+    const size = page.viewportSize();
+    assert.ok(size, "浏览器窗口尺寸还在。");
+    const inside = (
+      box: { x: number; y: number; width: number; height: number } | null,
+    ) =>
+      !!box &&
+      box.x >= 1 &&
+      box.y >= 1 &&
+      box.x + box.width <= size.width - 1 &&
+      box.y + box.height <= size.height - 1;
+    let sourceBox: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    } | null = null;
+    let targetBox: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    } | null = null;
+    for (let i = 0; i < 50; i++) {
+      sourceBox = await handle.boundingBox();
+      targetBox = await targetCard.boundingBox();
+      if (inside(sourceBox) && inside(targetBox)) break;
+      await page.waitForTimeout(100);
+    }
+    assert.ok(
+      inside(sourceBox) && inside(targetBox),
+      "两张便签都要在视口里才能连线：" +
+        JSON.stringify({ sourceBox, targetBox, size }),
+    );
+    await handle.dragTo(targetCard);
     await frame
       .getByRole("dialog", { name: "选择关系" })
       .getByRole("button", { name: "相关", exact: true })
       .click();
     const related = await call("sand_read", {
-      ids: [notes[0].objectId],
+      ids: [sourceNote.objectId],
       include: ["relations"],
     });
     assert.ok(
       (related.objects?.[0]?.relations ?? []).some(
         (relation: { kind?: string; otherId?: string }) =>
           relation.kind === "base.related" &&
-          relation.otherId === notes[1].objectId,
+          relation.otherId === targetNote.objectId,
       ),
       "Connecting two cards and choosing 相关 creates base.related.",
     );
