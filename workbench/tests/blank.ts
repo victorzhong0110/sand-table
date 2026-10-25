@@ -1226,9 +1226,8 @@ try {
       changes >= 2 && changes <= 5,
       `空闲时每秒一次增量请求（3 秒内 ${changes} 次）。`,
     );
-    /* 此时窗口还是 390 宽，镜头停在远处便签上。句柄在 DOM 里，
-       但中心点在视口外，拖动会一直等到超时。先回到宽窗口和默认镜头，
-       再放两张挨在一起的便签。 */
+    /* 此时窗口还是 390 宽，镜头停在远处便签上。先回到宽窗口和默认镜头。
+       比较卡片紧挨在第一张便签右边，会挡住句柄；空位按现有矩形找。 */
     await page.setViewportSize({ width: 1440, height: 1000 });
     await frame.getByRole("button", { name: "复位", exact: true }).click();
     for (let i = 0; i < 30; i++) {
@@ -1254,19 +1253,63 @@ try {
         Math.abs(reset.zoom - 1) < 0.02,
       "复位后镜头应回到默认位置：" + JSON.stringify(reset),
     );
+    const overlaps = (
+      a: { x: number; y: number; width: number; height: number },
+      c: { x: number; y: number; width: number; height: number },
+    ) =>
+      a.x < c.x + c.width &&
+      a.x + a.width > c.x &&
+      a.y < c.y + c.height &&
+      a.y + a.height > c.y;
+    let sourceAt: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      pinned: false;
+    } | null = null;
+    let targetAt: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      pinned: false;
+    } | null = null;
+    for (let y = 420; y <= 720; y += 30) {
+      const pair = { x: 320, y, width: 540, height: 140 };
+      const blocked = b.instances.some(
+        (item: {
+          rect: { x: number; y: number; width: number; height: number };
+        }) => overlaps(pair, item.rect),
+      );
+      if (blocked) continue;
+      sourceAt = { x: 320, y, width: 220, height: 140, pinned: false };
+      targetAt = { x: 640, y, width: 220, height: 140, pinned: false };
+      break;
+    }
+    assert.ok(
+      sourceAt && targetAt,
+      "视口里没有空位放两张要连线的便签：" +
+        JSON.stringify(
+          b.instances.map((item: { title?: string; rect?: unknown }) => ({
+            title: item.title,
+            rect: item.rect,
+          })),
+        ),
+    );
     await editSpace({
       kind: "create",
       type: "text",
       title: "连线甲",
       data: { text: "从这里拖出" },
-      rect: { x: 400, y: 200, width: 220, height: 140, pinned: false },
+      rect: sourceAt,
     });
     await editSpace({
       kind: "create",
       type: "text",
       title: "连线乙",
       data: { text: "接到这里" },
-      rect: { x: 700, y: 200, width: 220, height: 140, pinned: false },
+      rect: targetAt,
     });
     b = await until(
       (board) =>
