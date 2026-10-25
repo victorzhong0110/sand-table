@@ -11,8 +11,28 @@ import {
   type Viewport as FlowViewport,
 } from "@xyflow/react";
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import { ShortcutHelp } from "../ShortcutHelp.tsx";
 import { blocksCanvasShortcut } from "../keyboard.ts";
 import type { Board } from "../data-client/model.ts";
+import {
+  CLONE_SCOPE_MESSAGE,
+  DUPLICATE_OFFSET,
+  EMPTY_CLIPBOARD_MESSAGE,
+  OTHER_WORKSPACE_MESSAGE,
+  captureClipboard,
+  clearClipboard,
+  clipboardPlainText,
+  layoutAt,
+  layoutOffset,
+  planPaste,
+  readClipboard,
+  saveClipboard,
+  syncWorkspace,
+  type PasteItem,
+  type PasteMode,
+  type PlacedItem,
+} from "./clipboard.ts";
+import { detectPlatform, resolveShortcut, type ShortcutId } from "./keymap.ts";
 import { v3TypeOf } from "../data-client/adapter.ts";
 import {
   componentTypes,
@@ -69,6 +89,7 @@ const nodeTypes = { card: CardNode };
 const edgeTypes = { relation: RelationEdge };
 
 let removalSeq = 0;
+let pasteSeq = 0;
 
 function sameIds(left: readonly string[], right: readonly string[]) {
   if (left.length !== right.length) return false;
@@ -176,6 +197,7 @@ function FlowSurface({
   const [edges, setEdges] = useState<RelationEdgeType[]>([]);
   const [editing, setEditing] = useState<InlineEdit>();
   const [notice, setNotice] = useState("");
+  const [helpOpen, setHelpOpen] = useState(false);
   const [link, setLink] = useState<{
     source: string;
     target: string;
@@ -194,10 +216,24 @@ function FlowSurface({
   const userClearedSelection = useRef(false);
   const selectionServer = useRef<string[]>(view?.selection ?? []);
   selectionServer.current = view?.selection ?? [];
+  const workspaceRef = useRef("");
+  const pointerClient = useRef<{ x: number; y: number } | null>(null);
+  const nudgeState = useRef({
+    timer: 0,
+    intentId: "",
+    positions: new Map<string, { x: number; y: number }>(),
+    pending: new Map<string, { x: number; y: number }>(),
+    token: 0,
+  });
+  const shortcutRef = useRef<(event: KeyboardEvent) => void>(() => {});
+  const boardRef = useRef(b);
+  boardRef.current = b;
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
   const operateRef = useRef(operate);
   operateRef.current = operate;
+  const callRef = useRef(call);
+  callRef.current = call;
   const touched = useRef(false);
   const ignoreMove = useRef(false);
   const booted = useRef(false);
@@ -528,7 +564,14 @@ function FlowSurface({
     });
     const presentations = visible.map(presentationOf);
     const mapped = toFlowNodes(presentations, view.spaceId);
-    const keep = new Set([...dragging.current, ...resizing.current]);
+    const nudged = nudgeState.current.positions;
+    const pendingNudge = nudgeState.current.pending;
+    const keep = new Set([
+      ...dragging.current,
+      ...resizing.current,
+      ...nudged.keys(),
+      ...pendingNudge.keys(),
+    ]);
     setNodes((current) => {
       const live = new Map(current.map((node) => [node.id, node]));
       return mapped.map((node) => {
@@ -536,14 +579,17 @@ function FlowSurface({
         const selected = (selectionOverride.current ?? selectedIds).includes(
           node.id,
         );
-        if (previous && keep.has(node.id))
+        if (previous && keep.has(node.id)) {
+          const position = nudged.get(node.id) ?? pendingNudge.get(node.id);
           return {
             ...previous,
+            ...(position ? { position } : {}),
             data: { objectId: node.data.objectId },
             draggable: node.draggable,
             className: "nopan",
             selected: previous.selected,
           };
+        }
         return {
           id: node.id,
           type: "card",
@@ -666,30 +712,54 @@ function FlowSurface({
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      stopAnimation(true);
-      stopEdge();
-      if (blocksCanvasShortcut(event)) return;
-      const target = event.target as HTMLElement | null;
-      const typing = Boolean(
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable),
-      );
-      if (typing) return;
-      const selected = selectionOverride.current ?? selectionServer.current;
-      if (!selected.length) return;
-      event.preventDefault();
-      selectionOverride.current = [];
-      setNodes((current) =>
-        current.map((node) => ({ ...node, selected: false })),
-      );
-      void operateRef.current({ kind: "select", ids: [] });
+      if (event.key === "Escape") {
+        stopAnimation(true);
+        stopEdge();
+        if (blocksCanvasShortcut(event)) return;
+        const target = event.target as HTMLElement | null;
+        const typing = Boolean(
+          target &&
+          (target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.isContentEditable),
+        );
+        if (typing) return;
+        const selected = selectionOverride.current ?? selectionServer.current;
+        if (!selected.length) return;
+        event.preventDefault();
+        selectionOverride.current = [];
+        setNodes((current) =>
+          current.map((node) => ({ ...node, selected: false })),
+        );
+        void operateRef.current({ kind: "select", ids: [] });
+        return;
+      }
+      shortcutRef.current(event);
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, []);
+
+  useEffect(() => () => clearTimeout(nudgeState.current.timer), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void callRef
+      .current("sand_list_workspaces")
+      .then((data) => {
+        if (cancelled) return;
+        const id = typeof data?.activeId === "string" ? data.activeId : "";
+        if (!id) return;
+        const previous = workspaceRef.current;
+        workspaceRef.current = id;
+        if (previous && previous !== id) clearClipboard();
+        else syncWorkspace(id);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [b.id]);
 
   useEffect(() => {
     stopAnimation();
@@ -965,6 +1035,361 @@ function FlowSurface({
     }
   };
 
+  const placedOf = (
+    instance: Board["instances"][number],
+  ): PlacedItem | null => {
+    if (!instance.objectId) return null;
+    const detail = instance.appearance?.detail;
+    const accent = instance.appearance?.icon;
+    const appearance = {
+      ...(detail === "full" || detail === "label" || detail === "icon"
+        ? { detail }
+        : {}),
+      ...(accent ? { accent } : {}),
+    };
+    return {
+      objectId: instance.objectId,
+      title: instance.title,
+      x: instance.rect.x,
+      y: instance.rect.y,
+      width: instance.rect.width,
+      height: instance.rect.height,
+      ...(Object.keys(appearance).length ? { appearance } : {}),
+      container: instance.type === "board" || instance.type === "space-link",
+    };
+  };
+
+  const selectedPlaced = (): PlacedItem[] => {
+    if (!view) return [];
+    const ids = selectionOverride.current ?? selectionServer.current;
+    return ids.flatMap((id) => {
+      const instance = b.instances.find(
+        (item) => item.id === id && item.spaceId === view.spaceId,
+      );
+      const placed = instance ? placedOf(instance) : null;
+      return placed ? [placed] : [];
+    });
+  };
+
+  const ensureWorkspace = async () => {
+    if (workspaceRef.current) return workspaceRef.current;
+    const data = await call("sand_list_workspaces");
+    const id = typeof data?.activeId === "string" ? data.activeId : "";
+    if (id) workspaceRef.current = id;
+    return id;
+  };
+
+  const readAlive = async (ids: string[]) => {
+    const alive = new Set<string>();
+    for (let index = 0; index < ids.length; index += 20) {
+      const data = await call("sand_read", {
+        ids: ids.slice(index, index + 20),
+        include: [],
+      });
+      for (const object of data?.objects ?? []) {
+        if (object && typeof object.id === "string") alive.add(object.id);
+      }
+    }
+    return alive;
+  };
+
+  const writePaste = async (mode: PasteMode, items: PasteItem[]) => {
+    const ids = [...new Set(items.map((item) => item.objectId))];
+    let alive: Set<string>;
+    try {
+      alive = await readAlive(ids);
+    } catch (error) {
+      showNotice(
+        error instanceof Error
+          ? error.message
+          : "没能核对源对象是否还在。请稍后再试。",
+      );
+      return;
+    }
+    const planned = planPaste({ mode, items, alive });
+    if (!planned.ok) {
+      showNotice(planned.error);
+      return;
+    }
+    if (mode === "clone" && planned.items.some((item) => item.container))
+      showNotice(CLONE_SCOPE_MESSAGE);
+    const result = await operate({
+      kind: "paste",
+      mode,
+      items: planned.items,
+      intentId: `paste:${mode}:${Date.now()}:${++pasteSeq}`,
+    });
+    if (result === undefined)
+      showNotice("没有写上去。请看页面上方的说明，再试一次。");
+  };
+
+  const nudgeBy = (event: KeyboardEvent) => {
+    if (!view) return;
+    const step = event.shiftKey ? 10 : 1;
+    const delta =
+      event.key === "ArrowLeft"
+        ? { x: -step, y: 0 }
+        : event.key === "ArrowRight"
+          ? { x: step, y: 0 }
+          : event.key === "ArrowUp"
+            ? { x: 0, y: -step }
+            : event.key === "ArrowDown"
+              ? { x: 0, y: step }
+              : null;
+    if (!delta) return;
+    const selected = selectionOverride.current ?? selectionServer.current;
+    const state = nudgeState.current;
+    let moved = 0;
+    for (const id of selected) {
+      const instance = b.instances.find(
+        (item) => item.id === id && item.spaceId === view.spaceId,
+      );
+      if (!instance || instance.rect.pinned) continue;
+      const current = state.positions.get(id) ??
+        state.pending.get(id) ?? {
+          x: instance.rect.x,
+          y: instance.rect.y,
+        };
+      state.positions.set(id, {
+        x: current.x + delta.x,
+        y: current.y + delta.y,
+      });
+      moved += 1;
+    }
+    if (!moved) {
+      showNotice(
+        selected.length
+          ? "锁住的展示不能用方向键移动。请先取消固定。"
+          : "请先选中要移动的展示。",
+      );
+      return;
+    }
+    if (!state.intentId) state.intentId = `nudge:${Date.now()}`;
+    setNodes((current) =>
+      current.map((node) => {
+        const position = state.positions.get(node.id);
+        return position ? { ...node, position } : node;
+      }),
+    );
+    clearTimeout(state.timer);
+    const intentId = state.intentId;
+    state.timer = window.setTimeout(() => {
+      const items = [...state.positions.entries()].map(([id, pos]) => ({
+        id,
+        rect: { x: pos.x, y: pos.y },
+      }));
+      const token = ++state.token;
+      state.pending = new Map(state.positions);
+      state.positions = new Map();
+      state.intentId = "";
+      state.timer = 0;
+      void operate({ kind: "place", items, intentId }).then((result) => {
+        if (state.token !== token) return;
+        state.pending = new Map();
+        if (result !== undefined) return;
+        showNotice(
+          "方向键移动没有写入。已回到原来的位置。请看页面上方的说明。",
+        );
+        const board = boardRef.current;
+        setNodes((current) =>
+          current.map((node) => {
+            const instance = board.instances.find(
+              (item) => item.id === node.id,
+            );
+            if (!instance) return node;
+            return {
+              ...node,
+              position: { x: instance.rect.x, y: instance.rect.y },
+            };
+          }),
+        );
+      });
+    }, 500);
+  };
+
+  const publishSelection = (ids: string[]) => {
+    clearTimeout(selectTimer.current);
+    selectTimer.current = 0;
+    selectionOverride.current = ids;
+    setNodes((current) =>
+      current.map((node) => ({ ...node, selected: ids.includes(node.id) })),
+    );
+    void operate({ kind: "select", ids });
+  };
+
+  const runShortcut = (id: ShortcutId, event: KeyboardEvent) => {
+    switch (id) {
+      case "delete":
+      case "undo":
+      case "redo":
+        return;
+      case "select-all": {
+        if (!view) return;
+        event.preventDefault();
+        const ids = b.instances
+          .filter((item) => item.spaceId === view.spaceId)
+          .map((item) => item.id);
+        publishSelection(ids);
+        return;
+      }
+      case "duplicate-presentation":
+      case "duplicate-object": {
+        event.preventDefault();
+        const placed = selectedPlaced();
+        if (!placed.length) {
+          showNotice("请先选中要再放一份的展示。");
+          return;
+        }
+        const mode = id === "duplicate-object" ? "clone" : "reference";
+        void writePaste(mode, layoutOffset(placed, DUPLICATE_OFFSET));
+        return;
+      }
+      case "copy": {
+        event.preventDefault();
+        const placed = selectedPlaced();
+        if (!placed.length) {
+          showNotice("请先选中要复制的展示。");
+          return;
+        }
+        const keep = (workspaceId: string) => {
+          const clipboard = captureClipboard(workspaceId, placed);
+          saveClipboard(clipboard);
+          void navigator.clipboard
+            ?.writeText(clipboardPlainText(clipboard.items))
+            .catch(() => {});
+        };
+        if (workspaceRef.current) {
+          keep(workspaceRef.current);
+          return;
+        }
+        void ensureWorkspace().then((workspaceId) => {
+          if (!workspaceId) {
+            showNotice(
+              "还不知道当前是哪个工作空间，复制没有记下。请稍后再试。",
+            );
+            return;
+          }
+          keep(workspaceId);
+        });
+        return;
+      }
+      case "paste-reference":
+      case "paste-clone": {
+        event.preventDefault();
+        const clipboard = readClipboard();
+        if (!clipboard?.items.length) {
+          showNotice(EMPTY_CLIPBOARD_MESSAGE);
+          return;
+        }
+        void ensureWorkspace().then((workspaceId) => {
+          if (!workspaceId) {
+            showNotice("还不知道当前是哪个工作空间，粘贴已取消。请稍后再试。");
+            return;
+          }
+          if (clipboard.workspaceId !== workspaceId) {
+            clearClipboard();
+            showNotice(OTHER_WORKSPACE_MESSAGE);
+            return;
+          }
+          const origin = pointerClient.current
+            ? flow.screenToFlowPosition(pointerClient.current)
+            : { x: 48, y: 48 };
+          void writePaste(
+            id === "paste-clone" ? "clone" : "reference",
+            layoutAt(clipboard.items, origin),
+          );
+        });
+        return;
+      }
+      case "nudge":
+        event.preventDefault();
+        nudgeBy(event);
+        return;
+      case "edit": {
+        if (!view || editing) return;
+        event.preventDefault();
+        const selected = selectionOverride.current ?? selectionServer.current;
+        const instanceId = selected.at(-1);
+        const instance = b.instances.find(
+          (item) => item.id === instanceId && item.spaceId === view.spaceId,
+        );
+        if (!instance) {
+          showNotice("请先选中要编辑的组件。");
+          return;
+        }
+        const field = editField(instance.type);
+        const content = b.contentObjects.find(
+          (object) => object.id === instance.objectId,
+        );
+        const value =
+          field === "text"
+            ? String((content?.data ?? instance.data).text ?? "")
+            : (content?.title ?? instance.title);
+        beginEdit(instance, { start: value.length, end: value.length });
+        return;
+      }
+      case "escape":
+        if (helpOpen) {
+          event.preventDefault();
+          setHelpOpen(false);
+          return;
+        }
+        if (editing) {
+          event.preventDefault();
+          cancelEdit();
+          return;
+        }
+        return;
+      case "zoom-reset":
+        event.preventDefault();
+        setView({ ...DEFAULT_VIEWPORT }, true);
+        return;
+      case "zoom-in":
+        event.preventDefault();
+        setView(
+          {
+            ...viewportRef.current,
+            zoom: Math.min(3, viewportRef.current.zoom + 0.1),
+          },
+          true,
+        );
+        return;
+      case "zoom-out":
+        event.preventDefault();
+        setView(
+          {
+            ...viewportRef.current,
+            zoom: Math.max(0.05, viewportRef.current.zoom - 0.1),
+          },
+          true,
+        );
+        return;
+      case "help":
+        event.preventDefault();
+        setHelpOpen(true);
+        return;
+      default: {
+        const unreachable: never = id;
+        return unreachable;
+      }
+    }
+  };
+
+  shortcutRef.current = (event: KeyboardEvent) => {
+    if (blocksCanvasShortcut(event)) return;
+    const id = resolveShortcut({
+      key: event.key,
+      metaKey: event.metaKey,
+      ctrlKey: event.ctrlKey,
+      shiftKey: event.shiftKey,
+      altKey: event.altKey,
+      platform: detectPlatform(),
+      typing: false,
+    });
+    if (!id) return;
+    runShortcut(id, event);
+  };
+
   if (!view)
     return (
       <section className="canvas">
@@ -1045,13 +1470,17 @@ function FlowSurface({
               showNotice("这块组件没有放上去。请从工具箱再拖一次。");
             }
           }}
-          onPointerDownCapture={() => {
+          onPointerDownCapture={(event) => {
+            pointerClient.current = { x: event.clientX, y: event.clientY };
             touched.current = true;
             stopAnimation(true);
             stopEdge();
           }}
           onPointerLeave={() => stopEdge()}
-          onPointerMove={trackEdge}
+          onPointerMove={(event) => {
+            pointerClient.current = { x: event.clientX, y: event.clientY };
+            trackEdge(event);
+          }}
         >
           <ReactFlow
             nodes={nodes}
@@ -1188,6 +1617,10 @@ function FlowSurface({
             nodesConnectable
             elementsSelectable
             selectNodesOnDrag={false}
+            selectionOnDrag={false}
+            panOnDrag
+            selectionKeyCode="Shift"
+            multiSelectionKeyCode={["Meta", "Control"]}
             proOptions={{ hideAttribution: true }}
             colorMode="light"
           />
@@ -1256,6 +1689,7 @@ function FlowSurface({
           </div>
         </section>
       </div>
+      {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
     </CanvasApiProvider>
   );
 }

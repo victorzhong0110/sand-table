@@ -648,6 +648,36 @@ export function v3RetryInfo(
  * 界面这一侧的操作名与形状都不变，翻译只在这里发生：
  * 组件里不出现任何 v3 的名词。
  */
+function pasteNumber(value: unknown, label: string): number {
+  const number = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(number))
+    throw Error(`粘贴用的${label}不是有效数字。请重新复制后再试。`);
+  return number;
+}
+
+function pasteAppearance(value: unknown):
+  | {
+      detail?: "full" | "label" | "icon";
+      accent?: string;
+      coverBlob?: string;
+    }
+  | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  const appearance: {
+    detail?: "full" | "label" | "icon";
+    accent?: string;
+    coverBlob?: string;
+  } = {};
+  if (raw.detail === "full" || raw.detail === "label" || raw.detail === "icon")
+    appearance.detail = raw.detail;
+  if (typeof raw.accent === "string" && raw.accent)
+    appearance.accent = raw.accent;
+  if (typeof raw.coverBlob === "string" && /^[a-f0-9]{64}$/.test(raw.coverBlob))
+    appearance.coverBlob = raw.coverBlob;
+  return Object.keys(appearance).length ? appearance : undefined;
+}
+
 export function toCommands(op: any, ctx: WriteContext): V3Command[] {
   const commands: V3Command[] = [];
   const kind = String(op?.kind ?? "");
@@ -908,6 +938,67 @@ export function toCommands(op: any, ctx: WriteContext): V3Command[] {
         width: presentation.width,
         height: presentation.height,
       });
+      break;
+    }
+    case "paste": {
+      const mode = op.mode === "clone" ? "clone" : "reference";
+      const items = Array.isArray(op.items) ? op.items : [];
+      if (!items.length) throw Error("没有可粘贴的展示。请先选中并复制。");
+      const per = mode === "clone" ? 2 : 1;
+      if (items.length * per > 200)
+        throw Error("一次最多写入 200 条命令。请缩小选择后再试。");
+      const normalized = items.map((item: any) => {
+        const objectId = String(item?.objectId ?? "");
+        if (!objectId)
+          throw Error("剪贴板里有一条展示缺少源对象。请重新复制。");
+        const width = pasteNumber(item?.width, "宽度");
+        const height = pasteNumber(item?.height, "高度");
+        if (width <= 0 || height <= 0)
+          throw Error("粘贴用的宽高必须大于 0。请重新复制后再试。");
+        return {
+          objectId,
+          x: pasteNumber(item?.x, "横坐标"),
+          y: pasteNumber(item?.y, "纵坐标"),
+          width,
+          height,
+          appearance: pasteAppearance(item?.appearance),
+        };
+      });
+      normalized.forEach(
+        (
+          item: {
+            objectId: string;
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+            appearance?: {
+              detail?: "full" | "label" | "icon";
+              accent?: string;
+              coverBlob?: string;
+            };
+          },
+          index: number,
+        ) => {
+          if (mode === "clone")
+            commands.push({
+              op: "object.clone",
+              id: item.objectId,
+              ref: `copy${index}`,
+            });
+          commands.push({
+            op: "presentation.create",
+            ref: `paste${index}`,
+            boardId: ctx.boardId,
+            objectId: mode === "clone" ? `@copy${index}` : item.objectId,
+            x: item.x,
+            y: item.y,
+            width: item.width,
+            height: item.height,
+            ...(item.appearance ? { appearance: item.appearance } : {}),
+          });
+        },
+      );
       break;
     }
     case "group": {

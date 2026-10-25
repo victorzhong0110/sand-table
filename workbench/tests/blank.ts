@@ -17,6 +17,7 @@ import { readConnection } from "../local/session.ts";
 import { resultData } from "../board/data-client/results.ts";
 import { V3Store } from "../board/data-client/store.ts";
 import { toCommands, toBoard } from "../board/data-client/adapter.ts";
+import { SHORTCUTS } from "../board/canvas/keymap.ts";
 const root = mkdtempSync(join(tmpdir(), "sand-blank-")),
   sessionFile = join(root, "connection.json");
 const service = spawn(
@@ -1409,6 +1410,354 @@ try {
       "Reopening the board restores the viewport.",
     );
     await page.setViewportSize({ width: 1440, height: 1000 });
+    /* T31：复制、粘贴、再放一份、方向键。正文修改是另一步历史，
+       所以「撤销一次去掉两份新展示」放在改正文之前。 */
+    const objectIds = (board: any) =>
+      new Set(board.instances.map((item: any) => item.objectId as string));
+    const freshRecords = (before: any, after: any) =>
+      after.records.filter(
+        (record: any) =>
+          !before.records.some((item: any) => item.id === record.id),
+      );
+    const seededView = await v3View();
+    const anchorId = await frame.locator(".canvas").evaluate((canvas) => {
+      const view = canvas.getBoundingClientRect();
+      const cards = [...canvas.querySelectorAll(".component-card")];
+      const hit = cards.find((el) => {
+        const box = el.getBoundingClientRect();
+        return (
+          box.width > 40 &&
+          box.left >= view.left &&
+          box.right <= view.right &&
+          box.top >= view.top &&
+          box.bottom <= view.bottom
+        );
+      });
+      return hit?.getAttribute("data-instance-id") ?? "";
+    });
+    const anchorBoard = await read();
+    const anchor = anchorBoard.instances.find(
+      (item: any) => item.id === anchorId,
+    );
+    const anchorBox = anchorId
+      ? await frame.locator(`[data-instance-id="${anchorId}"]`).boundingBox()
+      : null;
+    const canvasBox = await frame.locator(".canvas").boundingBox();
+    const scale =
+      anchor && anchorBox && anchor.rect.width
+        ? anchorBox.width / anchor.rect.width
+        : 1;
+    const toFlow = (screenX: number, screenY: number) => {
+      if (!anchor || !anchorBox) return { x: screenX, y: screenY };
+      return {
+        x: anchor.rect.x + (screenX - anchorBox.x) / scale,
+        y: anchor.rect.y + (screenY - anchorBox.y) / scale,
+      };
+    };
+    const spotA = toFlow(
+      (canvasBox?.x ?? 0) + (canvasBox?.width ?? 800) * 0.42,
+      (canvasBox?.y ?? 0) + 180,
+    );
+    const spotB = toFlow(
+      (canvasBox?.x ?? 0) + (canvasBox?.width ?? 800) * 0.68,
+      (canvasBox?.y ?? 0) + 180,
+    );
+    const seeded = await call("app_edit", {
+      intentId: "t31-seed",
+      commands: [
+        {
+          op: "object.create",
+          ref: "a",
+          type: "base.note",
+          title: "甲",
+          data: { body: "原文甲" },
+        },
+        {
+          op: "presentation.create",
+          ref: "pa",
+          boardId: seededView.spaceId,
+          objectId: "@a",
+          x: spotA.x,
+          y: spotA.y,
+          width: 220,
+          height: 140,
+        },
+        {
+          op: "object.create",
+          ref: "b",
+          type: "base.note",
+          title: "乙",
+          data: { body: "原文乙" },
+        },
+        {
+          op: "presentation.create",
+          ref: "pb",
+          boardId: seededView.spaceId,
+          objectId: "@b",
+          x: spotB.x,
+          y: spotB.y,
+          width: 220,
+          height: 140,
+        },
+      ],
+    });
+    const objectA = seeded.created.a as string;
+    const idA = seeded.created.pa as string;
+    const idB = seeded.created.pb as string;
+    const cardA = frame.locator(`[data-instance-id="${idA}"]`);
+    const cardB = frame.locator(`[data-instance-id="${idB}"]`);
+    await cardA.waitFor();
+    await cardB.waitFor();
+    const clickCard = async (
+      card: ReturnType<typeof frame.locator>,
+      options?: { modifiers?: Array<"Alt" | "Control" | "Meta" | "Shift"> },
+    ) => {
+      const add = Boolean(options?.modifiers?.includes("Control"));
+      await card.focus();
+      if (add) await page.keyboard.down("Control");
+      await page.keyboard.press("Space");
+      if (add) await page.keyboard.up("Control");
+    };
+    const selectPair = async () => {
+      await page.keyboard.press("Escape");
+      await clickCard(cardA);
+      await clickCard(cardB, { modifiers: ["Control"] });
+      await untilUiSelection(2);
+    };
+    await selectPair();
+    const beforePaste = await read();
+    const pasteIds = new Set(beforePaste.instances.map((item: any) => item.id));
+    const pasteObjects = objectIds(beforePaste);
+    const historyBeforePaste = await readHistory();
+    await page.keyboard.press("Control+c");
+    await page.keyboard.press("Control+v");
+    const pasted = await until(
+      (board) =>
+        board.instances.filter((item: any) => !pasteIds.has(item.id)).length >=
+        2,
+    );
+    assert.equal(
+      pasted.instances.filter((item: any) => !pasteIds.has(item.id)).length,
+      2,
+      "Pasting two cards adds two presentations.",
+    );
+    assert.equal(
+      objectIds(pasted).size,
+      pasteObjects.size,
+      "Reference paste does not create objects.",
+    );
+    assert.equal(
+      freshRecords(historyBeforePaste, await readHistory()).length,
+      1,
+      "Reference paste is one history step.",
+    );
+    await undo();
+    await until(
+      (board) =>
+        board.instances.filter((item: any) => !pasteIds.has(item.id)).length ===
+        0,
+    );
+    await redo();
+    await until(
+      (board) =>
+        board.instances.filter((item: any) => !pasteIds.has(item.id)).length ===
+        2,
+    );
+    await page.keyboard.press("Escape");
+    await clickCard(cardA);
+    await untilUiSelection(1);
+    await frame
+      .getByRole("textbox", { name: "内容", exact: true })
+      .fill("一起变");
+    await until(
+      (board) => contentText(board, { objectId: objectA }) === "一起变",
+    );
+    await frame
+      .locator(`[data-object-id="${objectA}"] .component-text`, {
+        hasText: "一起变",
+      })
+      .nth(1)
+      .waitFor({ timeout: 8000 });
+    assert.equal(
+      await frame
+        .locator(`[data-object-id="${objectA}"] .component-text`, {
+          hasText: "一起变",
+        })
+        .count(),
+      2,
+      "Editing the shared object updates both presentations.",
+    );
+    const objectsBeforeClone = objectIds(await read());
+    await selectPair();
+    await page.keyboard.press("Control+Shift+V");
+    const cloned = await until((board) => {
+      const created = [...objectIds(board)].filter(
+        (id) => !objectsBeforeClone.has(id),
+      );
+      return created.length >= 2;
+    });
+    const clonedIds = [...objectIds(cloned)].filter(
+      (id) => !objectsBeforeClone.has(id),
+    );
+    assert.equal(clonedIds.length, 2, "Shift-paste creates two objects.");
+    const clonePresentation = cloned.instances.find(
+      (item: any) => item.objectId === clonedIds[0],
+    );
+    await page.keyboard.press("Escape");
+    await clickCard(
+      frame.locator(`[data-instance-id="${clonePresentation.id}"]`),
+    );
+    await untilUiSelection(1);
+    await frame
+      .getByRole("textbox", { name: "内容", exact: true })
+      .fill("副本不影响原文");
+    await until(
+      (board) =>
+        contentText(board, { objectId: clonedIds[0] }) === "副本不影响原文",
+    );
+    assert.equal(
+      contentText(await read(), { objectId: objectA }),
+      "一起变",
+      "Editing a clone does not change the original.",
+    );
+    const beforeDuplicate = await read();
+    const duplicateIds = new Set(
+      beforeDuplicate.instances.map((item: any) => item.id),
+    );
+    const duplicateObjects = objectIds(beforeDuplicate);
+    await selectPair();
+    await page.keyboard.press("Control+d");
+    const duplicated = await until(
+      (board) =>
+        board.instances.filter((item: any) => !duplicateIds.has(item.id))
+          .length >= 2,
+    );
+    assert.equal(
+      duplicated.instances.filter((item: any) => !duplicateIds.has(item.id))
+        .length,
+      2,
+    );
+    assert.equal(objectIds(duplicated).size, duplicateObjects.size);
+    await undo();
+    await until(
+      (board) =>
+        board.instances.filter((item: any) => !duplicateIds.has(item.id))
+          .length === 0,
+    );
+    const beforeIndependent = await read();
+    const independentObjects = objectIds(beforeIndependent);
+    await selectPair();
+    await frame.locator("body").evaluate(() => {
+      document.defaultView?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "d",
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+          shiftKey: true,
+        }),
+      );
+    });
+    const independent = await until((board) => {
+      const created = [...objectIds(board)].filter(
+        (id) => !independentObjects.has(id),
+      );
+      return created.length >= 2;
+    });
+    const independentIds = [...objectIds(independent)].filter(
+      (id) => !independentObjects.has(id),
+    );
+    assert.equal(
+      independentIds.length,
+      2,
+      "Shift-duplicate creates two objects.",
+    );
+    const independentPresentation = independent.instances.find(
+      (item: any) => item.objectId === independentIds[0],
+    );
+    await page.keyboard.press("Escape");
+    await clickCard(
+      frame.locator(`[data-instance-id="${independentPresentation.id}"]`),
+    );
+    await untilUiSelection(1);
+    await frame
+      .getByRole("textbox", { name: "内容", exact: true })
+      .fill("独立副本");
+    await until(
+      (board) =>
+        contentText(board, { objectId: independentIds[0] }) === "独立副本",
+    );
+    assert.notEqual(
+      contentText(await read(), { objectId: objectA }),
+      "独立副本",
+    );
+    await page.keyboard.press("Escape");
+    await clickCard(cardA);
+    await untilUiSelection(1);
+    const arrowStart = (await read()).instances.find(
+      (item: any) => item.id === idA,
+    ).rect;
+    const historyBeforeArrow = await readHistory();
+    await frame.locator(".canvas").evaluate((canvas) => {
+      for (let i = 0; i < 5; i++) {
+        canvas.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "ArrowRight",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+    });
+    const arrowMoved = await until((board) => {
+      const card = board.instances.find((item: any) => item.id === idA);
+      return card && Math.abs(card.rect.x - (arrowStart.x + 5)) < 0.01;
+    });
+    assert.equal(
+      arrowMoved.instances.find((item: any) => item.id === idA).rect.y,
+      arrowStart.y,
+    );
+    assert.equal(
+      freshRecords(historyBeforeArrow, await readHistory()).length,
+      1,
+      "Five arrow presses are one history step.",
+    );
+    await frame.locator(".zoom span").click();
+    await page.keyboard.press("Shift+Slash");
+    const help = frame.getByRole("dialog", { name: "快捷键" });
+    await help.waitFor();
+    assert.equal(
+      await help.locator("[data-shortcut-id]").count(),
+      SHORTCUTS.length,
+    );
+    assert.equal(
+      await help.getByText("复制对象内容，不复制内部白板").count(),
+      2,
+    );
+    await page.keyboard.press("Escape");
+    await help.waitFor({ state: "hidden" });
+    await clickCard(cardA);
+    await untilUiSelection(1);
+    const stable = await read();
+    const stableCount = stable.instances.length;
+    const stableX = stable.instances.find((item: any) => item.id === idA).rect
+      .x;
+    await frame.getByRole("button", { name: "设置", exact: true }).click();
+    await frame.getByRole("button", { name: "关闭设置" }).focus();
+    await page.keyboard.press("Control+v");
+    await page.keyboard.press("ArrowRight");
+    await page.waitForTimeout(800);
+    const duringSettings = await read();
+    assert.equal(duringSettings.instances.length, stableCount);
+    assert.equal(
+      duringSettings.instances.find((item: any) => item.id === idA).rect.x,
+      stableX,
+      "Shortcuts inside Settings do not change the canvas.",
+    );
+    await frame.getByRole("button", { name: "关闭设置" }).click();
+    await frame
+      .getByRole("dialog", { name: "设置" })
+      .waitFor({ state: "hidden" });
     /* 导出再导入：文件能下来，导入后能切到新工作空间并看到原来的组件。 */
     await page.setViewportSize({ width: 1440, height: 1000 });
     await frame.getByRole("button", { name: "设置", exact: true }).click();
