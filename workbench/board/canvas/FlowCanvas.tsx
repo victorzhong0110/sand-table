@@ -77,6 +77,26 @@ function sameIds(left: readonly string[], right: readonly string[]) {
   return sortedLeft.every((id, index) => id === sortedRight[index]);
 }
 
+function releasePoint(
+  event: MouseEvent | TouchEvent,
+): { x: number; y: number } | null {
+  if ("changedTouches" in event) {
+    const touch = event.changedTouches[0];
+    if (!touch) return null;
+    return { x: touch.clientX, y: touch.clientY };
+  }
+  return { x: event.clientX, y: event.clientY };
+}
+
+/** 连线预览画在卡片上面。从最上层往下找，落到哪张卡片上。 */
+function nodeIdAtPoint(x: number, y: number): string | null {
+  for (const element of document.elementsFromPoint(x, y)) {
+    const id = element.closest(".react-flow__node")?.getAttribute("data-id");
+    if (id) return id;
+  }
+  return null;
+}
+
 function parseCamera(value: unknown): Viewport | null {
   if (!value || typeof value !== "object") return null;
   const camera = value as Partial<Viewport>;
@@ -1078,6 +1098,20 @@ function FlowSurface({
             }}
             onConnect={(connection) => {
               void openLinkDialog(connection);
+            }}
+            onConnectEnd={(event, state) => {
+              /* 默认只在离把手 20px 内才算连上。拖到卡片上时这里补一次。 */
+              if (!state.fromNode || state.toNode) return;
+              const point = releasePoint(event);
+              if (!point) return;
+              const targetId = nodeIdAtPoint(point.x, point.y);
+              if (!targetId || targetId === state.fromNode.id) return;
+              void openLinkDialog({
+                source: state.fromNode.id,
+                target: targetId,
+                sourceHandle: state.fromHandle?.id ?? null,
+                targetHandle: null,
+              });
             }}
             onNodesDelete={(deleted) => {
               if (!deleted.length) return;
