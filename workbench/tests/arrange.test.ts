@@ -10,6 +10,7 @@ import {
   alignSelection,
   boardOrigin,
   componentMenu,
+  detachChildren,
   distribute,
   frameCommandCount,
   framePlan,
@@ -370,6 +371,105 @@ test("成框跳过锁定展示，层级按整组计算", () => {
     ),
     [{ id: "a", z: 1 }],
   );
+  assert.deepEqual(
+    restack(
+      [
+        { id: "a", z: 0 },
+        { id: "b", z: 0 },
+        { id: "c", z: 0 },
+      ],
+      ["a"],
+      "forward",
+    ),
+    [
+      { id: "a", z: 1 },
+      { id: "c", z: 2 },
+    ],
+  );
+  assert.deepEqual(
+    restack(
+      [
+        { id: "a", z: 0 },
+        { id: "b", z: 0 },
+        { id: "c", z: 0 },
+      ],
+      ["c"],
+      "backward",
+    ),
+    [
+      { id: "b", z: 2 },
+      { id: "c", z: 1 },
+    ],
+  );
+  const tied = [
+    { id: "a", z: 0 },
+    { id: "b", z: 0 },
+    { id: "c", z: 0 },
+  ];
+  const raised = restack(tied, ["a"], "forward");
+  const zOf = new Map(tied.map((item) => [item.id, item.z]));
+  for (const item of raised) zOf.set(item.id, item.z);
+  const order = [...zOf.entries()].sort(
+    (left, right) => left[1] - right[1] || (left[0] < right[0] ? -1 : 1),
+  );
+  assert.deepEqual(
+    order.map(([id]) => id),
+    ["b", "a", "c"],
+  );
+});
+
+test("删掉框时，还留着的孩子先回到不会删的祖先", () => {
+  const items: ArrangeItem[] = [
+    {
+      id: "outer",
+      parentId: null,
+      x: 100,
+      y: 40,
+      width: 200,
+      height: 200,
+      z: 0,
+    },
+    {
+      id: "inner",
+      parentId: "outer",
+      x: 30,
+      y: 8,
+      width: 40,
+      height: 40,
+      z: 0,
+    },
+    {
+      id: "child",
+      parentId: "inner",
+      x: 4,
+      y: 5,
+      width: 10,
+      height: 10,
+      z: 0,
+      locked: true,
+    },
+  ];
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const screen = boardOrigin("child", byId);
+  const moved = detachChildren(items, ["inner"]);
+  assert.equal(moved.length, 1);
+  const child = moved[0];
+  assert.ok(child);
+  assert.equal(child.parentId, "outer");
+  assert.equal(child.locked, true);
+  assert.equal(boardOrigin("outer", byId).x + child.x, screen.x);
+  assert.equal(boardOrigin("outer", byId).y + child.y, screen.y);
+  const both = detachChildren(items, ["outer", "inner"]);
+  assert.deepEqual(both, [
+    {
+      id: "child",
+      parentId: null,
+      x: screen.x,
+      y: screen.y,
+      locked: true,
+    },
+  ]);
+  assert.deepEqual(detachChildren(items, ["inner", "child"]), []);
 });
 
 test("超过 200 条命令不算可提交", () => {
@@ -585,5 +685,35 @@ test("成框写成相对坐标，解除框能把锁定子项解锁后再锁回�
   assert.deepEqual(
     toCommands({ kind: "deleteObject", objectId: "note" }, ctx),
     [{ op: "object.delete", id: "note" }],
+  );
+  assert.deepEqual(
+    toCommands({ kind: "remove", instanceIds: ["frame"] }, ctx),
+    [
+      { op: "presentation.update", id: "held", locked: false },
+      {
+        op: "presentation.update",
+        id: "held",
+        parentId: null,
+        x: 4,
+        y: 6,
+      },
+      { op: "presentation.update", id: "held", locked: true },
+      { op: "presentation.delete", id: "frame" },
+    ],
+  );
+  assert.deepEqual(
+    toCommands({ kind: "deleteObject", objectId: "frame-object" }, ctx),
+    [
+      { op: "presentation.update", id: "held", locked: false },
+      {
+        op: "presentation.update",
+        id: "held",
+        parentId: null,
+        x: 4,
+        y: 6,
+      },
+      { op: "presentation.update", id: "held", locked: true },
+      { op: "object.delete", id: "frame-object" },
+    ],
   );
 });

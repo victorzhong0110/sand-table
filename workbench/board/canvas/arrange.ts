@@ -257,31 +257,90 @@ export function restack(
   const walk =
     action === "forward"
       ? next
-          .map((item, index) => ({ item, index }))
-          .filter((entry) => selected.has(entry.item.id))
+          .map((item, index) => ({ id: item.id, index }))
+          .filter((entry) => selected.has(entry.id))
           .reverse()
       : next
-          .map((item, index) => ({ item, index }))
-          .filter((entry) => selected.has(entry.item.id));
+          .map((item, index) => ({ id: item.id, index }))
+          .filter((entry) => selected.has(entry.id));
   for (const entry of walk) {
     const neighbor = action === "forward" ? entry.index + 1 : entry.index - 1;
     if (neighbor < 0 || neighbor >= next.length) continue;
     const other = next[neighbor];
     const current = next[entry.index];
     if (!other || !current || selected.has(other.id)) continue;
-    if (action === "forward") {
-      const z = other.z === current.z ? other.z + 1 : other.z;
-      next[entry.index] = { ...current, z };
+    if (other.z !== current.z) {
+      next[entry.index] = { ...current, z: other.z };
       next[neighbor] = { ...other, z: current.z };
-    } else {
-      const z = other.z === current.z ? other.z - 1 : other.z;
-      next[entry.index] = { ...current, z };
-      next[neighbor] = { ...other, z: current.z };
+      continue;
+    }
+    /* 新建展示的 z 都是 0。只给选中项 +1 会越过这一整层，
+       所以同一层按现在的顺序改成相邻的 z，只和紧挨着的那一个交换。 */
+    let start = Math.min(entry.index, neighbor);
+    let end = Math.max(entry.index, neighbor);
+    while (start > 0 && next[start - 1]?.z === current.z) start -= 1;
+    while (end + 1 < next.length && next[end + 1]?.z === current.z) end += 1;
+    const sequence = next.slice(start, end + 1);
+    const from = entry.index - start;
+    const to = neighbor - start;
+    const moved = sequence[from];
+    const beside = sequence[to];
+    if (!moved || !beside) continue;
+    sequence[from] = beside;
+    sequence[to] = moved;
+    for (let offset = 0; offset < sequence.length; offset += 1) {
+      const item = sequence[offset];
+      if (!item) continue;
+      const index = next.findIndex((candidate) => candidate.id === item.id);
+      const sitting = index < 0 ? undefined : next[index];
+      if (!sitting) continue;
+      next[index] = { ...sitting, z: current.z + offset };
     }
   }
   return next
     .filter((item, index) => item.z !== ordered[index]?.z)
     .map((item) => ({ id: item.id, z: item.z }));
+}
+
+/**
+ * 删掉的展示如果还装着孩子，孩子先回到这次不会删的最近祖先。
+ * 坐标按删之前的白板位置换算，屏幕位置不变。一起删掉的孩子不用移。
+ */
+export function detachChildren(
+  items: readonly ArrangeItem[],
+  removingIds: readonly string[],
+): {
+  id: string;
+  parentId: string | null;
+  x: number;
+  y: number;
+  locked: boolean;
+}[] {
+  const removing = new Set(removingIds);
+  const byId = indexById(items);
+  const parentOf = (id: string) => byId.get(id)?.parentId ?? null;
+  return items.flatMap((item) => {
+    if (removing.has(item.id) || !item.parentId || !removing.has(item.parentId))
+      return [];
+    const seen = new Set<string>();
+    let parent: string | null = item.parentId;
+    while (parent && removing.has(parent) && !seen.has(parent)) {
+      seen.add(parent);
+      parent = parentOf(parent);
+    }
+    if (parent && seen.has(parent)) parent = null;
+    const board = boardOrigin(item.id, byId);
+    const parentBoard = parent ? boardOrigin(parent, byId) : { x: 0, y: 0 };
+    return [
+      {
+        id: item.id,
+        parentId: parent,
+        x: board.x - parentBoard.x,
+        y: board.y - parentBoard.y,
+        locked: Boolean(item.locked),
+      },
+    ];
+  });
 }
 
 export function framePlan(

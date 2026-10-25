@@ -25,6 +25,7 @@ import type {
   V3PresentationRow,
   V3RelationRow,
 } from "./store.ts";
+import { detachChildren, type ArrangeItem } from "../canvas/arrange.ts";
 
 /** v3 类型 → 现有组件类型。 */
 const V2_TYPE_BY_V3: Record<string, string> = {
@@ -594,6 +595,53 @@ export type WriteContext = {
   presentations: Map<string, V3PresentationRow>;
 };
 
+function arrangeItemsOf(ctx: WriteContext): ArrangeItem[] {
+  return [...ctx.presentations.values()].flatMap((row) => {
+    if (row.deleted || !row.id) return [];
+    return [
+      {
+        id: row.id,
+        parentId: row.parentId ?? null,
+        x: Number.isFinite(row.x) ? row.x : 0,
+        y: Number.isFinite(row.y) ? row.y : 0,
+        width: Number.isFinite(row.width) ? row.width : 0,
+        height: Number.isFinite(row.height) ? row.height : 0,
+        z: Number.isFinite(row.z) ? row.z : 0,
+        locked: Boolean(row.locked),
+      },
+    ];
+  });
+}
+
+/** 锁定时不能直接改坐标。先解锁，改父框和位置，再锁回去。 */
+function pushReparent(
+  commands: V3Command[],
+  ctx: WriteContext,
+  child: { id: string; parentId: string | null; x: number; y: number },
+) {
+  const presentation = ctx.presentations.get(child.id);
+  if (!presentation) return;
+  if (presentation.locked)
+    commands.push({
+      op: "presentation.update",
+      id: presentation.id,
+      locked: false,
+    });
+  commands.push({
+    op: "presentation.update",
+    id: presentation.id,
+    parentId: child.parentId,
+    x: child.x,
+    y: child.y,
+  });
+  if (presentation.locked)
+    commands.push({
+      op: "presentation.update",
+      id: presentation.id,
+      locked: true,
+    });
+}
+
 /** 白板预设：新建一块白板时里面先放什么。 */
 const BOARD_PRESETS: Record<string, [string, string][]> = {
   bug: [
@@ -857,11 +905,13 @@ export function toCommands(op: any, ctx: WriteContext): V3Command[] {
         : op.instanceId !== undefined
           ? [String(op.instanceId)]
           : [];
-      for (const id of ids) {
-        const presentation = ctx.presentations.get(id);
-        if (!presentation) continue;
-        commands.push({ op: "presentation.delete", id: presentation.id });
-      }
+      const removing = ids.filter((id: string) => ctx.presentations.has(id));
+      const next: V3Command[] = [];
+      for (const child of detachChildren(arrangeItemsOf(ctx), removing))
+        pushReparent(next, ctx, child);
+      for (const id of removing) next.push({ op: "presentation.delete", id });
+      if (next.length > 200) throw Error(ARRANGE_LIMIT_MESSAGE);
+      commands.push(...next);
       break;
     }
     case "link": {
@@ -1205,7 +1255,15 @@ export function toCommands(op: any, ctx: WriteContext): V3Command[] {
       if (!objectId) throw Error("没有要删除的对象。请重新选择后再试。");
       if (!ctx.objects.get(objectId))
         throw Error("这个对象已经不在了。请刷新后再试。");
-      commands.push({ op: "object.delete", id: objectId });
+      const removing = [...ctx.presentations.values()]
+        .filter((row) => !row.deleted && row.objectId === objectId)
+        .map((row) => row.id);
+      const next: V3Command[] = [];
+      for (const child of detachChildren(arrangeItemsOf(ctx), removing))
+        pushReparent(next, ctx, child);
+      next.push({ op: "object.delete", id: objectId });
+      if (next.length > 200) throw Error(ARRANGE_LIMIT_MESSAGE);
+      commands.push(...next);
       break;
     }
     default:
