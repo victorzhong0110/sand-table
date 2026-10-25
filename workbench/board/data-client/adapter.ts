@@ -308,6 +308,7 @@ function toInstance(
     /* 展示挂在哪块白板上，就用哪块白板的编号当空间编号。 */
     spaceId: row.boardId,
     type,
+    ...(object?.type ? { kernelType: object.type } : {}),
     binding: { kind: "object", objectId: row.objectId },
     objectId: row.objectId,
     ...(row.appearance && Object.keys(row.appearance).length
@@ -317,6 +318,9 @@ function toInstance(
               ? { detail: row.appearance.detail as "full" | "label" | "icon" }
               : {}),
             ...(row.appearance.accent ? { icon: row.appearance.accent } : {}),
+            ...(typeof row.appearance.coverBlob === "string"
+              ? { coverBlob: row.appearance.coverBlob }
+              : {}),
           },
         }
       : {}),
@@ -345,6 +349,7 @@ function toObjectRelation(row: V3RelationRow): ObjectRelation {
     source: row.sourceId,
     target: row.targetId,
     kind: v2LinkOf(row.kind),
+    kernelKind: row.kind,
     status: row.status,
     ...(row.attributes && Object.keys(row.attributes).length
       ? { attributes: row.attributes }
@@ -1277,6 +1282,59 @@ export function toCommands(op: any, ctx: WriteContext): V3Command[] {
       next.push({ op: "object.delete", id: objectId });
       if (next.length > 200) throw Error(ARRANGE_LIMIT_MESSAGE);
       commands.push(...next);
+      break;
+    }
+    case "fields": {
+      const presentation = ctx.presentations.get(String(op.instanceId));
+      if (!presentation)
+        throw Error("这个组件已经不在白板上了。请刷新后再试。");
+      const object = ctx.objects.get(presentation.objectId);
+      if (!object) throw Error("没有找到这个对象。请刷新后再试。");
+      const set =
+        op.set && typeof op.set === "object"
+          ? (op.set as Record<string, unknown>)
+          : undefined;
+      const unset = Array.isArray(op.unset)
+        ? op.unset.filter(
+            (item: unknown): item is string => typeof item === "string",
+          )
+        : [];
+      const title = op.title !== undefined ? String(op.title) : undefined;
+      if (title === undefined && !set && !unset.length) break;
+      commands.push({
+        op: "object.update",
+        id: object.id,
+        ...(op.expectedVersion !== undefined
+          ? { expectedVersion: Number(op.expectedVersion) }
+          : {}),
+        ...(title !== undefined ? { title } : {}),
+        ...(set && Object.keys(set).length ? { set } : {}),
+        ...(unset.length ? { unset } : {}),
+      });
+      break;
+    }
+    case "slot": {
+      const removeIds = Array.isArray(op.removeIds)
+        ? op.removeIds.filter(
+            (item: unknown): item is string => typeof item === "string",
+          )
+        : [];
+      for (const id of removeIds) commands.push({ op: "relation.delete", id });
+      const create = op.create as
+        { kind?: unknown; sourceId?: unknown; targetId?: unknown } | undefined;
+      if (
+        create &&
+        typeof create.kind === "string" &&
+        typeof create.sourceId === "string" &&
+        typeof create.targetId === "string"
+      )
+        commands.push({
+          op: "relation.create",
+          kind: create.kind,
+          sourceId: create.sourceId,
+          targetId: create.targetId,
+          status: "confirmed",
+        });
       break;
     }
     default:

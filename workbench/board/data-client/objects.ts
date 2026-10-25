@@ -53,6 +53,8 @@ export type ObjectRelation = {
   target: string;
   /** 关系类型，例如 参与 / 导致 / 先于 / 支持 / 反驳 / 调用。 */
   kind: string;
+  /** 内核关系名。kind 可能是旧界面的短名字。 */
+  kernelKind?: string;
   /** 推测性关系不得伪装成已确认事实。 */
   status: "confirmed" | "inferred";
   attributes?: Record<string, unknown>;
@@ -109,7 +111,13 @@ export type Presentation = {
    * binding 存在时，binding.objectId 必须与本字段一致。
    */
   objectId?: string;
-  appearance?: { icon?: string; detail?: "full" | "label" | "icon" };
+  /** 内核类型名，例如 base.note、novel.character。 */
+  kernelType?: string;
+  appearance?: {
+    icon?: string;
+    detail?: "full" | "label" | "icon";
+    coverBlob?: string;
+  };
   /** 未绑定对象时的本地标题。 */
   title: string;
   /** 未绑定对象时的本地内容 / 视图配置。 */

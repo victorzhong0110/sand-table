@@ -13,10 +13,13 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { ComponentRenderer } from "../ComponentRenderer.tsx";
 import { Icon } from "../Icon.tsx";
+import { v3DataOf, v3TypeOf } from "../data-client/adapter.ts";
 import { peekContent } from "../data-client/content.ts";
 import type { Board } from "../data-client/model.ts";
+import { useTypeCatalog } from "../views/catalog.tsx";
+import { GenericCard } from "../views/GenericCard.tsx";
+import { UnknownType } from "../views/UnknownType.tsx";
 import {
   componentTypes,
   material,
@@ -219,6 +222,7 @@ function quietControls(root: HTMLElement) {
 
 export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
   const api = useCanvasApi();
+  const catalog = useTypeCatalog();
   const article = useRef<HTMLElement>(null);
   const instance = api.board.instances.find((item) => item.id === id);
   useLayoutEffect(() => {
@@ -238,6 +242,10 @@ export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
     el.setSelectionRange(start, finish);
   }, [api, id]);
   if (!instance) return null;
+  const kernelType =
+    instance.kernelType || v3TypeOf(instance.type, instance.data);
+  const spec = catalog.specs.get(kernelType);
+  const kernelData = v3DataOf(kernelType, instance.data);
   const resolved = peekContent(instance, api.board.contentObjects);
   const detail = instance.appearance?.detail;
   const expanded = !detail || detail === "full";
@@ -288,6 +296,10 @@ export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
   const onRoute = Boolean(
     instance.objectId && api.routeIds.has(instance.objectId),
   );
+  const packTitle =
+    catalog.packs.find(
+      (pack) => pack.id === kernelType.slice(0, kernelType.indexOf(".")),
+    )?.title || "";
   return (
     <article
       ref={article}
@@ -301,7 +313,11 @@ export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
         const target = event.target as HTMLElement;
         if (target.closest("button, a, input, textarea, select")) return;
         event.stopPropagation();
-        if (instance.type === "board" || instance.type === "space-link") {
+        if (
+          instance.type === "board" ||
+          instance.type === "space-link" ||
+          spec?.capabilities?.container
+        ) {
           api.navigate(
             String(instance.data.spaceId ?? instance.objectId ?? ""),
             instance.id,
@@ -412,17 +428,53 @@ export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
           <Icon name="board" size={14} />
         </button>
       </div>
+      {!expanded && catalog.ready && !spec && (
+        <UnknownType
+          title={resolved.title}
+          typeName={kernelType}
+          packTitle={packTitle}
+          data={kernelData}
+          readOnly
+        />
+      )}
       {expanded && (
-        <ComponentRenderer
-          instance={instance}
-          board={api.board}
-          call={api.call}
-          onNavigate={(spaceId, presentationId) =>
-            api.navigate(spaceId, presentationId)
-          }
-          onOpenLink={api.onOpenLink}
+        <GenericCard
+          title={resolved.title}
+          kernelType={kernelType}
+          data={kernelData}
+          spec={spec}
+          detail="full"
+          packTitle={packTitle}
+          catalogReady={catalog.ready}
+          relationLabels={(spec?.relationSlots ?? []).map((slot) => ({
+            key: slot.key,
+            label: slot.label,
+            titles: api.board.objectRelations.flatMap((relation) => {
+              if ((relation.kernelKind || relation.kind) !== slot.kind)
+                return [];
+              const mine =
+                slot.direction === "out" ? relation.source : relation.target;
+              const other =
+                slot.direction === "out" ? relation.target : relation.source;
+              if (mine !== instance.objectId) return [];
+              const object = api.board.contentObjects.find(
+                (item) => item.id === other,
+              );
+              return [object?.title || "未命名"];
+            }),
+          }))}
+          coverBlob={instance.appearance?.coverBlob}
           editor={editor ?? undefined}
           editingField={editingHere?.field}
+          onEnter={
+            spec?.capabilities?.container
+              ? () =>
+                  api.navigate(
+                    String(instance.data.spaceId ?? instance.objectId ?? ""),
+                    instance.id,
+                  )
+              : undefined
+          }
         />
       )}
       {selected && !instance.rect.pinned && expanded && (

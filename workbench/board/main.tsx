@@ -9,7 +9,8 @@ import type { Board, Item, GuideFocus } from "./data-client/model.ts";
 import "./style.css";
 import { FlowCanvas } from "./canvas/FlowCanvas.tsx";
 import { ChangePanel } from "./ChangePanel.tsx";
-import { ComponentPanel, ThemePanel } from "./ComponentPanel.tsx";
+import { ThemePanel } from "./ThemePanel.tsx";
+import { Inspector } from "./views/Inspector.tsx";
 import { safeUrl } from "./data-client/spaces.ts";
 import { resultData } from "./data-client/results.ts";
 import { GuidePanel } from "./GuidePanel.tsx";
@@ -658,7 +659,24 @@ function Workbench() {
     const next = operations.current
       .then(() => operateV3(operation))
       .catch((e) => {
-        setError(e instanceof Error ? e.message : String(e));
+        const text = e instanceof Error ? e.message : String(e);
+        if (operation.reportError) {
+          let code = "";
+          let message = text;
+          try {
+            const parsed = JSON.parse(text) as {
+              code?: unknown;
+              message?: unknown;
+            };
+            if (typeof parsed.code === "string") code = parsed.code;
+            if (typeof parsed.message === "string") message = parsed.message;
+          } catch {
+            /* 不是工具 JSON。 */
+          }
+          if (code !== "VERSION_CONFLICT") setError(message);
+          return { error: { code, message } };
+        }
+        setError(text);
         return undefined;
       });
     operations.current = next.catch(() => undefined);
@@ -767,6 +785,8 @@ function Workbench() {
     try {
       written = await send(commands);
     } catch (e) {
+      /* 表单自己展示冲突并保留草稿，不能在这里拿新版本把别人的修改盖掉。 */
+      if (operation.reportError) throw e;
       /* 版本对不上：先同步一次（拿最新的内容），再看是不是界面自己
          连着写了两次（先标题、后正文）。改的不是同一处就拿着新版本
          再写一次；别人改了同一处就照实报冲突。 */
@@ -810,6 +830,11 @@ function Workbench() {
     /* 自己写完立刻拉一次增量：界面不用等下一个整秒。 */
     await store.sync();
     refreshV3Board();
+    if (operation.reportError)
+      return {
+        warnings: Array.isArray(written?.warnings) ? written.warnings : [],
+        changed: Array.isArray(written?.changed) ? written.changed : [],
+      };
     return true;
   }
   /* Board history: the newest record can always be flipped, and the flip is
@@ -1396,13 +1421,11 @@ function Workbench() {
               action={action}
             />
           ) : tab === "components" ? (
-            <ComponentPanel
+            <Inspector
               board={board}
               viewId={viewId}
-              busy={busy}
+              call={call}
               operate={operate}
-              action={action}
-              selectNew={clearFilters}
             />
           ) : tab === "theme" ? (
             <ThemePanel
