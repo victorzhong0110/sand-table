@@ -1538,11 +1538,31 @@ try {
     const historyBeforePaste = await readHistory();
     /* 属性面板会把焦点放进输入框，画布快捷键就被吃掉。先回到卡片再按。 */
     const copyAndPaste = async () => {
+      const field = frame.getByRole("textbox", { name: "编辑组件名称" });
+      if (await field.count()) await field.evaluate((node) => node.blur());
       await cardA.focus();
+      for (let i = 0; i < 10; i += 1) {
+        const focused = await cardA.evaluate(
+          (el) => el.ownerDocument.activeElement === el,
+        );
+        if (focused) break;
+        await cardA.focus();
+        await page.waitForTimeout(40);
+      }
       await page.keyboard.press("Control+c");
       await page.keyboard.press("Control+v");
     };
     await copyAndPaste();
+    let pastedCount = 0;
+    for (let i = 0; i < 20; i += 1) {
+      const board = await read();
+      pastedCount = board.instances.filter(
+        (item: any) => !pasteIds.has(item.id),
+      ).length;
+      if (pastedCount >= 2) break;
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
+    if (pastedCount === 0) await copyAndPaste();
     const pasted = await until(
       (board) =>
         board.instances.filter((item: any) => !pasteIds.has(item.id)).length >=
@@ -1920,11 +1940,14 @@ try {
     ) => Math.abs(left.x - right.x) < 2 && Math.abs(left.y - right.y) < 2;
     const stableScreen = async (ids: string[]) => {
       let previous = await screenBoxes(ids);
-      for (let i = 0; i < 8; i += 1) {
-        await page.waitForTimeout(150);
+      let stable = 0;
+      for (let i = 0; i < 20; i += 1) {
+        await page.waitForTimeout(200);
         const next = await screenBoxes(ids);
-        if (ids.every((id) => sameScreen(previous[id]!, next[id]!)))
-          return next;
+        if (ids.every((id) => sameScreen(previous[id]!, next[id]!))) {
+          stable += 1;
+          if (stable >= 3) return next;
+        } else stable = 0;
         previous = next;
       }
       return previous;
@@ -2157,10 +2180,15 @@ try {
     await deleteDialog
       .getByRole("button", { name: "彻底删除", exact: true })
       .click();
-    const deleted = await call("sand_read", {
-      ids: [arrangeA],
-      include: ["presentations"],
-    });
+    let deleted: { missing?: string[] } = {};
+    for (let i = 0; i < 40; i += 1) {
+      deleted = await call("sand_read", {
+        ids: [arrangeA],
+        include: ["presentations"],
+      });
+      if ((deleted.missing ?? []).includes(arrangeA)) break;
+      await page.waitForTimeout(100);
+    }
     assert.ok(
       (deleted.missing ?? []).includes(arrangeA),
       "Deleting the object removes it.",
@@ -2226,6 +2254,210 @@ try {
       await page.waitForTimeout(50);
     }
     assert.equal(returned, true, "Closing the menu returns focus to the card.");
+    /* T33：进入子白板再返回，视角和选区还在；来源没了不把镜头拉到中心。 */
+    const liveView = async () =>
+      call("app_view", { action: "get", viewId: "local-human" });
+    const viewBoardId = async () => (await liveView()).board.id as string;
+    const viewCamera = async () =>
+      (await liveView()).camera as {
+        x: number;
+        y: number;
+        zoom: number;
+      };
+    const viewSelection = async () =>
+      ((await liveView()).selection ?? []).map(
+        (item: { presentationId?: string }) => item.presentationId,
+      );
+    const navCanvas = frame.locator(".flow-canvas");
+    const enterCard = async (id: string) => {
+      const button = frame
+        .locator(`[data-instance-id="${id}"]`)
+        .getByRole("button", { name: "进入白板" });
+      await button.evaluate((node) => {
+        const control = node as HTMLButtonElement;
+        if (control.disabled) throw new Error("进入白板按钮还不能用");
+        control.click();
+      });
+    };
+    const waitUntilBoard = async (id: string) => {
+      let seen = "";
+      for (let i = 0; i < 50; i += 1) {
+        seen = await viewBoardId();
+        if (seen === id) return;
+        await page.waitForTimeout(100);
+      }
+      assert.equal(seen, id);
+    };
+    const waitNavIdle = async () => {
+      for (let i = 0; i < 30; i += 1) {
+        if ((await navCanvas.getAttribute("data-nav-playing")) !== "1") break;
+        await page.waitForTimeout(50);
+      }
+      let previous = await viewCamera();
+      for (let i = 0; i < 20; i += 1) {
+        await page.waitForTimeout(150);
+        const next = await viewCamera();
+        if (
+          Math.abs(next.x - previous.x) < 1 &&
+          Math.abs(next.y - previous.y) < 1 &&
+          Math.abs(next.zoom - previous.zoom) < 0.01
+        )
+          return next;
+        previous = next;
+      }
+      return previous;
+    };
+    await page.keyboard.press("Escape");
+    const homeBefore = await viewBoardId();
+    const seededNav = await call("app_edit", {
+      intentId: "t33-board",
+      commands: [
+        {
+          op: "object.create",
+          ref: "inner",
+          type: "base.board",
+          title: "往返白板",
+          data: {},
+        },
+        {
+          op: "presentation.create",
+          ref: "near",
+          boardId: homeBefore,
+          objectId: "@inner",
+          x: 80,
+          y: 80,
+          width: 220,
+          height: 140,
+        },
+        {
+          op: "presentation.create",
+          ref: "far",
+          boardId: homeBefore,
+          objectId: "@inner",
+          x: 1800,
+          y: 80,
+          width: 220,
+          height: 140,
+        },
+      ],
+    });
+    const innerId = seededNav.created.inner as string;
+    const nearId = seededNav.created.near as string;
+    const farCopyId = seededNav.created.far as string;
+    await frame.locator(`[data-instance-id="${nearId}"]`).waitFor();
+    await frame.locator(`[data-instance-id="${nearId}"]`).focus();
+    await page.keyboard.press("Space");
+    const cameraBefore = await waitNavIdle();
+    const selectionBefore = await viewSelection();
+    await enterCard(nearId);
+    await waitUntilBoard(innerId);
+    await frame
+      .locator(".breadcrumbs")
+      .getByRole("button", { name: "返回", exact: true })
+      .click();
+    await waitUntilBoard(homeBefore);
+    await frame.locator(`[data-instance-id="${nearId}"]`).waitFor();
+    const cameraBack = await waitNavIdle();
+    assert.ok(Math.abs(cameraBack.x - cameraBefore.x) < 2);
+    assert.ok(Math.abs(cameraBack.y - cameraBefore.y) < 2);
+    assert.ok(Math.abs(cameraBack.zoom - cameraBefore.zoom) < 0.05);
+    const selectionBack = await viewSelection();
+    assert.ok(selectionBack.includes(nearId));
+    for (const id of selectionBefore)
+      if (id && id !== nearId) assert.ok(selectionBack.includes(id));
+    await frame.locator(`[data-instance-id="${farCopyId}"]`).focus();
+    await page.keyboard.press("Space");
+    for (let i = 0; i < 40; i += 1) {
+      const shot = await viewCamera();
+      const box = await navCanvas.boundingBox();
+      const center = ((box?.width ?? 800) / 2 - shot.x) / (shot.zoom || 1);
+      const boardNow = await read();
+      const midOf = (id: string) => {
+        const rect = boardNow.instances.find(
+          (item: any) => item.id === id,
+        ).rect;
+        return rect.x + rect.width / 2;
+      };
+      const firstMid = midOf(nearId);
+      const secondMid = midOf(farCopyId);
+      if (Math.abs(center - secondMid) < Math.abs(center - firstMid)) break;
+      await page.waitForTimeout(100);
+    }
+    await waitNavIdle();
+    await enterCard(farCopyId);
+    await waitUntilBoard(innerId);
+    await frame
+      .locator(".breadcrumbs")
+      .getByRole("button", { name: "返回", exact: true })
+      .click();
+    await waitUntilBoard(homeBefore);
+    await frame.locator(`[data-instance-id="${farCopyId}"]`).waitFor();
+    const near = await waitNavIdle();
+    const placed = await read();
+    const firstRect = placed.instances.find(
+      (item: any) => item.id === nearId,
+    ).rect;
+    const secondRect = placed.instances.find(
+      (item: any) => item.id === farCopyId,
+    ).rect;
+    const navBox = await navCanvas.boundingBox();
+    const flowCenter = ((navBox?.width ?? 800) / 2 - near.x) / (near.zoom || 1);
+    const mid = (rect: { x: number; width: number }) => rect.x + rect.width / 2;
+    assert.ok(
+      Math.abs(flowCenter - mid(secondRect)) <
+        Math.abs(flowCenter - mid(firstRect)),
+      "Returning from the second copy stays near that copy.",
+    );
+    const beforeMissing = near;
+    await enterCard(nearId);
+    await waitUntilBoard(innerId);
+    await call("app_edit", {
+      intentId: "t33-remove-source",
+      commands: [{ op: "presentation.delete", id: nearId }],
+    });
+    await frame
+      .locator(".breadcrumbs")
+      .getByRole("button", { name: "返回", exact: true })
+      .click();
+    await waitUntilBoard(homeBefore);
+    await until(
+      (board) => !board.instances.some((item: any) => item.id === nearId),
+    );
+    const afterMissing = await viewCamera();
+    assert.equal(await navCanvas.getAttribute("data-nav-duration"), "0");
+    assert.ok(Math.abs(afterMissing.x - beforeMissing.x) < 2);
+    assert.ok(Math.abs(afterMissing.y - beforeMissing.y) < 2);
+    assert.ok(Math.abs(afterMissing.zoom - beforeMissing.zoom) < 0.05);
+    assert.equal((await viewSelection()).includes(nearId), false);
+    await waitNavIdle();
+    await enterCard(farCopyId);
+    let sawMotion = false;
+    for (let i = 0; i < 40; i += 1) {
+      if ((await navCanvas.getAttribute("data-nav-playing")) === "1") {
+        sawMotion = true;
+        break;
+      }
+      await page.waitForTimeout(20);
+    }
+    await page.keyboard.press("Escape");
+    for (let i = 0; i < 40; i += 1) {
+      if ((await navCanvas.getAttribute("data-nav-playing")) !== "1") break;
+      await page.waitForTimeout(20);
+    }
+    assert.equal(await navCanvas.getAttribute("data-nav-playing"), "0");
+    assert.equal(sawMotion, true, "Enter animation can be interrupted.");
+    assert.equal(await viewBoardId(), homeBefore);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await enterCard(farCopyId);
+    assert.equal(await navCanvas.getAttribute("data-nav-duration"), "0");
+    await waitUntilBoard(innerId);
+    await frame
+      .locator(".breadcrumbs")
+      .getByRole("button", { name: "返回", exact: true })
+      .click();
+    assert.equal(await navCanvas.getAttribute("data-nav-duration"), "0");
+    await waitUntilBoard(homeBefore);
+    await page.emulateMedia({ reducedMotion: "no-preference" });
     /* 导出再导入：文件能下来，导入后能切到新工作空间并看到原来的组件。 */
     await page.setViewportSize({ width: 1440, height: 1000 });
     await frame.getByRole("button", { name: "设置", exact: true }).click();

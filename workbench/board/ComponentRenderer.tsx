@@ -21,7 +21,7 @@ export function ComponentRenderer({
   instance: ComponentInstance;
   board: Board;
   call: (name: string, args?: Record<string, unknown>) => Promise<any>;
-  onNavigate: (spaceId: string) => void;
+  onNavigate: (spaceId: string, presentationId?: string) => void;
   onOpenLink: (url: string) => void;
   /** 就地编辑时，这块就是原来的那行字，不再另盖一个输入框。 */
   editor?: ReactNode;
@@ -91,7 +91,7 @@ export function ComponentRenderer({
           disabled={!space}
           onClick={(e) => {
             e.stopPropagation();
-            onNavigate(String(d.spaceId));
+            onNavigate(String(d.spaceId), c.id);
           }}
         >
           进入白板

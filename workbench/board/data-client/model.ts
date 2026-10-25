@@ -148,6 +148,8 @@ export type Board = Projection & {
   guides: Guide[];
   spaces: Space[];
   instances: ComponentInstance[];
+  /** 缓存里每张展示所在的白板。当前画布只渲染这一块板上的展示。 */
+  presentationBoards?: Record<string, string>;
   views: Record<string, View>;
   focusedViewId?: string;
   spaceLinks: SpaceLink[];

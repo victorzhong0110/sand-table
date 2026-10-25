@@ -104,7 +104,7 @@ function Workbench() {
     updatedAt: 0,
   });
   /* 进过的白板：从首页一路进到现在的这一条路。 */
-  const navStackRef = useRef<string[]>([]);
+  const navStackRef = useRef<unknown[]>([]);
   const [board, setBoard] = useState<Board>(),
     [error, setError] = useState(""),
     [saveError, setSaveError] = useState(""),
@@ -249,7 +249,7 @@ function Workbench() {
     if (!store) throw Error("白板还没装载，请稍候再试。");
     return toBoard(store.cache, {
       boardId: store.cache.boardId,
-      view: v3View(),
+      view: { ...v3View(), navStack: navStackRef.current },
       activities: activitiesRef.current,
       spaceActivities: spaceActivitiesRef.current,
       ...(store.workspaceId ? { workspaceId: store.workspaceId } : {}),
@@ -699,19 +699,50 @@ function Workbench() {
     if (kind === "navigate") {
       const spaceId = String(operation.spaceId);
       const from = storeRef.current?.cache.boardId;
+      let stack = Array.isArray(operation.navStack)
+        ? operation.navStack
+        : navStackRef.current;
+      if (!Array.isArray(operation.navStack) && from && from !== spaceId)
+        stack = [
+          ...stack,
+          {
+            boardId: from,
+            camera: viewRef.current.camera,
+            selection: [...viewRef.current.selection],
+            enteredFrom:
+              typeof operation.enteredFrom === "string"
+                ? operation.enteredFrom
+                : null,
+          },
+        ];
+      navStackRef.current = stack;
+      const selection = Array.isArray(operation.selection)
+        ? operation.selection.filter(
+            (item: unknown): item is string => typeof item === "string",
+          )
+        : [];
+      const rawCamera = operation.camera as
+        { x?: unknown; y?: unknown; zoom?: unknown } | undefined;
+      const camera =
+        rawCamera &&
+        typeof rawCamera.x === "number" &&
+        typeof rawCamera.y === "number" &&
+        typeof rawCamera.zoom === "number"
+          ? { x: rawCamera.x, y: rawCamera.y, zoom: rawCamera.zoom }
+          : { x: 24, y: 24, zoom: 1 };
       viewRef.current = {
         ...viewRef.current,
         spaceId,
-        selection: [],
-        camera: { x: 24, y: 24, zoom: 1 },
+        selection,
+        camera,
       };
-      if (from && from !== spaceId)
-        navStackRef.current = [...navStackRef.current, from];
       await callTool("app_view", {
         action: "navigate",
         viewId,
         boardId: spaceId,
-        navStack: navStackRef.current,
+        navStack: stack,
+        camera,
+        selection,
       });
       await storeRef.current?.load(spaceId);
       refreshV3Board();
@@ -829,11 +860,8 @@ function Workbench() {
         knownView = true;
         const savedId = existing?.board?.id;
         if (typeof savedId === "string" && savedId) opened = savedId;
-        if (Array.isArray(existing?.navStack)) {
-          navStackRef.current = existing.navStack.filter(
-            (item: unknown): item is string => typeof item === "string",
-          );
-        }
+        if (Array.isArray(existing?.navStack))
+          navStackRef.current = existing.navStack;
         const camera = existing?.camera;
         const selection = Array.isArray(existing?.selection)
           ? existing.selection.flatMap((item: unknown) => {

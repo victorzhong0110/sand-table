@@ -55,7 +55,21 @@ import {
   type MenuAction,
   type ZAction,
 } from "./arrange.ts";
+import { Breadcrumbs } from "./Breadcrumbs.tsx";
 import { detectPlatform, resolveShortcut, type ShortcutId } from "./keymap.ts";
+import {
+  breadcrumbIds,
+  contentBounds,
+  fitCamera,
+  frameCamera,
+  motionDuration,
+  normalizeStack,
+  panIntoView,
+  planJump,
+  planReturn,
+  pushFrame,
+  type NavFrame,
+} from "./navigation.ts";
 import { v3TypeOf } from "../data-client/adapter.ts";
 import {
   componentTypes,
@@ -261,6 +275,16 @@ function FlowSurface({
     token: 0,
   });
   const shortcutRef = useRef<(event: KeyboardEvent) => void>(() => {});
+  const pendingMotion = useRef<{
+    from: Viewport;
+    to: Viewport;
+    duration: number;
+  } | null>(null);
+  /** 进入或返回的镜头还没走完时，选区定位不能把它掐掉。 */
+  const navHold = useRef(false);
+  /** 刚按栈恢复的选区。这次不要再把镜头挪去对准它。 */
+  const holdSelection = useRef<string[] | null>(null);
+  const boardCameras = useRef(new Map<string, Viewport>());
   const focusReturn = useRef<HTMLElement | null>(null);
   const arrangeSeq = useRef(0);
   const boardRef = useRef(b);
@@ -324,12 +348,25 @@ function FlowSurface({
     if (save) scheduleCamera(next);
   };
 
+  const markNav = (duration: number, playing: boolean) => {
+    const node = canvas.current;
+    if (!node) return;
+    node.dataset.navDuration = String(duration);
+    node.dataset.navPlaying = playing ? "1" : "0";
+  };
+
+  const reduceMotionNow = () =>
+    Boolean(boardRef.current.theme?.reduceMotion) ||
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
   const stopAnimation = (commit = false) => {
     animationGen.current += 1;
+    navHold.current = false;
     if (commit && animation.current) scheduleCamera(viewportRef.current);
     cancelAnimationFrame(animation.current);
     animation.current = 0;
     ignoreMove.current = false;
+    markNav(0, false);
   };
 
   const stopEdge = (commit = true) => {
@@ -344,41 +381,56 @@ function FlowSurface({
     };
   };
 
-  const animateTo = (next: Camera) => {
+  const animateTo = (
+    next: Camera,
+    options?: {
+      duration?: number;
+      save?: boolean;
+      onDone?: () => void;
+      hold?: boolean;
+    },
+  ) => {
     stopEdge(false);
     stopAnimation();
     const gen = ++animationGen.current;
     /* 整段动画都忽略 React Flow 回传的视口，否则它会把动画掐断。 */
     ignoreMove.current = true;
     const from = viewportRef.current;
-    if (
-      b.theme?.reduceMotion ||
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ) {
-      setView(next, true);
+    const reduce = reduceMotionNow();
+    const distance = Math.hypot(next.x - from.x, next.y - from.y);
+    const duration = reduce
+      ? 0
+      : (options?.duration ?? Math.min(700, Math.max(260, distance * 0.35)));
+    if (options?.onDone || options?.hold) navHold.current = true;
+    markNav(duration, duration > 0);
+    const finish = () => {
+      if (animationGen.current !== gen) return;
+      animation.current = 0;
+      ignoreMove.current = false;
+      navHold.current = false;
+      markNav(duration, false);
+      if (options?.save !== false) scheduleCamera(next);
+      options?.onDone?.();
+    };
+    if (duration === 0) {
+      setView(next, options?.save !== false);
+      finish();
       return;
     }
-    const distance = Math.hypot(next.x - from.x, next.y - from.y);
-    const duration = Math.min(700, Math.max(260, distance * 0.35));
     const start = performance.now();
     const tick = (now: number) => {
       if (animationGen.current !== gen) return;
       const t = Math.min(1, (now - start) / duration);
       const eased = easeCamera(t);
       ignoreMove.current = true;
-      const frame = {
+      setViewport({
         x: from.x + (next.x - from.x) * eased,
         y: from.y + (next.y - from.y) * eased,
         zoom: from.zoom + (next.zoom - from.zoom) * eased,
-      };
-      setViewport(frame);
+      });
       if (animationGen.current !== gen) return;
       if (t < 1) animation.current = requestAnimationFrame(tick);
-      else {
-        animation.current = 0;
-        ignoreMove.current = false;
-        scheduleCamera(next);
-      }
+      else finish();
     };
     animation.current = requestAnimationFrame(tick);
   };
@@ -536,14 +588,13 @@ function FlowSurface({
     setEditing(undefined);
   };
 
-  const navigate = (spaceId: unknown) => {
-    dropBoardWrites();
-    touched.current = false;
-    selectionOverride.current = null;
-    stopAnimation(false);
-    stopEdge(false);
-    clearFilters();
-    return operate({ kind: "navigate", spaceId });
+  const enterRef = useRef<(spaceId: string, presentationId?: string) => void>(
+    () => {},
+  );
+  const backRef = useRef<() => void>(() => {});
+  const jumpRef = useRef<(boardId: string) => void>(() => {});
+  const navigate = (spaceId: unknown, presentationId?: string) => {
+    enterRef.current(String(spaceId ?? ""), presentationId);
   };
 
   const onBoard = view
@@ -686,6 +737,19 @@ function FlowSurface({
       selectionOverride.current = null;
       stopAnimation(false);
       stopEdge(false);
+    }
+    const motion = pendingMotion.current;
+    if (switching && motion) {
+      pendingMotion.current = null;
+      setViewport(motion.from);
+      animateTo(motion.to, {
+        duration: motion.duration,
+        save: true,
+        hold: true,
+      });
+      return () => {
+        cancelled = true;
+      };
     }
     const count = onBoard.length;
     const space = b.spaces.find((item) => item.id === view.spaceId);
@@ -835,7 +899,7 @@ function FlowSurface({
   useEffect(() => {
     stopAnimation();
     stopEdge(false);
-  }, [view?.spaceId, motionPaused, edgePan, edgeSpeed]);
+  }, [motionPaused, edgePan, edgeSpeed]);
 
   const trackEdge = (event: PointerEvent<HTMLElement>) => {
     if (
@@ -991,6 +1055,13 @@ function FlowSurface({
 
   useEffect(() => {
     if (
+      holdSelection.current &&
+      sameIds(holdSelection.current, view?.selection ?? [])
+    )
+      return;
+    holdSelection.current = null;
+    if (
+      navHold.current ||
       !view?.selection.length ||
       !canvas.current ||
       dragging.current.size ||
@@ -1007,17 +1078,16 @@ function FlowSurface({
     const bounds = area();
     const x = rect.x * current.zoom + current.x;
     const y = rect.y * current.zoom + current.y;
-    const width = canvas.current.clientWidth;
-    const height = canvas.current.clientHeight;
     if (
       animation.current ||
       x < bounds.left ||
       x + rect.width * current.zoom > bounds.right ||
       y < bounds.top ||
-      y + rect.height * current.zoom > height - insets.bottom
-    )
-      animateTo(centerCamera(current, { ...rect, pinned: false }, bounds, 0));
-    void width;
+      y + rect.height * current.zoom > bounds.bottom
+    ) {
+      const next = panIntoView(current, rect, bounds);
+      if (next) animateTo(next);
+    }
   }, [
     view?.selection.join("|"),
     view?.spaceId,
@@ -1156,7 +1226,8 @@ function FlowSurface({
 
   const selectedPlaced = (): PlacedItem[] => {
     if (!view) return [];
-    const ids = selectionOverride.current ?? selectionServer.current;
+    const picked = selectionOverride.current;
+    const ids = picked && picked.length ? picked : selectionServer.current;
     return ids.flatMap((id) => {
       const instance = b.instances.find(
         (item) => item.id === id && item.spaceId === view.spaceId,
@@ -1404,6 +1475,31 @@ function FlowSurface({
       case "nudge":
         event.preventDefault();
         nudgeBy(event);
+        return;
+      case "enter-board": {
+        event.preventDefault();
+        if (!view) return;
+        const selected = selectionOverride.current ?? selectionServer.current;
+        const instanceId = selected.at(-1);
+        const instance = b.instances.find(
+          (item) => item.id === instanceId && item.spaceId === view.spaceId,
+        );
+        if (
+          !instance ||
+          (instance.type !== "board" && instance.type !== "space-link")
+        ) {
+          showNotice("请先选中一块白板，再进入。");
+          return;
+        }
+        enterRef.current(
+          String(instance.data.spaceId ?? instance.objectId ?? ""),
+          instance.id,
+        );
+        return;
+      }
+      case "leave-board":
+        event.preventDefault();
+        backRef.current();
         return;
       case "edit": {
         if (!view || editing) return;
@@ -1877,6 +1973,209 @@ function FlowSurface({
     }
   };
 
+  const currentStack = (): NavFrame[] =>
+    normalizeStack(
+      ((view as { navStack?: unknown[] } | undefined)?.navStack ??
+        []) as unknown[],
+    );
+
+  const presentationBoard = (id: string) => {
+    const boards = boardRef.current.presentationBoards;
+    if (boards && Object.prototype.hasOwnProperty.call(boards, id))
+      return boards[id] ?? null;
+    const instance = boardRef.current.instances.find((item) => item.id === id);
+    return instance ? instance.spaceId : null;
+  };
+
+  const aliveBoards = () =>
+    new Set(boardRef.current.spaces.map((item) => item.id));
+
+  const homeBoardId = () => {
+    const home = boardRef.current.spaces.find((item) => !item.parentId);
+    return home?.id ?? boardRef.current.spaces[0]?.id ?? "";
+  };
+
+  const applyPlan = (plan: {
+    boardId: string;
+    camera: { x: number; y: number; zoom: number };
+    selection: string[];
+    stack: NavFrame[];
+    focusId: string | null;
+    shrink: boolean;
+    duration: number;
+  }) => {
+    dropBoardWrites();
+    touched.current = false;
+    selectionOverride.current = null;
+    stopEdge(false);
+    clearFilters();
+    if (view)
+      boardCameras.current.set(view.spaceId, { ...viewportRef.current });
+    const focus = plan.focusId
+      ? boardRef.current.instances.find((item) => item.id === plan.focusId)
+      : undefined;
+    const rect = focus ? placedRect(focus) : null;
+    const camera = plan.camera;
+    const from = plan.shrink && rect ? frameCamera(rect, area()) : camera;
+    const duration =
+      plan.shrink && rect && !reduceMotionNow()
+        ? motionDuration(from, camera, false)
+        : 0;
+    pendingMotion.current = { from, to: camera, duration };
+    holdSelection.current = plan.selection;
+    markNav(duration, duration > 0);
+    void operate({
+      kind: "navigate",
+      spaceId: plan.boardId,
+      navStack: plan.stack,
+      camera,
+      selection: plan.selection,
+    });
+  };
+
+  const enterFromInstance = (instance: Board["instances"][number]) => {
+    if (!view) return;
+    const target = String(instance.data.spaceId ?? instance.objectId ?? "");
+    if (!target || target === view.spaceId) {
+      showNotice("这块白板就是当前白板，不用再进入。");
+      return;
+    }
+    const saved = { ...viewportRef.current };
+    const picked = selectionOverride.current;
+    const selection = [
+      ...(picked && picked.length ? picked : selectionServer.current),
+    ];
+    const rect = placedRect(instance);
+    const usable = area();
+    const framed = frameCamera(rect, usable);
+    const reduce = reduceMotionNow();
+    const duration = motionDuration(saved, framed, reduce);
+    const frame: NavFrame = {
+      boardId: view.spaceId,
+      camera: saved,
+      selection,
+      enteredFrom: instance.id,
+    };
+    const stack = pushFrame(currentStack(), frame);
+    boardCameras.current.set(view.spaceId, saved);
+    const bounds = contentBounds(
+      boardRef.current.instances
+        .filter((item) => item.spaceId === target && !item.parentId)
+        .map((item) => ({
+          x: item.rect.x,
+          y: item.rect.y,
+          width: item.rect.width,
+          height: item.rect.height,
+        })),
+    );
+    const remembered = boardCameras.current.get(target) ?? null;
+    const filled = bounds ? frameCamera(bounds, usable) : null;
+    const landed = bounds ? (remembered ?? fitCamera(bounds, usable)) : null;
+    const opening =
+      filled && landed
+        ? {
+            from: filled,
+            to: landed,
+            duration: motionDuration(filled, landed, reduce),
+          }
+        : remembered
+          ? { from: remembered, to: remembered, duration: 0 }
+          : null;
+    animateTo(framed, {
+      duration,
+      save: false,
+      onDone: () => {
+        dropBoardWrites();
+        touched.current = false;
+        selectionOverride.current = null;
+        stopEdge(false);
+        clearFilters();
+        pendingMotion.current = opening;
+        void operate({
+          kind: "navigate",
+          spaceId: target,
+          navStack: stack,
+          enteredFrom: instance.id,
+          selection: [],
+        });
+      },
+    });
+  };
+
+  enterRef.current = (spaceId, presentationId) => {
+    if (!view) return;
+    const instance =
+      (presentationId
+        ? b.instances.find((item) => item.id === presentationId)
+        : undefined) ??
+      b.instances.find(
+        (item) =>
+          item.spaceId === view.spaceId &&
+          (item.objectId === spaceId || item.data.spaceId === spaceId),
+      );
+    if (
+      instance &&
+      (instance.type === "board" || instance.type === "space-link")
+    ) {
+      enterFromInstance(instance);
+      return;
+    }
+    dropBoardWrites();
+    touched.current = false;
+    selectionOverride.current = null;
+    stopAnimation(false);
+    stopEdge(false);
+    clearFilters();
+    void operate({ kind: "navigate", spaceId });
+  };
+
+  backRef.current = () => {
+    if (!view) return;
+    void call("sand_read_board").then((fresh) => {
+      const board = fresh?.instances ? fresh : boardRef.current;
+      const instances = (board.instances ?? []) as Board["instances"];
+      const spaces = (board.spaces ??
+        boardRef.current.spaces) as Board["spaces"];
+      const boards = board.presentationBoards ?? {};
+      const where = (id: string) =>
+        Object.prototype.hasOwnProperty.call(boards, id)
+          ? (boards[id] ?? null)
+          : (instances.find((item) => item.id === id)?.spaceId ?? null);
+      const alive = new Set(spaces.map((item) => item.id));
+      const home = spaces.find((item) => !item.parentId)?.id ?? homeBoardId();
+      const plan = planReturn({
+        stack: currentStack(),
+        homeId: home,
+        aliveBoards: alive,
+        presentationBoard: where,
+        reduceMotion: reduceMotionNow(),
+      });
+      if (!plan || plan.boardId === view.spaceId) {
+        showNotice("已经在首页白板，没有可以返回的上一层。");
+        return;
+      }
+      applyPlan(plan);
+    });
+  };
+
+  jumpRef.current = (boardId) => {
+    if (!view || boardId === view.spaceId) return;
+    const plan = planJump({
+      stack: currentStack(),
+      currentId: view.spaceId,
+      targetId: boardId,
+      homeId: homeBoardId(),
+      aliveBoards: aliveBoards(),
+      presentationBoard,
+      reduceMotion: reduceMotionNow(),
+    });
+    if (!plan) {
+      void operate({ kind: "navigate", spaceId: boardId });
+      return;
+    }
+    applyPlan(plan);
+  };
+
   if (!view)
     return (
       <section className="canvas">
@@ -1903,26 +2202,25 @@ function FlowSurface({
         })
       : paneMenu();
 
-  const parents = [];
-  let space = b.spaces.find((item) => item.id === view.spaceId);
-  while (space && parents.length < b.spaces.length) {
-    parents.unshift(space);
-    space = b.spaces.find((item) => item.id === space?.parentId);
-  }
+  const stack = currentStack();
+  const crumbs = breadcrumbIds(stack, view.spaceId).map((id) => ({
+    id,
+    title:
+      b.spaces.find((item) => item.id === id)?.title ||
+      b.objects.find((item) => item.id === id)?.title ||
+      "未命名白板",
+  }));
 
   return (
     <CanvasApiProvider value={api}>
       <div className="space-shell">
-        <nav className="breadcrumbs" aria-label="白板路径">
-          {parents.map((item) => (
-            <button key={item.id} onClick={() => void navigate(item.id)}>
-              {item.title}
-            </button>
-          ))}
-          <span>
-            {filtered.length} 个组件 · 本视图选中 {view.selection.length}
-          </span>
-        </nav>
+        <Breadcrumbs
+          items={crumbs}
+          canReturn={stack.length > 0}
+          detail={`${filtered.length} 个组件 · 本视图选中 ${view.selection.length}`}
+          onOpen={(id) => jumpRef.current(id)}
+          onReturn={() => backRef.current()}
+        />
         <section
           ref={canvas}
           className="canvas flow-canvas"
@@ -2048,12 +2346,12 @@ function FlowSurface({
             }}
             onSelectionChange={({ nodes: selectedNodes }) => {
               const ids = selectedNodes.map((node) => node.id);
-              /* 动画每帧都换一次回调，React Flow 会把节点上的旧选区再报一遍。
-                 按下才会停动画，所以动画进行时的回报不是人点的。 */
+              /* 动画每帧都会把当前选区再报一遍，空报不能把还没写走的选择清掉。
+                 人在动画里新选中的卡片仍然要留下，否则方向键和复制会落空。 */
               if (animation.current) {
-                clearTimeout(selectTimer.current);
-                selectTimer.current = 0;
-                return;
+                const known =
+                  selectionOverride.current ?? selectionServer.current;
+                if (ids.length === 0 || sameIds(ids, known)) return;
               }
               /* 镜头动画会让 React Flow 反复报选区。没在空白处点击时，
                  空选区不能写回去，否则定位后的详情面板会被关掉。 */
