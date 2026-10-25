@@ -89,14 +89,25 @@ try {
   const publicHtml = await (await page.request.get(connection.url)).text();
   assert.ok(!publicHtml.includes(connection.token));
   assert.equal(new URL(page.url()).hash, "");
+  assert.equal(await page.locator("body > nav").count(), 0);
+  assert.equal(await page.locator("#new-board").count(), 0);
   const browserId = await page.evaluate(() => (window as any).__sandBoardId);
   assert.ok(browserId);
-  await page.getByRole("button", { name: "连接我的 AI", exact: true }).click();
-  await page
+  await frame()
+    .locator(".app-rail")
+    .getByRole("button", { name: "帮助", exact: true })
+    .click();
+  await frame()
     .getByRole("heading", { name: "和你自己的 AI 共用这张白板" })
     .waitFor();
-  const config = JSON.parse(await page.locator("#json").inputValue())
-    .mcpServers["sand-table"];
+  const jsonField = frame().locator("#json");
+  let jsonText = "";
+  for (let i = 0; i < 50; i++) {
+    jsonText = await jsonField.inputValue();
+    if (jsonText.includes("mcpServers")) break;
+    await page.waitForTimeout(100);
+  }
+  const config = JSON.parse(jsonText).mcpServers["sand-table"];
   assert.ok(config.args.includes(sessionFile));
   assert.ok(!JSON.stringify(config).includes(connection.token));
   client = new Client({
@@ -115,9 +126,22 @@ try {
     uri: "ui://sand-table/overview.html",
   });
   assert.ok("text" in resource.contents[0]);
-  await page.getByText(/MCP 接入进程 1 个/).waitFor({ timeout: 12000 });
-  await page.getByRole("button", { name: "返回白板" }).click();
-  assert.equal(await page.locator("#setup-panel").isVisible(), false);
+  await frame()
+    .getByText(/MCP 接入进程 1 个/)
+    .waitFor({ timeout: 12000 });
+  await frame().locator('[data-connection="on"]').waitFor();
+  await frame().locator('[data-copy="json"]').click();
+  await frame().locator("#setup-status").waitFor();
+  assert.match(
+    await frame().locator("#setup-status").innerText(),
+    /已复制|请按系统复制/,
+  );
+  await frame().getByRole("button", { name: "返回白板" }).click();
+  assert.equal(await frame().locator("#json").count(), 0);
+  await frame()
+    .locator(".app-rail")
+    .getByRole("button", { name: "组件", exact: true })
+    .click();
   await frame()
     .getByRole("button", { name: "便签", exact: true })
     .dragTo(frame().locator(".canvas"), {
@@ -143,9 +167,14 @@ try {
     },
   );
   assert.equal(noToken.status(), 403);
-  await page.getByRole("button", { name: "连接我的 AI", exact: true }).click();
-  assert.ok((await page.locator("#prompt").inputValue()).includes(browserId));
-  assert.equal(await page.locator('[data-copy="prompt"]').count(), 1);
+  await frame()
+    .locator(".app-rail")
+    .getByRole("button", { name: "帮助", exact: true })
+    .click();
+  assert.ok(
+    (await frame().locator("#prompt").inputValue()).includes(browserId),
+  );
+  assert.equal(await frame().locator('[data-copy="prompt"]').count(), 1);
   const appFrame = () => page.frames().find((f) => f !== page.mainFrame())!;
   const agentMessage =
     "用沙盘搭一个比较两个方案的白板：左边证据，右边图表，最后是结论。";
@@ -160,28 +189,27 @@ try {
       "*",
     );
   }, agentMessage);
-  await page.waitForFunction(
-    (text) =>
-      (document.getElementById("prompt") as HTMLTextAreaElement)?.value ===
-      text,
-    agentMessage,
-    { timeout: 10000 },
-  );
-  const promptBefore = await page.locator("#prompt").inputValue();
-  await page.getByRole("button", { name: "复制当前选区提问" }).click();
-  await page.waitForFunction(
-    () =>
-      (document.getElementById("ask-text") as HTMLTextAreaElement)?.value
-        .length > 0,
-    undefined,
-    { timeout: 10000 },
-  );
-  assert.equal(await page.locator("#prompt").inputValue(), promptBefore);
+  for (let i = 0; i < 50; i++) {
+    if ((await frame().locator("#prompt").inputValue()) === agentMessage) break;
+    await page.waitForTimeout(100);
+  }
+  assert.equal(await frame().locator("#prompt").inputValue(), agentMessage);
+  const promptBefore = await frame().locator("#prompt").inputValue();
+  await frame().locator('[data-copy="prompt"]').click();
+  assert.equal(await frame().locator("#prompt").inputValue(), promptBefore);
+  await frame().getByRole("button", { name: "复制当前选区提问" }).click();
+  for (let i = 0; i < 50; i++) {
+    if ((await frame().locator("#ask-text").inputValue()).length > 0) break;
+    await page.waitForTimeout(100);
+  }
+  assert.ok((await frame().locator("#ask-text").inputValue()).length > 0);
+  assert.equal(await frame().locator("#prompt").inputValue(), promptBefore);
   await page.screenshot({ path: "artifacts/local-connect.png" });
-  await page.getByRole("button", { name: "返回白板" }).click();
+  await frame().getByRole("button", { name: "返回白板" }).click();
   await page.screenshot({ path: "artifacts/local-board.png" });
   const oldToken = connection.token;
   await stop();
+  await frame().locator('[data-connection="off"]').waitFor({ timeout: 8000 });
   assert.equal(existsSync(sessionFile), false);
   connection = await launch();
   assert.notEqual(connection.token, oldToken);

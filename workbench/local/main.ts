@@ -98,7 +98,7 @@ try {
         : "默认不打开系统浏览器，避免打断你正在做的事。想让它自动打开：加 --open 重新启动，例：npm start -- --open /absolute/path/to/repository",
       "兼容性：旧版本 npm start 会自动打开浏览器；现在默认不打开，需要时用 --open 恢复。",
       "",
-      "在页面点击「连接我的 AI」安装 MCP 连接。保持这个终端运行；Ctrl+C 结束会话。",
+      "打开白板后，点左侧「帮助」复制 MCP 连接配置。保持这个终端运行；Ctrl+C 结束会话。",
       `READY ${local.url}`,
     ].join("\n"),
   );

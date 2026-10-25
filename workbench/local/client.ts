@@ -115,10 +115,6 @@ const showError = (error: unknown) => {
   element("error-text").textContent =
     error instanceof Error ? error.message : String(error);
 };
-function showSetup(show: boolean) {
-  element("setup-panel").hidden = !show;
-  document.querySelector("iframe")!.hidden = show;
-}
 function makePrompt(id: string, names: string[] = []) {
   return (
     '使用浏览器已有的 Sand Table boardId="' +
@@ -130,20 +126,73 @@ function makePrompt(id: string, names: string[] = []) {
     "用 sand_edit 维护编排。需要代码时用 code_repo 读源码；需要修改源码时用 code_change 提交提案，等我确认后才使用宿主文件工具写入。编排不代表写入授权。"
   );
 }
+type ShellState = {
+  embedded: boolean;
+  connected: boolean;
+  statusText: string;
+  config: { json: string; codex: string; toml: string };
+  prompt: string;
+  askText: string;
+  askSeq: number;
+  revealSeq: number;
+};
+const shell: ShellState = {
+  embedded: false,
+  connected: false,
+  statusText: "正在连接工作台…",
+  config: { json: "", codex: "", toml: "" },
+  prompt: "",
+  askText: "",
+  askSeq: 0,
+  revealSeq: 0,
+};
+function postShell() {
+  toBoard({ type: "sand-table:shell", ...shell });
+}
 function renderStatus(data: any) {
   const entries = data.connections || [];
   const latest = entries
     .filter((c: any) => c.lastTool)
     .sort((a: any, b: any) => b.lastSeen - a.lastSeen)[0];
-  element("connection").textContent = entries.length
+  shell.connected = entries.length > 0;
+  shell.statusText = entries.length
     ? `MCP 接入进程 ${entries.length} 个${latest ? ` · 最近工具：${latest.lastTool}` : " · 等待 AI 调用工具"}`
-    : "尚未连接 AI · 可以先浏览，再点击「连接我的 AI」";
+    : "尚未连接 AI。打开「帮助」可以复制连接配置。";
+  postShell();
 }
 const embedded = location.pathname === "/embed" && window.parent !== window;
+shell.embedded = embedded;
 let hostOrigin = "";
 let hostHandshake: unknown;
 const toBoard = (data: unknown) =>
   document.querySelector("iframe")?.contentWindow?.postMessage(data, "*");
+function boardWindow() {
+  return document.querySelector("iframe")?.contentWindow ?? null;
+}
+async function answerAsk() {
+  try {
+    const r = await rpc("sand_context");
+    const data = resultData(r);
+    const names = Array.isArray(data?.selection)
+      ? data.selection
+          .map((item: { title?: string }) => item.title)
+          .filter((title: string | undefined): title is string =>
+            Boolean(title),
+          )
+      : [];
+    /* 提问单独放：prompt 里是 Agent 发来的原文，不能被这次复制盖掉。 */
+    shell.askText = makePrompt(data?.board?.id || boardId, names);
+    shell.askSeq += 1;
+    postShell();
+  } catch (e) {
+    showError(e);
+  }
+}
+window.addEventListener("message", (event) => {
+  if (event.source !== boardWindow()) return;
+  if (event.data?.type === "sand-table:shell-ready") postShell();
+  if (event.data?.type === "sand-table:shell-ask") void answerAsk();
+});
 window.addEventListener("message", (event) => {
   if (!embedded) return;
   if (event.source === window.parent) {
@@ -209,9 +258,13 @@ async function mount(cycle: number) {
   if (cycle !== openCycle) return;
   boardId = resultData(boot.boardResult).id;
   window.__sandBoardId = boardId;
-  for (const key of ["codex", "json", "toml"])
-    element<HTMLTextAreaElement>(key).value = boot.config[key];
-  element<HTMLTextAreaElement>("prompt").value = makePrompt(boardId);
+  shell.config = {
+    json: String(boot.config?.json ?? ""),
+    codex: String(boot.config?.codex ?? ""),
+    toml: String(boot.config?.toml ?? ""),
+  };
+  shell.prompt = makePrompt(boardId);
+  postShell();
   renderStatus(boot.status);
   const resource = await request("/rpc", {
     method: "resources/read",
@@ -226,6 +279,7 @@ async function mount(cycle: number) {
   frame.setAttribute("sandbox", "allow-scripts");
   old.replaceWith(frame);
   frame.addEventListener("load", () => {
+    postShell();
     if (hostHandshake) toBoard(hostHandshake);
     if (embedded)
       window.parent.postMessage(
@@ -247,13 +301,12 @@ async function mount(cycle: number) {
     },
   );
   bridge.onmessage = async ({ content }) => {
-    element<HTMLTextAreaElement>("prompt").value = content
+    shell.prompt = content
       .filter((c) => c.type === "text")
       .map((c) => c.text)
       .join("\n");
-    showSetup(true);
-    element("setup-status").textContent =
-      "AI 发来一条编排消息。点「复制这条消息」，再到你的 AI 客户端发送。";
+    shell.revealSeq += 1;
+    postShell();
     return {};
   };
   bridge.ondownloadfile = async ({ contents }) => {
@@ -293,19 +346,6 @@ async function mount(cycle: number) {
     "<head>",
     `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; connect-src 'none'">`,
   );
-  showSetup(false);
-}
-async function copy(id: string) {
-  const field = element<HTMLTextAreaElement>(id);
-  try {
-    await navigator.clipboard.writeText(field.value);
-    element("setup-status").textContent =
-      "已复制。粘贴到你的本机 AI 客户端即可。";
-  } catch {
-    field.focus();
-    field.select();
-    element("setup-status").textContent = "请按系统复制快捷键，文本已选中。";
-  }
 }
 async function connect(force = false) {
   if (opening) return;
@@ -336,8 +376,6 @@ async function connect(force = false) {
     connecting = false;
   }
 }
-element("setup").onclick = () => showSetup(true);
-element("close-setup").onclick = () => showSetup(false);
 element("retry").onclick = () => void connect(true).catch(showError);
 // Pasting a new link into an open tab changes only the fragment, so the
 // document is never reloaded and the new credential would be ignored: the
@@ -350,34 +388,6 @@ window.addEventListener("hashchange", () => {
   rememberToken(fresh);
   void connect(false).catch(showError);
 });
-element("new-board").onclick = () => {
-  void connect().catch(showError);
-};
-for (const button of document.querySelectorAll<HTMLButtonElement>(
-  "[data-copy]",
-))
-  button.onclick = () => void copy(button.dataset.copy!);
-element("ask").onclick = async () => {
-  try {
-    const r = await rpc("sand_context");
-    const data = resultData(r);
-    const names = Array.isArray(data?.selection)
-      ? data.selection
-          .map((item: { title?: string }) => item.title)
-          .filter((title: string | undefined): title is string =>
-            Boolean(title),
-          )
-      : [];
-    /* 提问写进自己的框子：#prompt 里是 Agent 发来的原文，不能被覆盖。 */
-    element<HTMLTextAreaElement>("ask-text").value = makePrompt(
-      data?.board?.id || boardId,
-      names,
-    );
-    await copy("ask-text");
-  } catch (e) {
-    showError(e);
-  }
-};
 void connect().catch((e) =>
   showError(
     e instanceof Error && e.message
@@ -392,7 +402,9 @@ setInterval(() => {
   void request("/status")
     .then(renderStatus)
     .catch((e) => {
-      element("connection").textContent = "与本地工作台断开";
+      shell.connected = false;
+      shell.statusText = "与本地工作台断开";
+      postShell();
       showError(
         Error(
           "与本地工作台断开：" +

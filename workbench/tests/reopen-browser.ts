@@ -55,12 +55,9 @@ try {
   const board = frame.getByRole("heading", { name: "从一块空白开始" });
   await board.waitFor();
   await page.locator("#opening").waitFor({ state: "hidden" });
-  const button = page.locator("#new-board");
-  assert.equal(await button.innerText(), "重新连接");
-  for (let i = 0; i < 5; i++) {
-    await button.click();
-    await page.waitForTimeout(200);
-  }
+  assert.equal(await page.locator("body > nav").count(), 0);
+  assert.equal(await page.locator("#new-board").count(), 0);
+  assert.equal(await page.locator("#retry").isVisible(), false);
   await board.waitFor();
   await frame.locator(".canvas").waitFor();
   await page.locator("#opening").waitFor({ state: "hidden" });
@@ -91,9 +88,9 @@ try {
     }
     await route.continue();
   });
+  await page.reload();
+  await page.getByText("正在打开白板…").waitFor({ timeout: 8000 });
   const started = Date.now();
-  await button.click();
-  await page.getByText("正在打开白板…").waitFor({ timeout: 3000 });
   await page.locator("#error").waitFor({ timeout: 18000 });
   const elapsed = Date.now() - started;
   const text = await page.locator("#error-text").innerText();

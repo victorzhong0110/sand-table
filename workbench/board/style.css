@@ -1516,18 +1516,7 @@ main.canvas-app {
   padding-top: 8px;
 }
 .spatial-activity {
-  position: absolute;
-  left: 12px;
-  bottom: 7px;
-  max-width: calc(100% - 40px);
-  font-size: 10px;
-  color: var(--accent);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  background: var(--surface);
-  border-radius: 4px;
-  padding: 1px 4px;
+  display: none;
 }
 
 .inspector-heading .inspector-switch {
@@ -1899,6 +1888,7 @@ main.canvas-app {
   margin-bottom: 14px;
 }
 .app-rail button {
+  position: relative;
   width: 40px;
   height: 40px;
   display: grid;
@@ -1912,8 +1902,9 @@ main.canvas-app {
 .app-rail button[aria-pressed="true"] {
   background: var(--soft);
 }
-.app-rail .rail-settings {
+.app-rail .rail-focus {
   margin-top: auto;
+  font-size: 13px;
 }
 .canvas-app .canvas-topbar {
   left: 74px;
@@ -2379,4 +2370,155 @@ main.canvas-app {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+}
+.shell-float {
+  position: absolute;
+  z-index: 6;
+  left: 16px;
+  top: 124px;
+  bottom: 58px;
+  max-width: calc(100% - 32px);
+}
+.shell-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 8px 32px #0000000c;
+  overflow: hidden;
+}
+.shell-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.shell-card-head h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.shell-card > .settings-body,
+.shell-card-body:not(.settings-body) {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+}
+.shell-card-body:not(.settings-body) {
+  padding: 14px 18px 14px 14px;
+}
+.shell-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  pointer-events: auto;
+}
+.help-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #9a9488;
+  pointer-events: none;
+}
+.help-dot.is-on {
+  background: #2f8f4e;
+}
+.help-panel label,
+.help-panel textarea,
+.boards-panel input {
+  display: block;
+  width: 100%;
+}
+.help-panel textarea {
+  min-height: 72px;
+  margin: 6px 0;
+}
+.help-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+.boards-panel form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+.board-tree button,
+.board-components button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.board-tree,
+.board-search-hits {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+.board-tree ul {
+  margin: 0 0 0 14px;
+  padding: 0;
+}
+.activity-badge {
+  position: absolute;
+  z-index: 5;
+  top: 4px;
+  right: 4px;
+  max-width: 70%;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 16px;
+  pointer-events: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px #00000014;
+}
+.activity-corner {
+  position: absolute;
+  z-index: 5;
+  left: 280px;
+  bottom: 16px;
+  max-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 4px 16px #00000010;
+}
+.activity-corner p {
+  margin: 0;
+  font-size: 12px;
+}
+.activity-corner button {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  text-align: left;
+  font-size: 12px;
+}
+.component-card {
+  position: relative;
+}
+@media (max-width: 700px) {
+  .shell-float {
+    left: 8px;
+    top: 120px;
+    bottom: 65px;
+  }
 }
