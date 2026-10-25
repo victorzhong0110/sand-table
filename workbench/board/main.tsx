@@ -252,6 +252,7 @@ function Workbench() {
       view: v3View(),
       activities: activitiesRef.current,
       spaceActivities: spaceActivitiesRef.current,
+      ...(store.workspaceId ? { workspaceId: store.workspaceId } : {}),
     });
   }
   /** 缓存变了就把界面拉回来。 */
