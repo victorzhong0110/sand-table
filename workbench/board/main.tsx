@@ -65,7 +65,12 @@ function readableError(error: unknown): string {
   }
   return raw;
 }
+const SANDBOX_VIEW_ID = "local-human";
+
 function storedViewId() {
+  /* 沙箱 iframe 没有同源权限，sessionStorage 随页面一起丢掉。
+     同一份工作空间用固定视角编号，重新打开才能读回白板和镜头。 */
+  if (window.origin === "null") return SANDBOX_VIEW_ID;
   const key = "sand-table-view";
   try {
     const existing = sessionStorage.getItem(key);
@@ -74,12 +79,12 @@ function storedViewId() {
     sessionStorage.setItem(key, created);
     return created;
   } catch {
-    return crypto.randomUUID();
+    return SANDBOX_VIEW_ID;
   }
 }
 
 function Workbench() {
-  /* 同一浏览器会话复用视角编号，关闭再打开才能读回上次的镜头。 */
+  /* 同一浏览器会话复用视角编号。沙箱里没有可持久的 sessionStorage，用固定编号。 */
   const [viewId] = useState(storedViewId);
   const [tab, setTab] = useState("inspect");
   const [, hostChanged] = useState(0);
