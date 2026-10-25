@@ -811,20 +811,87 @@ function Workbench() {
       }
       const store = new V3Store(callTool);
       storeRef.current = store;
-      viewRef.current = { ...viewRef.current, spaceId: boardId };
+      let opened = String(boardId);
+      let knownView = false;
+      try {
+        /* 同一个会话再打开时，视角里已经记下白板和镜头。
+           不能先导航回首页，否则会把这次看到的白板冲掉。 */
+        const existing: any = await callTool("app_view", {
+          action: "get",
+          viewId,
+        });
+        knownView = true;
+        const savedId = existing?.board?.id;
+        if (typeof savedId === "string" && savedId) opened = savedId;
+        if (Array.isArray(existing?.navStack)) {
+          navStackRef.current = existing.navStack.filter(
+            (item: unknown): item is string => typeof item === "string",
+          );
+        }
+        const camera = existing?.camera;
+        const selection = Array.isArray(existing?.selection)
+          ? existing.selection.flatMap((item: unknown) => {
+              if (typeof item === "string") return [item];
+              if (
+                item &&
+                typeof item === "object" &&
+                typeof (item as { presentationId?: unknown }).presentationId ===
+                  "string"
+              )
+                return [(item as { presentationId: string }).presentationId];
+              return [];
+            })
+          : [];
+        viewRef.current = {
+          ...viewRef.current,
+          spaceId: opened,
+          selection,
+          ...(camera &&
+          typeof camera === "object" &&
+          typeof (camera as { x?: unknown }).x === "number" &&
+          typeof (camera as { y?: unknown }).y === "number" &&
+          typeof (camera as { zoom?: unknown }).zoom === "number"
+            ? {
+                camera: {
+                  x: (camera as { x: number }).x,
+                  y: (camera as { y: number }).y,
+                  zoom: (camera as { zoom: number }).zoom,
+                },
+              }
+            : {}),
+        };
+      } catch {
+        knownView = false;
+        viewRef.current = { ...viewRef.current, spaceId: opened };
+      }
       try {
         /* 不把状态里的工作空间编号传进去：那是库内记录的旧编号，
            和这次打开用的目录名不一定相同。第一次装载不带编号，
            服务端回什么就认什么。 */
-        await store.load(boardId);
-        /* 登记视角：内核要先有这条视角，之后的选中与镜头才有地方放。
-           app_view 的 select / camera 不带白板编号，视角只能由 navigate 建立。 */
-        await callTool("app_view", {
-          action: "navigate",
-          viewId,
-          boardId,
-          navStack: [],
-        });
+        try {
+          await store.load(opened);
+        } catch (loadError) {
+          if (opened === boardId) throw loadError;
+          opened = String(boardId);
+          knownView = false;
+          navStackRef.current = [];
+          viewRef.current = {
+            ...viewRef.current,
+            spaceId: opened,
+            selection: [],
+          };
+          await store.load(opened);
+        }
+        if (!knownView) {
+          /* 登记视角：内核要先有这条视角，之后的选中与镜头才有地方放。
+             app_view 的 select / camera 不带白板编号，视角只能由 navigate 建立。 */
+          await callTool("app_view", {
+            action: "navigate",
+            viewId,
+            boardId: opened,
+            navStack: [],
+          });
+        }
         if (!alive) return;
         refreshV3Board();
         setError("");

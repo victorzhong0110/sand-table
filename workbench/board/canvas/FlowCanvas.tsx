@@ -97,6 +97,22 @@ function nodeIdAtPoint(x: number, y: number): string | null {
   return null;
 }
 
+/** 程序同步镜头时 sourceEvent 只有 sync，不能当成用户拖动。 */
+function isUserViewportEvent(event: unknown): boolean {
+  if (!event || typeof event !== "object") return false;
+  const source = event as { type?: unknown; sync?: unknown };
+  if (source.sync === true) return false;
+  return (
+    source.type === "wheel" ||
+    source.type === "mousemove" ||
+    source.type === "pointermove" ||
+    source.type === "touchmove" ||
+    source.type === "mouseup" ||
+    source.type === "pointerup" ||
+    source.type === "touchend"
+  );
+}
+
 function parseCamera(value: unknown): Viewport | null {
   if (!value || typeof value !== "object") return null;
   const camera = value as Partial<Viewport>;
@@ -601,6 +617,8 @@ function FlowSurface({
         presentationCount: count,
       });
       touched.current = entered.touched;
+      clearTimeout(cameraTimer.current);
+      cameraTimer.current = 0;
       setViewport(entered.viewport);
       if (!entered.fit) {
         if (switching) scheduleCamera(entered.viewport);
@@ -1042,13 +1060,23 @@ function FlowSurface({
             edgeTypes={edgeTypes}
             viewport={viewport}
             onMove={(_event, next: FlowViewport) => {
-              if (ignoreMove.current || animation.current) return;
+              if (
+                ignoreMove.current ||
+                animation.current ||
+                !isUserViewportEvent(_event)
+              )
+                return;
               touched.current = true;
               stopAnimation(false);
               setViewport(next);
             }}
             onMoveEnd={(_event, next: FlowViewport) => {
-              if (ignoreMove.current || animation.current) return;
+              if (
+                ignoreMove.current ||
+                animation.current ||
+                !isUserViewportEvent(_event)
+              )
+                return;
               touched.current = true;
               setViewport(next);
               scheduleCamera(next);
