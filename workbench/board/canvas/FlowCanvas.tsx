@@ -217,6 +217,7 @@ function FlowSurface({
     if (commit && animation.current) scheduleCamera(viewportRef.current);
     cancelAnimationFrame(animation.current);
     animation.current = 0;
+    ignoreMove.current = false;
   };
 
   const stopEdge = (commit = true) => {
@@ -234,6 +235,8 @@ function FlowSurface({
   const animateTo = (next: Camera) => {
     stopEdge(false);
     stopAnimation();
+    /* 整段动画都忽略 React Flow 回传的视口，否则它会把动画掐断。 */
+    ignoreMove.current = true;
     const from = viewportRef.current;
     if (
       b.theme?.reduceMotion ||
@@ -1005,12 +1008,13 @@ function FlowSurface({
             edgeTypes={edgeTypes}
             viewport={viewport}
             onMove={(_event, next: FlowViewport) => {
-              if (ignoreMove.current) return;
+              if (ignoreMove.current || animation.current) return;
               touched.current = true;
               stopAnimation(false);
               setViewport(next);
             }}
             onMoveEnd={(_event, next: FlowViewport) => {
+              if (ignoreMove.current || animation.current) return;
               touched.current = true;
               setViewport(next);
               scheduleCamera(next);
