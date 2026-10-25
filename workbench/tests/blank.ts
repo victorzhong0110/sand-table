@@ -1536,38 +1536,54 @@ try {
     const pasteIds = new Set(beforePaste.instances.map((item: any) => item.id));
     const pasteObjects = objectIds(beforePaste);
     const historyBeforePaste = await readHistory();
-    /* 属性面板会把焦点放进输入框，画布快捷键就被吃掉。先回到卡片再按。 */
-    const copyAndPaste = async () => {
-      await cardA.evaluate((el) => {
-        const active = el.ownerDocument.activeElement;
-        if (active instanceof HTMLElement) active.blur();
-        el.focus();
-        for (const key of ["c", "v"])
-          el.dispatchEvent(
+    /* 属性面板会把焦点放进输入框，画布快捷键就被吃掉。先回到卡片，再在窗口上按。 */
+    const fireShortcut = async (key: string, shift = false) => {
+      await cardA.evaluate(
+        (el, spec) => {
+          const active = el.ownerDocument.activeElement;
+          if (active instanceof HTMLElement) active.blur();
+          el.focus();
+          el.ownerDocument.defaultView?.dispatchEvent(
             new KeyboardEvent("keydown", {
-              key,
+              key: spec.key,
               ctrlKey: true,
+              shiftKey: spec.shift,
               bubbles: true,
               cancelable: true,
             }),
           );
-      });
+        },
+        { key, shift },
+      );
     };
-    await copyAndPaste();
-    let pastedCount = 0;
-    for (let i = 0; i < 20; i += 1) {
-      const board = await read();
-      pastedCount = board.instances.filter(
-        (item: any) => !pasteIds.has(item.id),
-      ).length;
-      if (pastedCount >= 2) break;
-      await new Promise((resolve) => setTimeout(resolve, 60));
-    }
-    if (pastedCount === 0) await copyAndPaste();
-    const pasted = await until(
+    const retryShortcut = async (
+      fire: () => Promise<void>,
+      ready: (board: any) => boolean,
+      untouched: (board: any) => boolean,
+    ) => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (attempt > 0) await selectPair();
+        await fire();
+        for (let i = 0; i < 40; i += 1) {
+          const board = await read();
+          if (ready(board)) return board;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        if (!untouched(await read())) return until(ready);
+      }
+      return until(ready);
+    };
+    const pasted = await retryShortcut(
+      async () => {
+        await fireShortcut("c");
+        await fireShortcut("v");
+      },
       (board) =>
         board.instances.filter((item: any) => !pasteIds.has(item.id)).length >=
         2,
+      (board) =>
+        board.instances.filter((item: any) => !pasteIds.has(item.id)).length ===
+        0,
     );
     assert.equal(
       pasted.instances.filter((item: any) => !pasteIds.has(item.id)).length,
@@ -1622,13 +1638,15 @@ try {
     );
     const objectsBeforeClone = objectIds(await read());
     await selectPair();
-    await page.keyboard.press("Control+Shift+V");
-    const cloned = await until((board) => {
-      const created = [...objectIds(board)].filter(
-        (id) => !objectsBeforeClone.has(id),
-      );
-      return created.length >= 2;
-    });
+    const cloned = await retryShortcut(
+      () => fireShortcut("v", true),
+      (board) =>
+        [...objectIds(board)].filter((id) => !objectsBeforeClone.has(id))
+          .length >= 2,
+      (board) =>
+        [...objectIds(board)].filter((id) => !objectsBeforeClone.has(id))
+          .length === 0,
+    );
     const clonedIds = [...objectIds(cloned)].filter(
       (id) => !objectsBeforeClone.has(id),
     );
@@ -1659,11 +1677,14 @@ try {
     );
     const duplicateObjects = objectIds(beforeDuplicate);
     await selectPair();
-    await page.keyboard.press("Control+d");
-    const duplicated = await until(
+    const duplicated = await retryShortcut(
+      () => fireShortcut("d"),
       (board) =>
         board.instances.filter((item: any) => !duplicateIds.has(item.id))
           .length >= 2,
+      (board) =>
+        board.instances.filter((item: any) => !duplicateIds.has(item.id))
+          .length === 0,
     );
     assert.equal(
       duplicated.instances.filter((item: any) => !duplicateIds.has(item.id))
@@ -1680,23 +1701,15 @@ try {
     const beforeIndependent = await read();
     const independentObjects = objectIds(beforeIndependent);
     await selectPair();
-    await frame.locator("body").evaluate(() => {
-      document.defaultView?.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "d",
-          bubbles: true,
-          cancelable: true,
-          ctrlKey: true,
-          shiftKey: true,
-        }),
-      );
-    });
-    const independent = await until((board) => {
-      const created = [...objectIds(board)].filter(
-        (id) => !independentObjects.has(id),
-      );
-      return created.length >= 2;
-    });
+    const independent = await retryShortcut(
+      () => fireShortcut("d", true),
+      (board) =>
+        [...objectIds(board)].filter((id) => !independentObjects.has(id))
+          .length >= 2,
+      (board) =>
+        [...objectIds(board)].filter((id) => !independentObjects.has(id))
+          .length === 0,
+    );
     const independentIds = [...objectIds(independent)].filter(
       (id) => !independentObjects.has(id),
     );
