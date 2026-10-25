@@ -119,7 +119,7 @@ test("表格行保持数组的数组，数字格不被拆成标签", () => {
       ],
       tableRows,
     ),
-    "a、1；b、2",
+    "2 行 × 2 列",
   );
   assert.equal(
     formatValue([["a", 1]], tableRows).includes("[object Object]"),

@@ -1,16 +1,26 @@
-import { useState, type JSX } from "react";
+import type { JSX } from "react";
 import {
-  commitNumberDraft,
-  fieldLabel,
   formatValue,
   hasValue,
-  listEditorKind,
-  nextListItem,
-  parseNumberDraft,
-  parseScalar,
   widgetKind,
   type JsonSchema,
 } from "./format.ts";
+import { BooleanEditor } from "../widgets/boolean.tsx";
+import { BlobEditor } from "../widgets/blob.tsx";
+import { ColorEditor } from "../widgets/color.tsx";
+import { DateEditor } from "../widgets/date.tsx";
+import { EnumEditor } from "../widgets/enum.tsx";
+import { ListEditor } from "../widgets/list.tsx";
+import { LocatorEditor } from "../widgets/locator.tsx";
+import { LongTextEditor } from "../widgets/longtext.tsx";
+import { MarkdownEditor } from "../widgets/markdown.tsx";
+import { NumberEditor } from "../widgets/number.tsx";
+import { ObjectEditor } from "../widgets/object.tsx";
+import { ScalarEditor } from "../widgets/scalar.tsx";
+import { TableEditor } from "../widgets/table.tsx";
+import { TagsEditor } from "../widgets/tags.tsx";
+import { TextEditor } from "../widgets/text.tsx";
+import { UrlEditor } from "../widgets/url.tsx";
 
 export type WidgetProps = {
   value: unknown;
@@ -49,294 +59,41 @@ export function customView(name: string | undefined) {
   return customViews[name];
 }
 
-function textOf(value: unknown): string {
-  if (value === undefined || value === null) return "";
-  return String(value);
-}
-
-function TextEditor({
-  value,
-  schema,
-  readOnly,
-  onChange,
-  ariaLabel,
-  label,
-}: WidgetProps) {
-  const kind = widgetKind(schema);
-  const long = kind === "longtext" || kind === "markdown";
-  const name = ariaLabel || label;
-  if (long)
-    return (
-      <textarea
-        aria-label={name}
-        placeholder={schema["x-sand-placeholder"]}
-        readOnly={readOnly}
-        disabled={readOnly}
-        value={textOf(value)}
-        onChange={(event) =>
-          onChange(event.target.value === "" ? undefined : event.target.value)
-        }
-      />
-    );
-  return (
-    <input
-      aria-label={name}
-      placeholder={schema["x-sand-placeholder"]}
-      readOnly={readOnly}
-      disabled={readOnly}
-      value={textOf(value)}
-      onChange={(event) =>
-        onChange(event.target.value === "" ? undefined : event.target.value)
-      }
-    />
-  );
-}
-
-function NumberEditor({
-  value,
-  schema,
-  readOnly,
-  onChange,
-  ariaLabel,
-  label,
-}: WidgetProps) {
-  const integer = widgetKind(schema) === "integer";
-  const [draft, setDraft] = useState<string | null>(null);
-  const shown =
-    draft !== null
-      ? draft
-      : value === undefined || value === null
-        ? ""
-        : String(value);
-  return (
-    <input
-      aria-label={ariaLabel || label}
-      inputMode={integer ? "numeric" : "decimal"}
-      readOnly={readOnly}
-      disabled={readOnly}
-      value={shown}
-      onChange={(event) => {
-        const next = event.target.value;
-        setDraft(next);
-        const parsed = parseNumberDraft(next, integer);
-        if (parsed.complete) onChange(parsed.value);
-      }}
-      onBlur={() => {
-        const raw = draft ?? shown;
-        setDraft(null);
-        onChange(commitNumberDraft(raw, integer));
-      }}
-    />
-  );
-}
-
-function ScalarEditor({
-  value,
-  schema,
-  readOnly,
-  onChange,
-  ariaLabel,
-  label,
-}: WidgetProps) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const shown =
-    draft !== null
-      ? draft
-      : value === undefined || value === null
-        ? ""
-        : String(value);
-  return (
-    <input
-      aria-label={ariaLabel || label}
-      readOnly={readOnly}
-      disabled={readOnly}
-      value={shown}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={() => {
-        const raw = draft ?? shown;
-        setDraft(null);
-        onChange(parseScalar(raw, schema));
-      }}
-    />
-  );
-}
-
-function BooleanEditor({
-  value,
-  readOnly,
-  onChange,
-  ariaLabel,
-  label,
-}: WidgetProps) {
-  return (
-    <input
-      aria-label={ariaLabel || label}
-      type="checkbox"
-      disabled={readOnly}
-      checked={value === true}
-      onChange={(event) => onChange(event.target.checked)}
-    />
-  );
-}
-
-function EnumEditor({
-  value,
-  schema,
-  readOnly,
-  onChange,
-  ariaLabel,
-  label,
-}: WidgetProps) {
-  const labels = schema["x-sand-enum-labels"] ?? {};
-  const options = schema.enum ?? Object.keys(labels);
-  return (
-    <select
-      aria-label={ariaLabel || label}
-      disabled={readOnly}
-      value={value === undefined || value === null ? "" : String(value)}
-      onChange={(event) =>
-        onChange(event.target.value === "" ? undefined : event.target.value)
-      }
-    >
-      <option value="">未填</option>
-      {options.map((option) => (
-        <option key={String(option)} value={String(option)}>
-          {labels[String(option)] || String(option)}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function TagsEditor({
-  value,
-  readOnly,
-  onChange,
-  ariaLabel,
-  label,
-}: WidgetProps) {
-  const text = Array.isArray(value)
-    ? value.map((item) => String(item)).join("\n")
-    : "";
-  return (
-    <textarea
-      aria-label={ariaLabel || label}
-      readOnly={readOnly}
-      disabled={readOnly}
-      value={text}
-      onChange={(event) => {
-        const items = event.target.value
-          .split(/[\n,，]/)
-          .map((item) => item.trim())
-          .filter(Boolean);
-        onChange(items.length ? items : undefined);
-      }}
-    />
-  );
-}
-
-function ObjectEditor({ value, schema, readOnly, onChange }: WidgetProps) {
-  const record =
-    value && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
-  const properties = schema.properties ?? {};
-  const changeKey = (key: string, next: unknown | undefined) => {
-    const copy = { ...record };
-    if (next === undefined) delete copy[key];
-    else copy[key] = next;
-    onChange(Object.keys(copy).length ? copy : undefined);
-  };
-  return (
-    <div className="nested-fields">
-      {Object.entries(properties).map(([key, child]) => {
-        if (child["x-sand-hidden"]) return null;
-        const widget = widgetFor(child);
-        const Editor = widget.Editor;
-        return (
-          <label key={key}>
-            {fieldLabel(key, child)}
-            <Editor
-              value={record[key]}
-              schema={child}
-              label={fieldLabel(key, child)}
-              readOnly={readOnly}
-              onChange={(next) => changeKey(key, next)}
-            />
-          </label>
-        );
-      })}
-    </div>
-  );
-}
-
-function ListEditor({
-  value,
-  schema,
-  readOnly,
-  onChange,
-  ariaLabel,
-  label,
-}: WidgetProps) {
-  const items = Array.isArray(value) ? value : [];
-  const itemSchema = schema.items ?? {};
-  if (listEditorKind(schema) === "nested") {
-    const Editor = widgetFor(itemSchema).Editor;
-    return (
-      <div className="nested-fields">
-        {items.map((item, index) => (
-          <Editor
-            key={index}
-            value={item}
-            schema={itemSchema}
-            label={`${label} ${index + 1}`}
-            readOnly={readOnly}
-            onChange={(next) => {
-              const copy = nextListItem(items, index, next, itemSchema);
-              onChange(copy.length ? copy : undefined);
-            }}
-          />
-        ))}
-      </div>
-    );
-  }
-  return (
-    <TagsEditor
-      value={items}
-      schema={schema}
-      label={label}
-      ariaLabel={ariaLabel}
-      readOnly={readOnly}
-      onChange={onChange}
-    />
-  );
-}
-
 const EDITORS: Record<string, Widget["Editor"]> = {
   text: TextEditor,
-  longtext: TextEditor,
-  markdown: TextEditor,
-  url: TextEditor,
-  date: TextEditor,
-  color: TextEditor,
-  locator: TextEditor,
-  blob: TextEditor,
+  longtext: LongTextEditor,
+  markdown: MarkdownEditor,
+  url: UrlEditor,
+  date: DateEditor,
+  color: ColorEditor,
+  locator: LocatorEditor,
+  blob: BlobEditor,
   number: NumberEditor,
   integer: NumberEditor,
   boolean: BooleanEditor,
   enum: EnumEditor,
   tags: TagsEditor,
-  list: ListEditor,
-  table: ListEditor,
-  object: ObjectEditor,
+  table: TableEditor,
 };
+
+function BoundList(props: WidgetProps) {
+  return <ListEditor {...props} widgetFor={widgetFor} />;
+}
+
+function BoundObject(props: WidgetProps) {
+  return <ObjectEditor {...props} widgetFor={widgetFor} />;
+}
 
 export function widgetFor(schema: JsonSchema): Widget {
   const kind = widgetKind(schema);
   const Editor =
     kind === "text" && schema.anyOf?.length
       ? ScalarEditor
-      : (EDITORS[kind] ?? TextEditor);
+      : kind === "list"
+        ? BoundList
+        : kind === "object"
+          ? BoundObject
+          : (EDITORS[kind] ?? TextEditor);
   return {
     display: (value) => formatValue(value, schema),
     Editor,

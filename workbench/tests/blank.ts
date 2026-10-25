@@ -2547,8 +2547,39 @@ try {
         await personCard.click({ position: { x: 24, y: 16 }, force: true });
       }
     }
+    const roleField = frame.getByRole("textbox", { name: "定位", exact: true });
+    await roleField.fill("配角");
+    await roleField.blur();
     await age.fill("30");
     await age.blur();
+    const traits = frame.getByRole("textbox", { name: "性格", exact: true });
+    await traits.fill("冷静");
+    await traits.press("Enter");
+    await traits.fill("固执");
+    await traits.press("Enter");
+    await traits.fill("冷静");
+    await traits.press("Enter");
+    let saved: { role?: string; age?: number; traits?: string[] } | undefined;
+    for (let i = 0; i < 30; i += 1) {
+      const readBack = await call("sand_read", { ids: [personId] });
+      const data = readBack.objects?.[0]?.data as
+        { role?: string; age?: number; traits?: string[] } | undefined;
+      if (
+        data?.role === "配角" &&
+        data.age === 30 &&
+        Array.isArray(data.traits) &&
+        data.traits.join(",") === "冷静,固执"
+      ) {
+        saved = data;
+        break;
+      }
+      await page.waitForTimeout(100);
+    }
+    assert.deepEqual(saved, {
+      role: "配角",
+      age: 30,
+      traits: ["冷静", "固执"],
+    });
     await personCard.getByText("年龄 30 岁", { exact: true }).waitFor();
     await age.fill("");
     await age.blur();

@@ -10,12 +10,14 @@ export function Inspector({
   call,
   operate,
   onOpenSettings,
+  onOpenLink,
 }: {
   board: Board;
   viewId: string;
   call: (name: string, args?: Record<string, unknown>) => Promise<any>;
   operate: (op: any) => Promise<any>;
   onOpenSettings?: () => void;
+  onOpenLink?: (url: string) => void;
 }) {
   return (
     <TypeCatalogProvider call={call} revision={board.revision}>
@@ -25,6 +27,7 @@ export function Inspector({
         call={call}
         operate={operate}
         onOpenSettings={onOpenSettings}
+        onOpenLink={onOpenLink}
       />
     </TypeCatalogProvider>
   );
@@ -36,12 +39,14 @@ function InspectorBody({
   call,
   operate,
   onOpenSettings,
+  onOpenLink,
 }: {
   board: Board;
   viewId: string;
   call: (name: string, args?: Record<string, unknown>) => Promise<any>;
   operate: (op: any) => Promise<any>;
   onOpenSettings?: () => void;
+  onOpenLink?: (url: string) => void;
 }) {
   const view = board.views[viewId];
   const selected = (view?.selection ?? [])
@@ -59,6 +64,7 @@ function InspectorBody({
             call={call}
             operate={operate}
             onOpenSettings={onOpenSettings}
+            onOpenLink={onOpenLink}
           />
           <button
             type="button"

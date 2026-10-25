@@ -2325,3 +2325,58 @@ main.canvas-app {
   object-fit: cover;
   border-radius: 4px;
 }
+.widget {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.widget textarea,
+.widget input[type="text"],
+.widget input:not([type]) {
+  flex: 1 1 12em;
+  min-width: 0;
+}
+.widget-hint,
+.markdown-preview {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 12px;
+}
+.widget-clear,
+.widget-actions button,
+.tag-chip button {
+  font-size: 12px;
+}
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.widget-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.widget-table input {
+  width: 100%;
+}
+.blob-thumb {
+  max-width: 120px;
+  max-height: 80px;
+  object-fit: cover;
+}
+.list-item,
+.widget-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
