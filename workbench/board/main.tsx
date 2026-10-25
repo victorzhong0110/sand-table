@@ -402,9 +402,12 @@ function Workbench() {
           id: sha,
           name: sha,
           mime,
+          bytes: read.bytes,
           dataUrl: `data:${mime};base64,${read.base64}`,
         };
       }
+      case "app_asset":
+        return callTool("app_asset", args);
       case "sand_edit_space": {
         /* 宿主桥（DSH）把 AI 的结果写成一次白板操作：
            v3 下翻译成内核命令，写完立刻拉一次增量。 */
@@ -1426,6 +1429,15 @@ function Workbench() {
               viewId={viewId}
               call={call}
               operate={operate}
+              onOpenLink={(url) => {
+                const safe = safeUrl(url);
+                if (safe)
+                  void app
+                    ?.openLink({ url: safe })
+                    .catch((e) =>
+                      setError(e instanceof Error ? e.message : String(e)),
+                    );
+              }}
             />
           ) : tab === "theme" ? (
             <ThemePanel

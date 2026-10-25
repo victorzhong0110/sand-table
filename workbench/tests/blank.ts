@@ -1513,10 +1513,22 @@ try {
       options?: { modifiers?: Array<"Alt" | "Control" | "Meta" | "Shift"> },
     ) => {
       const add = Boolean(options?.modifiers?.includes("Control"));
-      await card.focus();
-      if (add) await page.keyboard.down("Control");
-      await page.keyboard.press("Space");
-      if (add) await page.keyboard.up("Control");
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await card.focus();
+        if (add) await page.keyboard.down("Control");
+        await page.keyboard.press("Space");
+        if (add) {
+          await page.keyboard.up("Control");
+          return;
+        }
+        const selected = ((await card.getAttribute("class")) || "").includes(
+          "selected",
+        );
+        if (selected) return;
+        await card.click({ position: { x: 12, y: 12 }, force: true });
+        if (((await card.getAttribute("class")) || "").includes("selected"))
+          return;
+      }
     };
     const selectPair = async () => {
       for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -2547,8 +2559,39 @@ try {
         await personCard.click({ position: { x: 24, y: 16 }, force: true });
       }
     }
+    const roleField = frame.getByRole("textbox", { name: "定位", exact: true });
+    await roleField.fill("配角");
+    await roleField.blur();
     await age.fill("30");
     await age.blur();
+    const traits = frame.getByRole("textbox", { name: "性格", exact: true });
+    await traits.fill("冷静");
+    await traits.press("Enter");
+    await traits.fill("固执");
+    await traits.press("Enter");
+    await traits.fill("冷静");
+    await traits.press("Enter");
+    let saved: { role?: string; age?: number; traits?: string[] } | undefined;
+    for (let i = 0; i < 30; i += 1) {
+      const readBack = await call("sand_read", { ids: [personId] });
+      const data = readBack.objects?.[0]?.data as
+        { role?: string; age?: number; traits?: string[] } | undefined;
+      if (
+        data?.role === "配角" &&
+        data.age === 30 &&
+        Array.isArray(data.traits) &&
+        data.traits.join(",") === "冷静,固执"
+      ) {
+        saved = data;
+        break;
+      }
+      await page.waitForTimeout(100);
+    }
+    assert.deepEqual(saved, {
+      role: "配角",
+      age: 30,
+      traits: ["冷静", "固执"],
+    });
     await personCard.getByText("年龄 30 岁", { exact: true }).waitFor();
     await age.fill("");
     await age.blur();

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { v3DataOf } from "../data-client/adapter.ts";
 import { editIntent, endEditSession } from "../edit-session.ts";
 import type { Board } from "../data-client/model.ts";
@@ -14,6 +14,7 @@ import { OtherFields } from "./OtherFields.tsx";
 import { RelationSlots, type SlotLink } from "./RelationSlots.tsx";
 import { propertyEntries, widgetFor } from "./registry.tsx";
 import { UnknownType } from "./UnknownType.tsx";
+import { WidgetHostProvider, type WidgetHost } from "../widgets/host.tsx";
 
 type ToolError = { code: string; message: string };
 
@@ -23,12 +24,14 @@ export function GenericForm({
   call,
   operate,
   onOpenSettings,
+  onOpenLink,
 }: {
   instance: ComponentInstance;
   board: Board;
   call: (name: string, args?: Record<string, unknown>) => Promise<any>;
   operate: (op: any) => Promise<any>;
   onOpenSettings?: () => void;
+  onOpenLink?: (url: string) => void;
 }) {
   const catalog = useTypeCatalog();
   const kernelType = instance.kernelType || instance.type;
@@ -253,6 +256,44 @@ export function GenericForm({
     endEditSession(instance.id);
   };
 
+  const host = useMemo<WidgetHost>(
+    () => ({
+      openUrl(url) {
+        onOpenLink?.(url);
+      },
+      async uploadAsset(file) {
+        const base64 = await readFileBase64(file);
+        const result = await call("app_asset", {
+          action: "upload",
+          name: file.name,
+          mime: file.type || "application/octet-stream",
+          base64,
+        });
+        return {
+          sha256: String(result?.sha256 ?? ""),
+          name: file.name,
+          mime: file.type,
+          bytes: file.size,
+        };
+      },
+      async readAsset(sha256) {
+        try {
+          const result = await call("sand_read_asset", { assetId: sha256 });
+          return {
+            sha256,
+            name: typeof result?.name === "string" ? result.name : undefined,
+            mime: typeof result?.mime === "string" ? result.mime : undefined,
+            bytes: typeof result?.bytes === "number" ? result.bytes : undefined,
+            dataUrl:
+              typeof result?.dataUrl === "string" ? result.dataUrl : undefined,
+          };
+        } catch {
+          return undefined;
+        }
+      },
+    }),
+    [call, onOpenLink],
+  );
   const links = slotLinks(board, objectId, spec);
   const pack = catalog.packs.find((item) => item.id === packIdOf(kernelType));
 
@@ -269,96 +310,112 @@ export function GenericForm({
     );
 
   return (
-    <section className="component-editor generic-form">
-      <h3>配置</h3>
-      {migrationError && (
-        <p role="status" className="migration-error">
-          {migrationError}
-        </p>
-      )}
-      {conflict && (
-        <div className="version-conflict" role="status">
-          <p>这个对象刚被别人改过</p>
-          <button type="button" onClick={() => void overwrite()}>
-            用我的覆盖
-          </button>
-          <button type="button" onClick={() => void discard()}>
-            放弃我的修改
-          </button>
-        </div>
-      )}
-      <label>
-        {kernelType === "novel.character" ? "姓名" : "名称"}
-        <input
-          aria-label={
-            kernelType === "novel.character" ? "姓名" : "编辑组件名称"
-          }
-          value={title}
-          onChange={(event) => {
-            hold.current = false;
-            captureVersion();
-            titleDirty.current = true;
-            titleRef.current = event.target.value;
-            setTitle(event.target.value);
-            schedule();
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== "Escape") return;
-            event.preventDefault();
-            event.stopPropagation();
-            clearTimeout(timer.current);
-            titleDirty.current = false;
-            titleRef.current = startTitle.current;
-            setTitle(startTitle.current);
-            event.currentTarget.blur();
-          }}
-          onBlur={() => {
-            void flush();
-          }}
-        />
-      </label>
-      {propertyEntries(spec?.schema).map(([key, schema]) => (
-        <Field
-          key={key}
-          name={key}
-          schema={schema}
-          required={required(spec, key)}
-          value={data[key]}
-          warning={warnings[key]}
+    <WidgetHostProvider host={host}>
+      <section className="component-editor generic-form">
+        <h3>配置</h3>
+        {migrationError && (
+          <p role="status" className="migration-error">
+            {migrationError}
+          </p>
+        )}
+        {conflict && (
+          <div className="version-conflict" role="status">
+            <p>这个对象刚被别人改过</p>
+            <button type="button" onClick={() => void overwrite()}>
+              用我的覆盖
+            </button>
+            <button type="button" onClick={() => void discard()}>
+              放弃我的修改
+            </button>
+          </div>
+        )}
+        <label>
+          {kernelType === "novel.character" ? "姓名" : "名称"}
+          <input
+            aria-label={
+              kernelType === "novel.character" ? "姓名" : "编辑组件名称"
+            }
+            value={title}
+            onChange={(event) => {
+              hold.current = false;
+              captureVersion();
+              titleDirty.current = true;
+              titleRef.current = event.target.value;
+              setTitle(event.target.value);
+              schedule();
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              event.stopPropagation();
+              clearTimeout(timer.current);
+              titleDirty.current = false;
+              titleRef.current = startTitle.current;
+              setTitle(startTitle.current);
+              event.currentTarget.blur();
+            }}
+            onBlur={() => {
+              void flush();
+            }}
+          />
+        </label>
+        {propertyEntries(spec?.schema).map(([key, schema]) => (
+          <Field
+            key={key}
+            name={key}
+            schema={schema}
+            required={required(spec, key)}
+            value={data[key]}
+            warning={warnings[key]}
+            readOnly={readOnlyData}
+            ariaLabel={
+              kernelType === "base.note" && key === "body" ? "内容" : undefined
+            }
+            onChange={(next) => changeField(key, next)}
+            onBlur={() => {
+              void flush();
+            }}
+          />
+        ))}
+        <RelationSlots
+          slots={spec?.relationSlots ?? []}
+          linksBySlot={links}
           readOnly={readOnlyData}
-          ariaLabel={
-            kernelType === "base.note" && key === "body" ? "内容" : undefined
+          selfId={objectId}
+          call={call}
+          onChange={(change) =>
+            void operate({
+              kind: "slot",
+              intentId: editIntent(instance.id),
+              removeIds: change.removeIds,
+              ...(change.create ? { create: change.create } : {}),
+            })
           }
-          onChange={(next) => changeField(key, next)}
-          onBlur={() => {
-            void flush();
-          }}
         />
-      ))}
-      <RelationSlots
-        slots={spec?.relationSlots ?? []}
-        linksBySlot={links}
-        readOnly={readOnlyData}
-        selfId={objectId}
-        call={call}
-        onChange={(change) =>
-          void operate({
-            kind: "slot",
-            intentId: editIntent(instance.id),
-            removeIds: change.removeIds,
-            ...(change.create ? { create: change.create } : {}),
-          })
-        }
-      />
-      <OtherFields data={data} spec={spec} />
-      <p className="save-hint">
-        停止输入约 1 秒后自动写入，也可以点「保存组件」立即写入。
-      </p>
-      <button type="button" onClick={() => void flush(undefined, true)}>
-        保存组件
-      </button>
-    </section>
+        <OtherFields data={data} spec={spec} />
+        <p className="save-hint">
+          停止输入约 1 秒后自动写入，也可以点「保存组件」立即写入。
+        </p>
+        <button type="button" onClick={() => void flush(undefined, true)}>
+          保存组件
+        </button>
+      </section>
+    </WidgetHostProvider>
   );
+}
+
+function readFileBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () =>
+      reject(reader.error ?? Error("没有读到这个文件。请重新选择后再试。"));
+    reader.readAsDataURL(file);
+  });
 }
 
 function required(spec: TypeSpecView | undefined, key: string): boolean {

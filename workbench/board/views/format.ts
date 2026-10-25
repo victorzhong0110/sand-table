@@ -1,3 +1,19 @@
+import {
+  formatBlob,
+  formatBoolean,
+  formatColor,
+  formatDate,
+  formatEnum,
+  formatList,
+  formatLocator,
+  formatLongText,
+  formatMarkdown,
+  formatNumber,
+  formatTable,
+  formatTags,
+  formatUrl,
+} from "../widgets/display.ts";
+
 /** 界面用的 Schema 子集。校验仍由内核做，这里只读提示关键字。 */
 export type JsonSchema = {
   type?: string | string[];
@@ -7,6 +23,10 @@ export type JsonSchema = {
   enum?: unknown[];
   anyOf?: JsonSchema[];
   additionalProperties?: boolean;
+  maxLength?: number;
+  minLength?: number;
+  minimum?: number;
+  maximum?: number;
   "x-sand-label"?: string;
   "x-sand-widget"?: string;
   "x-sand-placeholder"?: string;
@@ -83,19 +103,22 @@ export function fieldLabel(
 export function formatValue(value: unknown, schema: JsonSchema = {}): string {
   if (!hasValue(value)) return "";
   const kind = widgetKind(schema);
-  if (kind === "integer" || kind === "number") {
-    const text = String(value);
-    const unit = schema["x-sand-unit"];
-    return unit ? `${text} ${unit}` : text;
-  }
+  if (kind === "integer" || kind === "number")
+    return formatNumber(value, schema);
+  if (kind === "boolean") return formatBoolean(value);
+  if (kind === "enum") return formatEnum(value, schema);
+  if (kind === "tags") return formatTags(value);
+  if (kind === "date") return formatDate(value);
+  if (kind === "url") return formatUrl(value);
+  if (kind === "longtext") return formatLongText(value);
+  if (kind === "markdown") return formatMarkdown(value);
+  if (kind === "color") return formatColor(value);
+  if (kind === "locator") return formatLocator(value);
+  if (kind === "blob") return formatBlob(value);
+  if (kind === "table") return formatTable(value);
+  if (kind === "list") return formatList(value);
   if (value && typeof value === "object" && !Array.isArray(value))
     return formatObject(value as Record<string, unknown>, schema);
-  if (kind === "boolean") return value ? "是" : "否";
-  if (kind === "enum") {
-    const labels = schema["x-sand-enum-labels"] ?? {};
-    const named = labels[String(value)];
-    return named || String(value);
-  }
   if (
     kind === "object" &&
     value &&
@@ -132,6 +155,8 @@ export function scalarTypes(schema: JsonSchema): Set<string> {
  * 打成标签会把一行表格拆成扁平字符串，内核按模式拒绝。
  */
 export function listEditorKind(schema: JsonSchema): "tags" | "nested" {
+  if (schema["x-sand-widget"] === "list" || schema["x-sand-widget"] === "table")
+    return "nested";
   if (schema["x-sand-widget"] === "tags") return "tags";
   const item = schema.items ?? {};
   if (item["x-sand-widget"] === "tags") return "tags";
@@ -214,6 +239,30 @@ export function commitNumberDraft(
   if (parsed.complete) return parsed.value;
   const trimmed = parseNumberDraft(raw.trim().replace(/\.$/, ""), integer);
   return trimmed.complete ? trimmed.value : undefined;
+}
+
+export type NumberCommit =
+  { ok: true; value: number | undefined } | { ok: false; message: string };
+
+/** 空输入清空。整数拒绝小数。超出上下限时说明原因，不写入。 */
+export function commitNumber(raw: string, schema: JsonSchema): NumberCommit {
+  const integer = widgetKind(schema) === "integer";
+  const text = raw.trim();
+  if (!text) return { ok: true, value: undefined };
+  if (integer && /^-?\d+\.\d+$/.test(text))
+    return { ok: false, message: "整数不能有小数。请改成整数后再保存。" };
+  const draft = parseNumberDraft(text, integer);
+  const value = draft.complete ? draft.value : commitNumberDraft(text, integer);
+  if (value === undefined)
+    return {
+      ok: false,
+      message: integer ? "请输入整数。" : "请输入数字。",
+    };
+  if (typeof schema.minimum === "number" && value < schema.minimum)
+    return { ok: false, message: `不能小于 ${schema.minimum}。` };
+  if (typeof schema.maximum === "number" && value > schema.maximum)
+    return { ok: false, message: `不能大于 ${schema.maximum}。` };
+  return { ok: true, value };
 }
 
 const IMAGE_PREFIXES: readonly [string, string][] = [

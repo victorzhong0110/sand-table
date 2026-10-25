@@ -445,6 +445,10 @@ export function CanvasShell({
                 call={call}
                 operate={operate}
                 onOpenSettings={() => setSettingsOpen(true)}
+                onOpenLink={(url) => {
+                  const safe = safeUrl(url);
+                  if (safe) openLink(safe);
+                }}
               />
             ) : panel === "changes" ? (
               <ChangePanel
