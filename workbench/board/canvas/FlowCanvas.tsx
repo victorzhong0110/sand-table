@@ -190,6 +190,8 @@ function FlowSurface({
   const cameraTimer = useRef(0);
   const noticeTimer = useRef(0);
   const animation = useRef(0);
+  const animationGen = useRef(0);
+  const appliedSelection = useRef<string | null>(null);
   const edge = useRef({
     frame: 0,
     point: undefined as { x: number; y: number } | undefined,
@@ -234,6 +236,7 @@ function FlowSurface({
   };
 
   const stopAnimation = (commit = false) => {
+    animationGen.current += 1;
     if (commit && animation.current) scheduleCamera(viewportRef.current);
     cancelAnimationFrame(animation.current);
     animation.current = 0;
@@ -255,6 +258,7 @@ function FlowSurface({
   const animateTo = (next: Camera) => {
     stopEdge(false);
     stopAnimation();
+    const gen = ++animationGen.current;
     /* 整段动画都忽略 React Flow 回传的视口，否则它会把动画掐断。 */
     ignoreMove.current = true;
     const from = viewportRef.current;
@@ -269,6 +273,7 @@ function FlowSurface({
     const duration = Math.min(700, Math.max(260, distance * 0.35));
     const start = performance.now();
     const tick = (now: number) => {
+      if (animationGen.current !== gen) return;
       const t = Math.min(1, (now - start) / duration);
       const eased = easeCamera(t);
       ignoreMove.current = true;
@@ -278,6 +283,7 @@ function FlowSurface({
         zoom: from.zoom + (next.zoom - from.zoom) * eased,
       };
       setViewport(frame);
+      if (animationGen.current !== gen) return;
       if (t < 1) animation.current = requestAnimationFrame(tick);
       else {
         animation.current = 0;
@@ -477,9 +483,17 @@ function FlowSurface({
     }
   }
   const visible = onBoard.filter((item) => visibleIds.has(item.id));
+  const selectionKey = view?.selection.join("|") ?? "";
 
   useEffect(() => {
     if (!view) return;
+    /* 定位会先改视角。节点上的旧选区会抢先回报，不能盖住这次定位。 */
+    if (appliedSelection.current !== selectionKey) {
+      appliedSelection.current = selectionKey;
+      selectionOverride.current = null;
+      clearTimeout(selectTimer.current);
+      selectTimer.current = 0;
+    }
     const selectedIds = selectionOverride.current ?? view.selection;
     if (
       selectionOverride.current &&
@@ -556,7 +570,7 @@ function FlowSurface({
         markerEnd: { type: MarkerType.ArrowClosed },
       })),
     );
-  }, [b, query, kind, scope, arrows, view?.spaceId, view?.selection.join("|")]);
+  }, [b, query, kind, scope, arrows, view?.spaceId, selectionKey]);
 
   useEffect(() => {
     const root = canvas.current?.querySelector(".react-flow__viewport");
@@ -1067,6 +1081,13 @@ function FlowSurface({
             }}
             onSelectionChange={({ nodes: selectedNodes }) => {
               const ids = selectedNodes.map((node) => node.id);
+              /* 动画每帧都换一次回调，React Flow 会把节点上的旧选区再报一遍。
+                 按下才会停动画，所以动画进行时的回报不是人点的。 */
+              if (animation.current) {
+                clearTimeout(selectTimer.current);
+                selectTimer.current = 0;
+                return;
+              }
               /* 镜头动画会让 React Flow 反复报选区。没在空白处点击时，
                  空选区不能写回去，否则定位后的详情面板会被关掉。 */
               if (

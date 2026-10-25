@@ -977,16 +977,31 @@ try {
       "Focusing preserves zoom",
     );
   }
-  const targetBox = await frame
-    .locator('[data-instance-id="' + farId + '"]')
-    .boundingBox();
-  const viewport = await frame.locator(".canvas").boundingBox();
-  assert.ok(targetBox && viewport);
-  const expectedCenter = viewport.x + (256 + viewport.width - 332) / 2;
+  let centered = false;
+  let lastDelta = Number.NaN;
+  for (let i = 0; i < 25; i++) {
+    const targetBox = await frame
+      .locator('[data-instance-id="' + farId + '"]')
+      .boundingBox();
+    const viewport = await frame.locator(".canvas").boundingBox();
+    if (targetBox && viewport) {
+      const expectedCenter = viewport.x + (256 + viewport.width - 332) / 2;
+      lastDelta = Math.abs(targetBox.x + targetBox.width / 2 - expectedCenter);
+      if (lastDelta < 8) {
+        centered = true;
+        break;
+      }
+    }
+    await page.waitForTimeout(80);
+  }
   assert.ok(
-    Math.abs(targetBox.x + targetBox.width / 2 - expectedCenter) < 8,
-    "Focus centers inside the area between floating panels",
+    centered,
+    "Focus centers inside the area between floating panels (off by " +
+      lastDelta +
+      "px).",
   );
+  const viewport = await frame.locator(".canvas").boundingBox();
+  assert.ok(viewport);
   await frame.getByRole("button", { name: "收起面板", exact: true }).click();
   await frame.getByRole("button", { name: "关闭详情", exact: true }).click();
   await page.mouse.move(
