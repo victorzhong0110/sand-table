@@ -70,6 +70,23 @@ export function syncWorkspace(workspaceId: string): "set" | "same" | "cleared" {
   return "cleared";
 }
 
+/**
+ * 两边都有编号而且不同，才算换了工作空间。
+ * 首页白板的对象编号可以跨导入副本保持不变，不能拿来判断。
+ */
+export function workspaceChanged(previous: string, next: string): boolean {
+  return previous !== "" && next !== "" && previous !== next;
+}
+
+/** 方向键那一步还没写回时，只有仍在发起它的工作空间里才能写。 */
+export function nudgeStillInWorkspace(
+  origin: string,
+  current: string,
+): boolean {
+  if (!origin || !current) return true;
+  return origin === current;
+}
+
 export function missingSourceMessage(mode: PasteMode): string {
   if (mode === "clone")
     return "这些展示的源对象已经不在了。请先撤销删除把源对象恢复回来，或使用工作空间导入。这次不会去复制一个已经不存在的对象。";

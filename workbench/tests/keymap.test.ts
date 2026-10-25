@@ -5,10 +5,12 @@ import {
   captureClipboard,
   clearClipboard,
   layoutAt,
+  nudgeStillInWorkspace,
   planPaste,
   readClipboard,
   saveClipboard,
   syncWorkspace,
+  workspaceChanged,
   type PlacedItem,
 } from "../board/canvas/clipboard.ts";
 import {
@@ -132,6 +134,22 @@ test("换工作空间清空内部剪贴板", () => {
   assert.ok(readClipboard());
   assert.equal(syncWorkspace("ws-b"), "cleared");
   assert.equal(readClipboard(), null);
+});
+
+test("首页白板编号相同也不算还在原来的工作空间", () => {
+  assert.equal(workspaceChanged("ws-a", "ws-a"), false);
+  assert.equal(workspaceChanged("", "ws-b"), false);
+  assert.equal(workspaceChanged("ws-a", "ws-b"), true);
+  clearClipboard();
+  saveClipboard(captureClipboard("ws-a", [placed("home-board", 0, 0)]));
+  if (workspaceChanged("ws-a", "ws-copy")) clearClipboard();
+  assert.equal(readClipboard(), null);
+});
+
+test("方向键还没写回时，换了工作空间就不再写", () => {
+  assert.equal(nudgeStillInWorkspace("ws-a", "ws-a"), true);
+  assert.equal(nudgeStillInWorkspace("ws-a", "ws-copy"), false);
+  assert.equal(nudgeStillInWorkspace("", "ws-copy"), true);
 });
 
 test("缺任何一个源对象就整批拒绝，引用和副本都一样", () => {

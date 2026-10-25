@@ -482,6 +482,8 @@ export function toBoard(
     activities?: Board["activities"];
     /** 活动报告：AI 面板和卡片标记读这一份。 */
     spaceActivities?: Board["spaceActivities"];
+    /** 当前打开的工作空间。不是白板上那个首页对象的编号。 */
+    workspaceId?: string;
   },
 ): Board {
   const presentations = [...cache.presentations.values()].filter(
@@ -576,6 +578,7 @@ export function toBoard(
     workspaces: [],
     objects: [],
     relations: [],
+    ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
   };
 }
 

@@ -27,7 +27,9 @@ import {
   planPaste,
   readClipboard,
   saveClipboard,
+  nudgeStillInWorkspace,
   syncWorkspace,
+  workspaceChanged,
   type PasteItem,
   type PasteMode,
   type PlacedItem,
@@ -217,6 +219,8 @@ function FlowSurface({
   const selectionServer = useRef<string[]>(view?.selection ?? []);
   selectionServer.current = view?.selection ?? [];
   const workspaceRef = useRef("");
+  const appliedWorkspace = useRef("");
+  if (b.workspaceId) workspaceRef.current = b.workspaceId;
   const pointerClient = useRef<{ x: number; y: number } | null>(null);
   const nudgeState = useRef({
     timer: 0,
@@ -742,24 +746,58 @@ function FlowSurface({
 
   useEffect(() => () => clearTimeout(nudgeState.current.timer), []);
 
+  const dropPendingNudge = () => {
+    const state = nudgeState.current;
+    const pending =
+      state.timer !== 0 || state.positions.size > 0 || state.pending.size > 0;
+    clearTimeout(state.timer);
+    state.timer = 0;
+    state.token += 1;
+    state.positions = new Map();
+    state.pending = new Map();
+    state.intentId = "";
+    return pending;
+  };
+
   useEffect(() => {
-    let cancelled = false;
-    void callRef
-      .current("sand_list_workspaces")
-      .then((data) => {
-        if (cancelled) return;
-        const id = typeof data?.activeId === "string" ? data.activeId : "";
-        if (!id) return;
-        const previous = workspaceRef.current;
-        workspaceRef.current = id;
-        if (previous && previous !== id) clearClipboard();
-        else syncWorkspace(id);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [b.id]);
+    const id = b.workspaceId ?? "";
+    if (!id) {
+      let cancelled = false;
+      void callRef
+        .current("sand_list_workspaces")
+        .then((data) => {
+          if (cancelled) return;
+          const listed =
+            typeof data?.activeId === "string" ? data.activeId : "";
+          if (!listed || b.workspaceId) return;
+          workspaceRef.current = listed;
+          syncWorkspace(listed);
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }
+    const previous = appliedWorkspace.current;
+    appliedWorkspace.current = id;
+    workspaceRef.current = id;
+    if (!workspaceChanged(previous, id)) {
+      syncWorkspace(id);
+      return;
+    }
+    clearClipboard();
+    if (!dropPendingNudge()) return;
+    setNodes((current) =>
+      current.map((node) => {
+        const instance = b.instances.find((item) => item.id === node.id);
+        if (!instance) return node;
+        return {
+          ...node,
+          position: { x: instance.rect.x, y: instance.rect.y },
+        };
+      }),
+    );
+  }, [b.workspaceId]);
 
   useEffect(() => {
     stopAnimation();
@@ -1173,7 +1211,12 @@ function FlowSurface({
     );
     clearTimeout(state.timer);
     const intentId = state.intentId;
+    const origin = workspaceRef.current;
     state.timer = window.setTimeout(() => {
+      if (!nudgeStillInWorkspace(origin, workspaceRef.current)) {
+        dropPendingNudge();
+        return;
+      }
       const items = [...state.positions.entries()].map(([id, pos]) => ({
         id,
         rect: { x: pos.x, y: pos.y },
