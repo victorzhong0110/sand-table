@@ -118,6 +118,14 @@ type Props = {
   edgeSpeed?: number;
   motionPaused?: boolean;
   insets?: { left: number; right: number; top: number; bottom: number };
+  centerPositionRef?: React.MutableRefObject<
+    | ((size: {
+        width: number;
+        height: number;
+      }) => { x: number; y: number } | undefined)
+    | null
+  >;
+  requestCreate?: (operation: any, requiresFields: boolean) => void;
   operate: (op: any) => Promise<any>;
   call: (name: string, args?: Record<string, unknown>) => Promise<any>;
   onOpenLink: (url: string) => void;
@@ -223,6 +231,8 @@ function FlowSurface({
   edgeSpeed = 600,
   motionPaused = false,
   insets = { left: 0, right: 0, top: 0, bottom: 0 },
+  centerPositionRef,
+  requestCreate,
   operate,
   call,
   onOpenLink,
@@ -231,6 +241,23 @@ function FlowSurface({
   const view = b.views[viewId];
   const flow = useReactFlow();
   const canvas = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!centerPositionRef) return;
+    const locate = (size: { width: number; height: number }) => {
+      const bounds = canvas.current?.getBoundingClientRect();
+      if (!bounds) return undefined;
+      const point = flow.screenToFlowPosition({
+        x: bounds.left + (insets.left + bounds.width - insets.right) / 2,
+        y: bounds.top + (insets.top + bounds.height - insets.bottom) / 2,
+      });
+      return { x: point.x - size.width / 2, y: point.y - size.height / 2 };
+    };
+    centerPositionRef.current = locate;
+    return () => {
+      if (centerPositionRef.current === locate)
+        centerPositionRef.current = null;
+    };
+  }, [flow, centerPositionRef, insets]);
   const [viewport, setViewport] = useState<Viewport>({ ...DEFAULT_VIEWPORT });
   const [nodes, setNodes] = useState<CardNodeType[]>([]);
   const selectedNodes = useRef<string[]>([]);
@@ -2264,12 +2291,16 @@ function FlowSurface({
                 const size = componentTypes.find(
                   (entry) => entry.type === item.type,
                 );
+                const width = Number(item.size?.width);
+                const height = Number(item.size?.height);
                 const position = flow.screenToFlowPosition({
                   x: event.clientX,
                   y: event.clientY,
                 });
-                void operate({
+                const operation = {
                   kind: "create",
+                  workspaceId: b.workspaceId,
+                  boardId: view.spaceId,
                   type: item.type,
                   title: item.title,
                   data: item.data || {},
@@ -2277,11 +2308,20 @@ function FlowSurface({
                   rect: {
                     x: position.x,
                     y: position.y,
-                    width: size?.width || 280,
-                    height: size?.height || 180,
+                    width:
+                      Number.isFinite(width) && width > 0 && width <= 10000
+                        ? width
+                        : size?.width || 280,
+                    height:
+                      Number.isFinite(height) && height > 0 && height <= 10000
+                        ? height
+                        : size?.height || 180,
                     pinned: false,
                   },
-                });
+                };
+                if (requestCreate)
+                  requestCreate(operation, item.requiresFields === true);
+                else void operate(operation);
                 clearFilters();
               } catch {
                 showNotice("这块组件没有放上去。请从工具箱再拖一次。");
