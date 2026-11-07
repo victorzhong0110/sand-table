@@ -19,6 +19,8 @@ import { peekContent } from "../data-client/content.ts";
 import type { Board } from "../data-client/model.ts";
 import { useTypeCatalog } from "../views/catalog.tsx";
 import { GenericCard } from "../views/GenericCard.tsx";
+import { CustomView } from "../views/CustomView.tsx";
+import { customView } from "../views/registry.tsx";
 import { UnknownType } from "../views/UnknownType.tsx";
 import {
   componentTypes,
@@ -245,6 +247,9 @@ export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
   const kernelType =
     instance.kernelType || v3TypeOf(instance.type, instance.data);
   const spec = catalog.specs.get(kernelType);
+  const hasCustomView = Boolean(
+    spec && instance.objectId && customView(spec.display?.view),
+  );
   const kernelData = v3DataOf(kernelType, instance.data);
   const resolved = peekContent(instance, api.board.contentObjects);
   const detail = instance.appearance?.detail;
@@ -437,7 +442,14 @@ export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
           readOnly
         />
       )}
-      {expanded && (
+      {expanded && hasCustomView && spec && instance.objectId && (
+        <CustomView
+          objectId={instance.objectId}
+          presentationId={instance.id}
+          spec={spec}
+        />
+      )}
+      {expanded && !hasCustomView && (
         <GenericCard
           title={resolved.title}
           kernelType={kernelType}

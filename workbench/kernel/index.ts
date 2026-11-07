@@ -24,6 +24,14 @@ export type {
   TypeSpec,
 } from "./types.ts";
 export { CommandError } from "./errors.ts";
+export { readBindings, readObjectVersion } from "./bindings.ts";
+export type {
+  BindingInput,
+  BindingItem,
+  BindingsResult,
+  HistoricalObjectRow,
+  VersionResult,
+} from "./bindings.ts";
 export {
   WorkspaceOpenError,
   getMeta,

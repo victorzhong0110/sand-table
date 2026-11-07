@@ -314,6 +314,7 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
 |---|---|---|
 | `app_board` | `{ boardId }` | 返回 `boardContents` 的完整结果（对象数据是迁移后的投影），给画布渲染 |
 | `app_changes` | `{ since }` | 返回 `changesSince`（对象数据是迁移后的投影），界面每秒调用一次 |
+| `app_bindings` | `{ action: "read" \| "version", workspaceId, objectId, slot, ids?, fields?, limit?, cursor?, targetId?, version? }` | 读取组件声明的槽中已绑定对象或其中一个对象的指定版本；读取版本须给 `targetId` 和 `version`。工作空间、槽和目标逐次校验，`self` 只指读取组件自身 |
 | `app_edit` | 同 `sand_edit` | 人的写入，`actor` 为 human |
 | `app_history` | 同 `sand_history` | 人的撤销、重做、跳转 |
 | `app_view` | `{ action: "get" \| "select" \| "camera" \| "navigate", viewId, boardId?, ... }` | 视角、选区、进入或返回白板；不进历史。`get` 返回 `navStack`；`select` 与 `camera` 也接受 `boardId`，第一次调用就能登记视角，不用先 `navigate` 一次 |
