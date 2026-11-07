@@ -3173,6 +3173,240 @@ try {
   await frame
     .getByRole("button", { name: "撤销", exact: true })
     .waitFor({ state: "hidden" });
+  /* 注册表驱动的工具箱与组件包管理。 */
+  await railButton("设置").click();
+  const packManager = frame.getByRole("region", { name: "组件包管理" });
+  await packManager.waitFor();
+  const t39Pack = {
+    format: "sand-table-pack",
+    formatVersion: 2,
+    id: "t39",
+    title: "探针包",
+    version: 1,
+    types: [
+      {
+        type: "t39.item",
+        title: "探针卡片",
+        description: "测试注册表组件",
+        icon: "text",
+        version: 1,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["mode"],
+          properties: {
+            text: { type: "string" },
+            mode: {
+              type: "string",
+              enum: ["one", "two"],
+              "x-sand-default": "one",
+            },
+          },
+        },
+        display: {
+          material: "paper",
+          defaultSize: { width: 200, height: 120 },
+        },
+      },
+    ],
+    relationKinds: [
+      {
+        kind: "t39.related",
+        title: "连接",
+        inverseTitle: "连接",
+        allowsInferred: false,
+      },
+    ],
+    presets: [
+      {
+        key: "same",
+        type: "t39.item",
+        title: "探针预设一",
+        data: { text: "甲" },
+      },
+      {
+        key: "same",
+        type: "t39.item",
+        title: "探针预设二",
+        data: { text: "乙" },
+      },
+    ],
+    templates: [
+      {
+        id: "t39.pair",
+        title: "探针模板",
+        commands: [
+          {
+            op: "object.create",
+            ref: "a",
+            type: "t39.item",
+            title: "模板甲",
+            data: { mode: "two" },
+          },
+          {
+            op: "object.create",
+            ref: "b",
+            type: "t39.item",
+            title: "模板乙",
+            data: { mode: "two" },
+          },
+          { op: "presentation.create", boardId: "$board", objectId: "@a" },
+          { op: "presentation.create", boardId: "$board", objectId: "@b" },
+          {
+            op: "relation.create",
+            kind: "t39.related",
+            sourceId: "@a",
+            targetId: "@b",
+          },
+        ],
+      },
+    ],
+  };
+  const t39File = join(root, "t39-pack.json");
+  writeFileSync(t39File, JSON.stringify(t39Pack));
+  await packManager.locator('input[type="file"]').setInputFiles(t39File);
+  await packManager.getByText("组件包已导入。可以在工具箱中使用。").waitFor();
+  await frame.getByRole("button", { name: "关闭设置" }).click();
+  await railButton("组件").click();
+  const toolbox = frame.getByRole("complementary", { name: "组件工具箱" });
+  await toolbox.getByRole("button", { name: "基础", exact: true }).click();
+  await toolbox
+    .getByRole("textbox", { name: "搜索组件" })
+    .fill("测试注册表组件");
+  await toolbox
+    .getByRole("button", { name: "探针卡片", exact: true })
+    .waitFor();
+  await toolbox.getByRole("textbox", { name: "搜索组件" }).fill("");
+  await toolbox.getByRole("button", { name: "探针包", exact: true }).click();
+  const paletteStatus: any = await call("sand_status");
+  for (const pack of paletteStatus.packs.filter((item: any) => item.enabled))
+    assert.equal(
+      await toolbox
+        .getByRole("button", { name: pack.title, exact: true })
+        .count(),
+      1,
+    );
+  const beforeCreateCanvas = await frame.locator(".canvas").boundingBox();
+  const beforeCreateToolbox = await toolbox.boundingBox();
+  const inspectorBeforeCreate = await frame
+    .locator(".studio-inspector")
+    .isVisible();
+  assert.ok(beforeCreateCanvas && beforeCreateToolbox);
+  const expectedCenter = {
+    x:
+      (beforeCreateToolbox.x +
+        beforeCreateToolbox.width +
+        16 +
+        beforeCreateCanvas.x +
+        beforeCreateCanvas.width -
+        (inspectorBeforeCreate ? 332 : 16)) /
+      2,
+    y: beforeCreateCanvas.y + (120 + beforeCreateCanvas.height - 60) / 2,
+  };
+  await toolbox.getByRole("button", { name: "探针卡片", exact: true }).click();
+  for (let i = 0; i < 100; i++) {
+    if ((await call("sand_query", { types: ["t39.item"] })).total === 1) break;
+    await page.waitForTimeout(50);
+  }
+  assert.equal((await call("sand_query", { types: ["t39.item"] })).total, 1);
+  const initialItem = (await call("sand_query", { types: ["t39.item"] }))
+    .rows[0];
+  assert.equal(
+    (await call("sand_read", { ids: [initialItem.id] })).objects[0].data.mode,
+    "one",
+  );
+  const createdBox = await frame
+    .locator(".component-card", { hasText: "探针卡片" })
+    .first()
+    .boundingBox();
+  assert.ok(createdBox);
+  assert.ok(
+    Math.abs(createdBox.x + createdBox.width / 2 - expectedCenter.x) < 25,
+    "点击组件时放在可见画布中央",
+  );
+  assert.ok(
+    Math.abs(createdBox.y + createdBox.height / 2 - expectedCenter.y) < 25,
+    "点击组件时垂直居中",
+  );
+  await toolbox.getByRole("tab", { name: "场景" }).click();
+  await toolbox
+    .getByRole("button", { name: "探针预设一 探针卡片", exact: true })
+    .waitFor();
+  await toolbox
+    .getByRole("button", { name: "探针预设二 探针卡片", exact: true })
+    .waitFor();
+  await toolbox
+    .getByRole("button", { name: "探针预设一 探针卡片", exact: true })
+    .click();
+  for (let i = 0; i < 100; i++) {
+    if ((await call("sand_query", { types: ["t39.item"] })).total === 2) break;
+    await page.waitForTimeout(50);
+  }
+  assert.equal((await call("sand_query", { types: ["t39.item"] })).total, 2);
+  await toolbox.getByRole("button", { name: "探针模板", exact: true }).click();
+  for (let i = 0; i < 100; i++) {
+    if ((await call("sand_query", { types: ["t39.item"] })).total === 4) break;
+    await page.waitForTimeout(50);
+  }
+  assert.equal((await call("sand_query", { types: ["t39.item"] })).total, 4);
+  const activeBoard = (await call("sand_context")).board.id as string;
+  const t39Board: any = await call("app_board", { boardId: activeBoard });
+  assert.equal(
+    t39Board.relations.filter(
+      (relation: any) => relation.kind === "t39.related",
+    ).length,
+    1,
+  );
+  await railButton("设置").click();
+  const t39Row = packManager
+    .locator(".pack-group")
+    .filter({ hasText: "探针包" });
+  await t39Row.getByText("1 个类型").waitFor();
+  const downloadPromise = page.waitForEvent("download");
+  await t39Row.getByRole("button", { name: "导出", exact: true }).click();
+  const t39Download = await downloadPromise;
+  assert.equal(
+    JSON.parse(readFileSync((await t39Download.path())!, "utf8")).id,
+    "t39",
+  );
+  await t39Row.getByRole("button", { name: "停用", exact: true }).click();
+  const packConfirmation = frame.getByRole("alertdialog", {
+    name: "确认组件包更改",
+  });
+  await packConfirmation
+    .getByText("这个包的 4 个对象会变成只读，数据不会丢失。")
+    .waitFor();
+  await packConfirmation.getByRole("button", { name: "确认停用" }).click();
+  await t39Row.getByRole("button", { name: "启用", exact: true }).waitFor();
+  await undo();
+  for (let i = 0; i < 100; i++) {
+    const state: any = await call("sand_status");
+    if (state.packs.find((pack: any) => pack.id === "t39")?.enabled) break;
+    await page.waitForTimeout(50);
+  }
+  assert.equal(
+    (await call("sand_status")).packs.find((pack: any) => pack.id === "t39")
+      ?.enabled,
+    true,
+  );
+  const badPackFile = join(root, "t39-bad.json");
+  writeFileSync(
+    badPackFile,
+    JSON.stringify({
+      format: "sand-table-pack",
+      formatVersion: 2,
+      id: "bad",
+      title: "错误包",
+      version: 1,
+      types: [{ type: "bad.item" }],
+    }),
+  );
+  await packManager.locator('input[type="file"]').setInputFiles(badPackFile);
+  await packManager.getByRole("alert").waitFor();
+  assert.notEqual(
+    (await packManager.getByRole("alert").innerText()).trim(),
+    "",
+  );
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",

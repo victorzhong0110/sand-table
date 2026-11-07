@@ -24,6 +24,7 @@ import {
 import { presetOfBase } from "./theme/presets.ts";
 import { coerceTheme, type Theme } from "./theme/tokens.ts";
 import { ThemeSettings } from "./theme/ThemeSettings.tsx";
+import { PackManager } from "./packs/PackManager.tsx";
 import { Inspector } from "./views/Inspector.tsx";
 import { ChangePanel } from "./ChangePanel.tsx";
 import { WorkspacePanel, type WorkspacePanelProps } from "./WorkspacePanel.tsx";
@@ -77,6 +78,7 @@ export function CanvasShell({
   workspacePanel,
   hostTask,
   onCancelHostTask,
+  downloadFile,
 }: {
   board: Board;
   viewId: string;
@@ -96,6 +98,7 @@ export function CanvasShell({
   workspacePanel?: WorkspacePanelProps;
   hostTask?: HostTaskEvent;
   onCancelHostTask?: () => Promise<void>;
+  downloadFile: (filename: string, text: string) => Promise<void>;
 }) {
   const [mode, setMode] = useState("browse"),
     [focusRevision, setFocusRevision] = useState(0),
@@ -114,6 +117,13 @@ export function CanvasShell({
     [shell, setShell] = useState<HostShellMessage>(EMPTY_SHELL);
   const field = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLElement | null>(null);
+  const centerPositionRef = useRef<
+    | ((size: {
+        width: number;
+        height: number;
+      }) => { x: number; y: number } | undefined)
+    | null
+  >(null);
   const railRefs = useRef<Partial<Record<NavId, HTMLButtonElement | null>>>({});
   const navRef = useRef(nav);
   const revealSeen = useRef(0);
@@ -257,16 +267,24 @@ export function CanvasShell({
     const camera = view?.camera || { x: 24, y: 24, zoom: 1 };
     const offset =
       (b.instances.filter((c) => c.spaceId === view?.spaceId).length % 6) * 24;
+    const componentSize = {
+      width: size?.width || size_?.width || 280,
+      height: size?.height || size_?.height || 180,
+    };
+    const centered = centerPositionRef.current?.(componentSize);
     void operate({
       kind: "create",
+      workspaceId: b.workspaceId,
+      boardId: view?.spaceId ?? b.id,
       type,
       title,
       data: data ?? initialData(type, title),
       rect: {
-        x: ((narrow ? 24 : 280) + offset - camera.x) / camera.zoom,
-        y: (160 + offset - 36 - camera.y) / camera.zoom,
-        width: size?.width || size_?.width || 280,
-        height: size?.height || size_?.height || 180,
+        x:
+          centered?.x ??
+          ((narrow ? 24 : 280) + offset - camera.x) / camera.zoom,
+        y: centered?.y ?? (160 + offset - 36 - camera.y) / camera.zoom,
+        ...componentSize,
         pinned: false,
       },
       ...(objectId ? { objectId } : {}),
@@ -472,6 +490,7 @@ export function CanvasShell({
             action={action}
             call={call}
             showPanel={setPanel}
+            openPackSettings={() => applyNav("settings")}
           />
           <PanelResize onResizeStart={resizeFrom} />
         </div>
@@ -603,6 +622,13 @@ export function CanvasShell({
                   call={call}
                   onPreview={setPreviewTheme}
                 />
+                <PackManager
+                  call={call}
+                  boardId={view?.spaceId ?? b.id}
+                  workspaceId={b.workspaceId}
+                  revision={b.revision}
+                  download={downloadFile}
+                />
               </>
             ) : (
               <HelpPanel
@@ -630,6 +656,7 @@ export function CanvasShell({
             edgePan={edgePan}
             edgeSpeed={edgeSpeed}
             motionPaused={nav === "settings"}
+            centerPositionRef={centerPositionRef}
             insets={shellOcclusion({
               panelWidth: nav ? shownWidth : null,
               inspectorRight: Boolean(panel) && panel !== "ai",

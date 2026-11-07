@@ -1,33 +1,8 @@
-import { paletteTypes, initialData } from "./domain-ui.ts";
 import { Icon } from "./Icon.tsx";
 import { useState } from "react";
-import type { Board, ComponentPack } from "./data-client/model.ts";
-import { componentTypes, defaultData } from "./data-client/spaces.ts";
+import type { Board } from "./data-client/model.ts";
+import { usePackCatalog } from "./packs/catalog.ts";
 import "./packs.css";
-const groups = [
-  { id: "novel", title: "小说", types: ["character", "event", "chapter"] },
-  {
-    id: "research",
-    title: "科研",
-    types: ["hypothesis", "evidence", "conclusion"],
-  },
-  {
-    id: "basic",
-    title: "基础",
-    types: ["text", "heading", "board", "resource", "code"],
-  },
-  {
-    id: "data",
-    title: "数据",
-    types: ["metric", "status", "chart", "table", "events"],
-  },
-  { id: "thinking", title: "思考", types: ["task", "reasoning", "comparison"] },
-  {
-    id: "development",
-    title: "开发",
-    types: ["intent", "proposal", "validation"],
-  },
-];
 export function Toolbox({
   board: b,
   viewId,
@@ -42,10 +17,12 @@ export function Toolbox({
   activeSection = "tools",
   focusInstance,
   close,
+  openPackSettings,
 }: {
   focusInstance?: (id: string) => void;
   activeSection?: string;
   close?: () => void;
+  openPackSettings?: () => void;
   board: Board;
   viewId: string;
   mode: string;
@@ -67,105 +44,35 @@ export function Toolbox({
   navigate?: (spaceId: string) => void;
 }) {
   const [section, setSection] = useState("components"),
-    [group, setGroup] = useState("basic"),
+    [group, setGroup] = useState("base"),
     [query, setQuery] = useState(""),
     [path, setPath] = useState(""),
     [sourceQuery, setSourceQuery] = useState(""),
-    [packJson, setPackJson] = useState(""),
-    [packUrl, setPackUrl] = useState(""),
-    [packError, setPackError] = useState(""),
-    [packNotice, setPackNotice] = useState(""),
-    [packBusy, setPackBusy] = useState(false),
-    [exported, setExported] = useState<{ id: string; json: string }>();
-  const palette = paletteTypes().filter(
-    (c) =>
-      groups.find((g) => g.id === group)!.types.includes(c.type) &&
-      c.title.includes(query),
+    [packError, setPackError] = useState("");
+  const catalog = usePackCatalog(call, b.id, b.workspaceId, b.revision);
+  const matching = (title: string, description = "") =>
+    `${title} ${description}`
+      .toLocaleLowerCase()
+      .includes(query.trim().toLocaleLowerCase());
+  const palette = catalog.types.filter(
+    (item) =>
+      (query.trim().length > 0 || item.pack === group) &&
+      matching(item.title, item.description),
   );
-  /* One group per imported pack, after the built-in groups. A pack preset is
-     only a preset: it fills in a component that already exists. */
-  const packGroups = (b.componentPacks ?? [])
-    .map((pack) => ({
-      pack,
-      items: pack.components.filter((c) => c.title.includes(query)),
-    }))
-    .filter((g) => !query || g.items.length > 0);
-  const packSource = (pack: ComponentPack) =>
-    pack.source === "json" ? "粘贴的 JSON" : pack.source.replace(/^url:/, "");
-  async function packTool(name: string, args: Record<string, unknown>) {
-    if (call) return await call(name, args);
-    const result = await action(name, args);
-    if (result === undefined)
-      throw Error("操作没有成功，服务端的错误说明见页面上方的提示。");
-    return result;
-  }
-  async function importPack(source: { json: string } | { url: string }) {
+  const templateBoardId = b.views[viewId]?.spaceId ?? b.id;
+  async function applyTemplate(templateId: string) {
+    if (!call) return;
     setPackError("");
-    setPackNotice("");
-    setPackBusy(true);
     try {
-      const fresh = await action("sand_read_board");
-      const revision = (fresh as Board | undefined)?.revision ?? b.revision;
-      const result = await packTool("sand_import_component_pack", {
-        revision,
-        viewId,
-        author: "human",
-        source,
+      if (!b.workspaceId) throw Error("工作空间尚未准备好，请重新打开工具箱。");
+      await call("app_edit", {
+        workspaceId: b.workspaceId,
+        commands: [
+          { op: "template.apply", templateId, boardId: templateBoardId },
+        ],
       });
-      /* The server's warnings are part of the answer: a pack written for a
-         newer version can be imported, but the person has to be told what
-         was kept, dropped or shown as a placeholder. */
-      const warnings = (result?.warnings ?? []) as string[];
-      const pack = result?.pack;
-      setPackNotice(
-        warnings.length
-          ? `已导入「${pack?.name ?? "组件包"}」，有 ${warnings.length} 条提示：${warnings.join(" ")}`
-          : `已导入「${pack?.name ?? "组件包"}」，共 ${pack?.componentCount ?? 0} 个预设。`,
-      );
-      setPackJson("");
-      setPackUrl("");
-      /* Read the board again so the new group shows up right away. */
-      await action("sand_read_board");
-    } catch (e) {
-      setPackError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPackBusy(false);
-    }
-  }
-  async function removePack(pack: ComponentPack) {
-    setPackError("");
-    setPackBusy(true);
-    try {
-      const fresh = await action("sand_read_board");
-      const revision = (fresh as Board | undefined)?.revision ?? b.revision;
-      await packTool("sand_remove_component_pack", {
-        revision,
-        packId: pack.id,
-        author: "human",
-      });
-      if (exported?.id === pack.id) setExported(undefined);
-      await action("sand_read_board");
-    } catch (e) {
-      setPackError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPackBusy(false);
-    }
-  }
-  async function exportPack(pack: ComponentPack) {
-    setPackError("");
-    setPackBusy(true);
-    try {
-      const result = await packTool("sand_export_component_pack", {
-        packId: pack.id,
-      });
-      setExported({
-        id: pack.id,
-        json: JSON.stringify(result.manifest, null, 2),
-      });
-    } catch (e) {
-      setPackError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPackBusy(false);
+    } catch (error) {
+      setPackError(error instanceof Error ? error.message : String(error));
     }
   }
   const sources = b.objects
@@ -183,6 +90,7 @@ export function Toolbox({
     title: string,
     data?: any,
     objectId?: string,
+    size?: { width: number; height: number },
   ) {
     e.dataTransfer.effectAllowed = "copy";
     e.dataTransfer.setData(
@@ -190,8 +98,9 @@ export function Toolbox({
       JSON.stringify({
         type,
         title,
-        data: data || initialData(type, title),
+        data: data ?? {},
         objectId,
+        size,
       }),
     );
   }
@@ -266,180 +175,111 @@ export function Toolbox({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
+            {catalog.loading && <p role="status">正在读取组件…</p>}
+            {catalog.error && <p role="alert">{catalog.error}</p>}
             <div className="component-categories">
-              {groups.map((g) => (
-                <button
-                  key={g.id}
-                  aria-pressed={group === g.id}
-                  onClick={() => setGroup(g.id)}
-                >
-                  {g.title}
-                </button>
-              ))}
+              {catalog.packs
+                .filter((pack) => pack.enabled)
+                .map((pack) => (
+                  <button
+                    key={pack.id}
+                    aria-pressed={group === pack.id}
+                    onClick={() => setGroup(pack.id)}
+                  >
+                    {pack.title}
+                  </button>
+                ))}
             </div>
             <div className="palette-list">
-              {palette.map((c) => (
-                <button
-                  className="palette-item"
-                  key={c.type}
-                  disabled={busy}
-                  draggable={!busy}
-                  onDragStart={(e) => drag(e, c.type, c.title)}
-                  onClick={() => create(c.type, c.title)}
-                  title={"拖入画布，或点击添加" + c.title}
-                >
-                  <span className={"palette-icon " + group} aria-hidden="true">
-                    <Icon name={c.type} />
-                  </span>
-                  <span>{c.title}</span>
-                  <span className="palette-grip" aria-hidden="true">
-                    <Icon name="grip" size={14} />
-                  </span>
-                </button>
-              ))}
+              {palette.map((item) => {
+                const data = item.defaults;
+                return (
+                  <button
+                    className="palette-item"
+                    key={item.type}
+                    disabled={busy}
+                    draggable={!busy}
+                    onDragStart={(event) =>
+                      drag(
+                        event,
+                        item.type,
+                        item.title,
+                        data,
+                        undefined,
+                        item.size,
+                      )
+                    }
+                    onClick={() =>
+                      create(item.type, item.title, data, undefined, item.size)
+                    }
+                    title={item.description || item.title}
+                  >
+                    <span className="palette-icon pack" aria-hidden="true">
+                      <Icon name={item.icon} />
+                    </span>
+                    <span>{item.title}</span>
+                    <span className="palette-grip" aria-hidden="true">
+                      <Icon name="grip" size={14} />
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-            {packGroups.map(({ pack, items }) => (
-              <section className="pack-group" key={pack.id}>
-                <header className="pack-heading">
-                  <b className="pack-name">{pack.name}</b>
-                  <small className="pack-meta">
-                    {pack.author ? pack.author + " · " : ""}
-                    {packSource(pack)}
-                  </small>
-                  <div className="pack-actions">
-                    <button
-                      disabled={busy || packBusy}
-                      onClick={() => void exportPack(pack)}
-                    >
-                      导出
-                    </button>
-                    <button
-                      disabled={busy || packBusy}
-                      onClick={() => void removePack(pack)}
-                    >
-                      移除
-                    </button>
-                  </div>
-                </header>
-                <div className="palette-list">
-                  {items.map((c) => {
-                    const base = componentTypes.find((t) => t.type === c.type);
-                    const size =
-                      c.width === undefined && c.height === undefined
-                        ? undefined
-                        : {
-                            width: c.width ?? base?.width ?? 280,
-                            height: c.height ?? base?.height ?? 180,
-                          };
-                    return (
-                      <button
-                        className="palette-item"
-                        key={pack.id + ":" + c.key}
-                        disabled={busy || packBusy}
-                        draggable={!busy && !packBusy}
-                        onDragStart={(e) => drag(e, c.type, c.title, c.data)}
-                        onClick={() =>
-                          create(c.type, c.title, c.data, undefined, size)
-                        }
-                        title={"拖入画布，或点击添加" + c.title}
-                      >
-                        <span className="palette-icon pack" aria-hidden="true">
-                          <Icon name={c.icon ?? c.type} />
-                        </span>
-                        <span>{c.title}</span>
-                        <span className="palette-grip" aria-hidden="true">
-                          <Icon name="grip" size={14} />
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-                {exported?.id === pack.id && (
-                  <textarea
-                    className="pack-export"
-                    aria-label={pack.name + " 的清单"}
-                    readOnly
-                    value={exported.json}
-                  />
-                )}
-              </section>
-            ))}
+            {!catalog.loading && !palette.length && (
+              <p className="pack-hint">这里没有匹配的组件。</p>
+            )}
             <details className="pack-import">
               <summary>导入组件包</summary>
-              <div className="pack-import-body">
-                <p className="pack-hint">
-                  组件包是一份 JSON
-                  清单，只是数据：它只会给这里多出几组预填组件，
-                  不会安装新代码，也不会改动任何源码。
-                </p>
-                <label>
-                  粘贴 JSON
-                  <textarea
-                    aria-label="组件包 JSON"
-                    placeholder='{"protocol":"sand-table/component-pack","version":1,…}'
-                    value={packJson}
-                    onChange={(e) => setPackJson(e.target.value)}
-                  />
-                </label>
-                <button
-                  disabled={busy || packBusy || !packJson.trim()}
-                  onClick={() => void importPack({ json: packJson.trim() })}
-                >
-                  从粘贴的 JSON 导入
-                </button>
-                <label>
-                  或粘贴 https:// 链接
-                  <input
-                    aria-label="组件包链接"
-                    placeholder="https://example.com/pack.json"
-                    value={packUrl}
-                    onChange={(e) => setPackUrl(e.target.value)}
-                  />
-                </label>
-                <button
-                  disabled={busy || packBusy || !packUrl.trim()}
-                  onClick={() => void importPack({ url: packUrl.trim() })}
-                >
-                  从链接导入
-                </button>
-                {packError && (
-                  <p className="pack-error" role="alert">
-                    {packError}
-                  </p>
-                )}
-                {packNotice && <p className="pack-notice">{packNotice}</p>}
-              </div>
+              <p className="pack-hint">组件包在设置中导入和管理。</p>
+              <button onClick={openPackSettings}>打开组件包设置</button>
             </details>
           </>
         ) : section === "presets" ? (
           <>
-            <h2>从一个场景开始</h2>
-            <button
-              className="preset-choice"
-              disabled={busy}
-              onClick={() =>
-                create("board", "研究比较", { preset: "research" })
-              }
-            >
-              <b>研究比较</b>
-              <span>证据、图表、比较和下一步</span>
-            </button>
-            <button
-              className="preset-choice"
-              disabled={busy}
-              onClick={() => create("board", "Bug 修复", { preset: "bug" })}
-            >
-              <b>Bug 修复</b>
-              <span>目标、意图、提案与验证</span>
-            </button>
-            <button
-              className="preset-choice"
-              disabled={busy}
-              onClick={() => create("board", "空白子白板", {})}
-            >
-              <b>空白子白板</b>
-              <span>在这张板子里再放一张板子</span>
-            </button>
+            <h2>模板</h2>
+            {catalog.templates.map((template) => (
+              <button
+                className="preset-choice"
+                key={`${template.pack}:${template.id}`}
+                disabled={busy}
+                onClick={() => void applyTemplate(template.id)}
+              >
+                <b>{template.title}</b>
+              </button>
+            ))}
+            {!catalog.templates.length && (
+              <p className="pack-hint">当前没有可用模板。</p>
+            )}
+            <h2>预设</h2>
+            {catalog.types.flatMap((item) =>
+              item.presets.map((preset, index) => (
+                <button
+                  className="preset-choice"
+                  key={`${item.type}:${preset.key}:${index}`}
+                  disabled={busy}
+                  onClick={() =>
+                    create(
+                      item.type,
+                      preset.title,
+                      { ...item.defaults, ...preset.data },
+                      undefined,
+                      {
+                        width: preset.width ?? item.size?.width ?? 280,
+                        height: preset.height ?? item.size?.height ?? 180,
+                      },
+                    )
+                  }
+                >
+                  <b>{preset.title}</b>
+                  <span>{item.title}</span>
+                </button>
+              )),
+            )}
+            {packError && (
+              <p className="pack-error" role="alert">
+                {packError}
+              </p>
+            )}
           </>
         ) : (
           <>
