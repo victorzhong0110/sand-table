@@ -1,4 +1,13 @@
-import type { JSX } from "react";
+import { createContext, useContext, type JSX } from "react";
+import type {
+  Command,
+  CommandResult,
+  ObjectRow,
+  PresentationRow,
+  TypeSpec,
+} from "../../kernel/index.ts";
+import type { V3Store, V3Tool } from "../data-client/store.ts";
+import type { Bindings } from "./bindings.ts";
 import {
   formatValue,
   hasValue,
@@ -38,17 +47,25 @@ export type Widget = {
 };
 
 export type ViewProps = {
-  objectId: string;
-  type: string;
-  title: string;
-  data: Record<string, unknown>;
+  object: ObjectRow;
+  spec: TypeSpec;
+  presentation: PresentationRow;
   detail: "full" | "label" | "icon";
   readOnly: boolean;
   dispatch: (
-    commands: Record<string, unknown>[],
+    commands: Command[],
     options?: { intentId?: string },
-  ) => Promise<unknown>;
+  ) => Promise<CommandResult>;
+  bindings: Bindings;
 };
+
+export const ViewRuntimeContext = createContext<{
+  store: V3Store;
+  call: V3Tool;
+} | null>(null);
+export function useViewRuntime() {
+  return useContext(ViewRuntimeContext);
+}
 
 /** 本卡只留空表。display.view 对上名字才用，对不上就用通用视图。 */
 export const customViews: Record<string, (props: ViewProps) => JSX.Element> =

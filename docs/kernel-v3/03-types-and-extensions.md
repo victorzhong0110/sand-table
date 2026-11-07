@@ -166,6 +166,11 @@ export type ViewProps = {
   detail: "full" | "label" | "icon";
   readOnly: boolean;
   dispatch: (commands: Command[], options?: { intentId?: string }) => Promise<CommandResult>;
+  bindings: {
+    read(slot: string, opts?: { ids?: string[]; fields?: string[]; limit?: number; cursor?: string }): Promise<BindingsResult>;
+    readVersion(slot: string, id: string, version: number): Promise<VersionResult>;
+    subscribe(slot: string, onChange: () => void): () => void;
+  };
 };
 ```
 

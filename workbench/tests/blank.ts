@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { once } from "node:events";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { build } from "esbuild";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { readConnection } from "../local/session.ts";
@@ -60,9 +61,10 @@ try {
     executablePath: process.env.CHROMIUM_PATH,
     args: ["--no-sandbox"],
   });
-  const page = await browser.newPage({
-      viewport: { width: 1440, height: 1000 },
-    }),
+  const browserContext = await browser.newContext({
+    viewport: { width: 1440, height: 1000 },
+  });
+  const page = await browserContext.newPage(),
     errors: string[] = [];
   const isMac = await page.evaluate(() =>
     /Mac|iPhone|iPad|iPod/i.test(
@@ -3173,6 +3175,165 @@ try {
   await frame
     .getByRole("button", { name: "撤销", exact: true })
     .waitFor({ state: "hidden" });
+
+  // 两个独立页面通过同一服务修改和订阅绑定，视图使用与画布相同的挂载组件。
+  const bindingSlot = {
+    key: "source",
+    label: "来源",
+    kind: "binding-test.source",
+    direction: "out" as const,
+    targetTypes: ["binding-test.table"],
+    many: true,
+  };
+  const readerSpec = {
+    type: "binding-test.reader",
+    title: "读取者",
+    description: "测试读取者",
+    icon: "note",
+    version: 1,
+    schema: { type: "object", properties: {}, additionalProperties: false },
+    display: { material: "paper", defaultSize: { width: 200, height: 100 } },
+    relationSlots: [bindingSlot],
+  };
+  const tableSpec = {
+    type: "binding-test.table",
+    title: "表格",
+    description: "测试表格",
+    icon: "note",
+    version: 1,
+    schema: {
+      type: "object",
+      properties: { value: { type: "string" } },
+      additionalProperties: false,
+    },
+    display: { material: "paper", defaultSize: { width: 200, height: 100 } },
+  };
+  await call("app_edit", {
+    commands: [
+      {
+        op: "pack.import",
+        manifest: {
+          format: "sand-table-pack",
+          formatVersion: 2,
+          id: "binding-test",
+          title: "绑定测试",
+          version: 1,
+          types: [readerSpec, tableSpec],
+          relationKinds: [
+            {
+              kind: "binding-test.source",
+              title: "来源",
+              inverseTitle: "被引用",
+              allowsInferred: false,
+            },
+          ],
+        },
+      },
+    ],
+  });
+  const bindingStatus: any = await call("sand_status");
+  const bindingBoardId = bindingStatus.homeBoardId as string;
+  const bindingWorkspaceId = bindingStatus.workspace.id as string;
+  const bindingCreated: any = await call("app_edit", {
+    commands: [
+      {
+        op: "object.create",
+        ref: "reader",
+        type: readerSpec.type,
+        title: "绑定视图",
+      },
+      {
+        op: "object.create",
+        ref: "table",
+        type: tableSpec.type,
+        title: "表格",
+        data: { value: "修改前" },
+      },
+      {
+        op: "relation.create",
+        kind: "binding-test.source",
+        sourceId: "@reader",
+        targetId: "@table",
+      },
+      {
+        op: "presentation.create",
+        ref: "view",
+        boardId: bindingBoardId,
+        objectId: "@reader",
+      },
+    ],
+  });
+  const compiled = await build({
+    entryPoints: ["tests/fixtures/bindings-browser.tsx"],
+    bundle: true,
+    write: false,
+    platform: "browser",
+    format: "iife",
+    jsx: "automatic",
+  });
+  const context = page.context();
+  await context.route("**/__bindings_fixture.js", (route) =>
+    route.fulfill({
+      contentType: "application/javascript",
+      body: compiled.outputFiles[0]!.text,
+    }),
+  );
+  await context.route("**/__bindings_fixture", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: '<!doctype html><div id="fixture"></div><script src="/__bindings_fixture.js"></script>',
+    }),
+  );
+  const bindingPage = await context.newPage();
+  const editingPage = await context.newPage();
+  const fixtureUrl = new URL("/__bindings_fixture", c.url).href;
+  await Promise.all([
+    bindingPage.goto(fixtureUrl),
+    editingPage.goto(fixtureUrl),
+  ]);
+  await bindingPage.evaluate(
+    async (input) => window.startBindingFixture(input),
+    {
+      token: c.token,
+      workspaceId: bindingWorkspaceId,
+      boardId: bindingBoardId,
+      readerId: bindingCreated.created.reader,
+      presentationId: bindingCreated.created.view,
+      spec: {
+        ...readerSpec,
+        display: { ...readerSpec.display, view: "test.binding" },
+      },
+    },
+  );
+  await bindingPage.getByTestId("binding-value").getByText("修改前").waitFor();
+  await editingPage.evaluate(
+    async ({ token, tableId }) => {
+      const response = await fetch("/rpc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Sand-Token": token },
+        body: JSON.stringify({
+          method: "tools/call",
+          params: {
+            name: "app_edit",
+            arguments: {
+              commands: [
+                { op: "object.update", id: tableId, set: { value: "修改后" } },
+              ],
+            },
+          },
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok || result.isError) throw Error(JSON.stringify(result));
+    },
+    { token: c.token, tableId: bindingCreated.created.table },
+  );
+  await bindingPage
+    .getByTestId("binding-value")
+    .getByText("修改后")
+    .waitFor({ timeout: 2000 });
+  await bindingPage.close();
+  await editingPage.close();
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",

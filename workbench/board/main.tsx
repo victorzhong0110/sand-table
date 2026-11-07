@@ -24,6 +24,7 @@ import {
 import { installHostBridgeClient } from "./host-bridge-client.ts";
 import { translateLegacyTool } from "./data-client/legacy-calls.ts";
 import { V3Store } from "./data-client/store.ts";
+import { ViewRuntimeContext } from "./views/registry.tsx";
 import {
   toBoard,
   toCommands,
@@ -1165,8 +1166,17 @@ function Workbench() {
               : "system-ui,sans-serif",
       } as CSSProperties)
     : undefined;
+  const withViewRuntime = (content: React.ReactNode) => (
+    <ViewRuntimeContext.Provider
+      value={
+        storeRef.current ? { store: storeRef.current, call: callTool } : null
+      }
+    >
+      {content}
+    </ViewRuntimeContext.Provider>
+  );
   if (board.presentation !== "code")
-    return (
+    return withViewRuntime(
       <CanvasShell
         board={board}
         viewId={viewId}
@@ -1265,7 +1275,7 @@ function Workbench() {
           });
           if (result.isError) throw Error("Host rejected message.");
         }}
-      />
+      />,
     );
   return (
     <main
@@ -1384,26 +1394,28 @@ function Workbench() {
         </div>
       )}
       <div className="layout">
-        <FlowCanvas
-          board={board}
-          viewId={viewId}
-          mode={mode}
-          query={query}
-          kind={kind}
-          scope={scope}
-          arrows={arrows}
-          busy={busy}
-          operate={operate}
-          call={call}
-          clearFilters={clearFilters}
-          onOpenLink={(url) => {
-            const safe = safeUrl(url);
-            if (safe)
-              void app
-                ?.openLink({ url: safe })
-                .catch(() => setError(`宿主无法打开链接，请复制：${safe}`));
-          }}
-        />
+        {withViewRuntime(
+          <FlowCanvas
+            board={board}
+            viewId={viewId}
+            mode={mode}
+            query={query}
+            kind={kind}
+            scope={scope}
+            arrows={arrows}
+            busy={busy}
+            operate={operate}
+            call={call}
+            clearFilters={clearFilters}
+            onOpenLink={(url) => {
+              const safe = safeUrl(url);
+              if (safe)
+                void app
+                  ?.openLink({ url: safe })
+                  .catch(() => setError(`宿主无法打开链接，请复制：${safe}`));
+            }}
+          />,
+        )}
         <aside>
           <div className="side-tabs" role="tablist" aria-label="工作面板">
             {[
