@@ -2314,6 +2314,23 @@ main.canvas-app {
   background: #8d2f2f;
   border-color: #8d2f2f;
 }
+.create-object-dialog {
+  top: 12%;
+  max-height: 76vh;
+  overflow-y: auto;
+}
+.create-object-dialog h2 {
+  margin: 0 0 12px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+}
+.create-object-dialog > label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 0;
+}
 .summary-line {
   margin: 4px 0;
   color: var(--muted);

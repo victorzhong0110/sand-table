@@ -125,6 +125,7 @@ type Props = {
       }) => { x: number; y: number } | undefined)
     | null
   >;
+  requestCreate?: (operation: any, requiresFields: boolean) => void;
   operate: (op: any) => Promise<any>;
   call: (name: string, args?: Record<string, unknown>) => Promise<any>;
   onOpenLink: (url: string) => void;
@@ -231,6 +232,7 @@ function FlowSurface({
   motionPaused = false,
   insets = { left: 0, right: 0, top: 0, bottom: 0 },
   centerPositionRef,
+  requestCreate,
   operate,
   call,
   onOpenLink,
@@ -2295,7 +2297,7 @@ function FlowSurface({
                   x: event.clientX,
                   y: event.clientY,
                 });
-                void operate({
+                const operation = {
                   kind: "create",
                   workspaceId: b.workspaceId,
                   boardId: view.spaceId,
@@ -2316,7 +2318,10 @@ function FlowSurface({
                         : size?.height || 180,
                     pinned: false,
                   },
-                });
+                };
+                if (requestCreate)
+                  requestCreate(operation, item.requiresFields === true);
+                else void operate(operation);
                 clearFilters();
               } catch {
                 showNotice("这块组件没有放上去。请从工具箱再拖一次。");

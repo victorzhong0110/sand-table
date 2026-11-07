@@ -24,6 +24,8 @@ export type PaletteEntry = {
   }[];
   size?: { width: number; height: number };
   defaults: Record<string, unknown>;
+  required: string[];
+  minProperties: number;
 };
 export type TemplateEntry = { id: string; title: string; pack: string };
 
@@ -99,7 +101,12 @@ export function usePackCatalog(
         );
         const detailsByType = new Map<
           string,
-          { size: PaletteEntry["size"]; defaults: Record<string, unknown> }
+          {
+            size: PaletteEntry["size"];
+            defaults: Record<string, unknown>;
+            required: string[];
+            minProperties: number;
+          }
         >();
         for (const types of details)
           for (const type of types) {
@@ -120,6 +127,13 @@ export function usePackCatalog(
             detailsByType.set(type.type, {
               size: type.display?.defaultSize,
               defaults,
+              required: Array.isArray(type.schema?.required)
+                ? type.schema.required
+                : [],
+              minProperties:
+                typeof type.schema?.minProperties === "number"
+                  ? type.schema.minProperties
+                  : 0,
             });
           }
         const types: PaletteEntry[] = (listed.types ?? []).map((type: any) => ({
@@ -127,6 +141,8 @@ export function usePackCatalog(
           presets: type.presets ?? [],
           size: detailsByType.get(type.type)?.size,
           defaults: detailsByType.get(type.type)?.defaults ?? {},
+          required: detailsByType.get(type.type)?.required ?? [],
+          minProperties: detailsByType.get(type.type)?.minProperties ?? 0,
         }));
         if (!cancelled)
           setCatalog({

@@ -3208,6 +3208,30 @@ try {
           defaultSize: { width: 200, height: 120 },
         },
       },
+      {
+        type: "t39.required",
+        title: "必填卡片",
+        description: "创建前填写内容",
+        icon: "text",
+        version: 1,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["text"],
+          properties: {
+            text: {
+              type: "string",
+              minLength: 1,
+              "x-sand-label": "必填正文",
+              "x-sand-widget": "text",
+            },
+          },
+        },
+        display: {
+          material: "paper",
+          defaultSize: { width: 180, height: 100 },
+        },
+      },
     ],
     relationKinds: [
       {
@@ -3328,6 +3352,70 @@ try {
     Math.abs(createdBox.y + createdBox.height / 2 - expectedCenter.y) < 25,
     "点击组件时垂直居中",
   );
+  await toolbox.getByRole("button", { name: "必填卡片", exact: true }).click();
+  const createDialog = frame.getByRole("dialog", { name: "填写必填卡片" });
+  await createDialog.waitFor();
+  await page.screenshot({
+    path: "artifacts/t39-create-dialog.png",
+    fullPage: true,
+  });
+  await createDialog.getByRole("button", { name: "创建组件" }).click();
+  await createDialog.getByRole("alert").waitFor();
+  assert.match(
+    await createDialog.getByRole("alert").innerText(),
+    /请填写：必填正文。/,
+  );
+  await createDialog
+    .getByRole("textbox", { name: "必填正文" })
+    .fill("点击创建");
+  await createDialog.getByRole("button", { name: "创建组件" }).click();
+  await createDialog.waitFor({ state: "hidden" });
+  assert.equal(
+    (await call("sand_query", { types: ["t39.required"] })).total,
+    1,
+  );
+  const canvasBeforeRequiredDrop = await frame.locator(".canvas").boundingBox();
+  await toolbox
+    .getByRole("button", { name: "必填卡片", exact: true })
+    .dragTo(frame.locator(".canvas"), { targetPosition: { x: 380, y: 240 } });
+  await createDialog.waitFor();
+  await createDialog
+    .getByRole("textbox", { name: "必填正文" })
+    .fill("拖入创建");
+  await createDialog.getByRole("button", { name: "创建组件" }).click();
+  await createDialog.waitFor({ state: "hidden" });
+  const requiredQuery: any = await call("sand_query", {
+    types: ["t39.required"],
+    limit: 10,
+  });
+  assert.equal(requiredQuery.total, 2);
+  const requiredObjects: any = await call("sand_read", {
+    ids: requiredQuery.rows.map((row: any) => row.id),
+  });
+  const droppedObject = requiredObjects.objects.find(
+    (object: any) => object.data.text === "拖入创建",
+  );
+  assert.ok(droppedObject && canvasBeforeRequiredDrop);
+  const requiredBoardId = (await call("sand_context")).board.id as string;
+  const requiredBoard: any = await call("app_board", {
+    boardId: requiredBoardId,
+  });
+  const droppedPresentation = requiredBoard.presentations.find(
+    (item: any) => item.objectId === droppedObject.id,
+  );
+  assert.ok(droppedPresentation);
+  const droppedBox = await frame
+    .locator(`[data-instance-id="${droppedPresentation.id}"]`)
+    .boundingBox();
+  assert.ok(droppedBox);
+  assert.ok(
+    Math.abs(droppedBox.x - (canvasBeforeRequiredDrop.x + 380)) < 4,
+    "填写后保留拖入横坐标",
+  );
+  assert.ok(
+    Math.abs(droppedBox.y - (canvasBeforeRequiredDrop.y + 240)) < 4,
+    "填写后保留拖入纵坐标",
+  );
   await toolbox.getByRole("tab", { name: "场景" }).click();
   await toolbox
     .getByRole("button", { name: "探针预设一 探针卡片", exact: true })
@@ -3361,7 +3449,7 @@ try {
   const t39Row = packManager
     .locator(".pack-group")
     .filter({ hasText: "探针包" });
-  await t39Row.getByText("1 个类型").waitFor();
+  await t39Row.getByText("2 个类型").waitFor();
   const downloadPromise = page.waitForEvent("download");
   await t39Row.getByRole("button", { name: "导出", exact: true }).click();
   const t39Download = await downloadPromise;
@@ -3374,7 +3462,7 @@ try {
     name: "确认组件包更改",
   });
   await packConfirmation
-    .getByText("这个包的 4 个对象会变成只读，数据不会丢失。")
+    .getByText("这个包的 6 个对象会变成只读，数据不会丢失。")
     .waitFor();
   await packConfirmation.getByRole("button", { name: "确认停用" }).click();
   await t39Row.getByRole("button", { name: "启用", exact: true }).waitFor();
@@ -3388,6 +3476,19 @@ try {
     (await call("sand_status")).packs.find((pack: any) => pack.id === "t39")
       ?.enabled,
     true,
+  );
+  await t39Row.getByRole("button", { name: "移除", exact: true }).click();
+  await packConfirmation
+    .getByText("这个包的 6 个对象会变成只读，数据不会丢失。")
+    .waitFor();
+  await packConfirmation.getByRole("button", { name: "确认移除" }).click();
+  await t39Row.waitFor({ state: "hidden" });
+  assert.equal((await call("sand_query", { types: ["t39.item"] })).total, 4);
+  await undo();
+  await t39Row.waitFor();
+  assert.equal(
+    (await call("sand_query", { types: ["t39.required"] })).total,
+    2,
   );
   const badPackFile = join(root, "t39-bad.json");
   writeFileSync(

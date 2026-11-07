@@ -1,7 +1,7 @@
 import { Icon } from "./Icon.tsx";
 import { useState } from "react";
 import type { Board } from "./data-client/model.ts";
-import { usePackCatalog } from "./packs/catalog.ts";
+import { usePackCatalog, type PaletteEntry } from "./packs/catalog.ts";
 import "./packs.css";
 export function Toolbox({
   board: b,
@@ -34,6 +34,7 @@ export function Toolbox({
     data?: any,
     objectId?: string,
     size?: { width: number; height: number },
+    needsFields?: boolean,
   ) => void;
   action: (name: string, args?: Record<string, unknown>) => Promise<any>;
   /** Calls one tool and throws when the server refuses it, so a failed pack
@@ -60,6 +61,10 @@ export function Toolbox({
       matching(item.title, item.description),
   );
   const templateBoardId = b.views[viewId]?.spaceId ?? b.id;
+  const needsFields = (item: PaletteEntry, data: Record<string, unknown>) =>
+    item.required.some(
+      (key) => !Object.prototype.hasOwnProperty.call(data, key),
+    ) || Object.keys(data).length < item.minProperties;
   async function applyTemplate(templateId: string) {
     if (!call) return;
     setPackError("");
@@ -91,6 +96,7 @@ export function Toolbox({
     data?: any,
     objectId?: string,
     size?: { width: number; height: number },
+    requiresFields = false,
   ) {
     e.dataTransfer.effectAllowed = "copy";
     e.dataTransfer.setData(
@@ -101,6 +107,7 @@ export function Toolbox({
         data: data ?? {},
         objectId,
         size,
+        requiresFields,
       }),
     );
   }
@@ -207,10 +214,18 @@ export function Toolbox({
                         data,
                         undefined,
                         item.size,
+                        needsFields(item, data),
                       )
                     }
                     onClick={() =>
-                      create(item.type, item.title, data, undefined, item.size)
+                      create(
+                        item.type,
+                        item.title,
+                        data,
+                        undefined,
+                        item.size,
+                        needsFields(item, data),
+                      )
                     }
                     title={item.description || item.title}
                   >
@@ -267,6 +282,7 @@ export function Toolbox({
                         width: preset.width ?? item.size?.width ?? 280,
                         height: preset.height ?? item.size?.height ?? 180,
                       },
+                      needsFields(item, { ...item.defaults, ...preset.data }),
                     )
                   }
                 >
