@@ -158,6 +158,8 @@ export type Board = Projection & {
    * none, so everything that reads them uses `b.componentPacks ?? []`. */
   componentPacks?: ComponentPack[];
   theme?: ThemeConfig | null;
+  /** 未合并白板覆盖的工作空间主题。 */
+  themeWorkspace?: ThemeConfig | null;
   intents: ChangeIntent[];
   proposals: Proposal[];
   validations: ValidationReport[];

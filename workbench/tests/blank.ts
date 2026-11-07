@@ -64,6 +64,12 @@ try {
       viewport: { width: 1440, height: 1000 },
     }),
     errors: string[] = [];
+  const isMac = await page.evaluate(() =>
+    /Mac|iPhone|iPad|iPod/i.test(
+      `${navigator.platform} ${navigator.userAgent}`,
+    ),
+  );
+  const primaryModifier = isMac ? "Meta" : "Control";
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(c.url + "#session=" + c.token);
   const frame = page.frameLocator("iframe");
@@ -708,7 +714,7 @@ try {
     0,
     "Delete removes the selected component.",
   );
-  await page.keyboard.press("Control+z");
+  await page.keyboard.press(`${primaryModifier}+z`);
   b = await until((b) => b.instances.some((i: any) => i.id === noteId));
   assert.ok(
     b.instances.some((i: any) => i.id === noteId),
@@ -721,7 +727,7 @@ try {
   await frame.getByRole("button", { name: "设置", exact: true }).click();
   await frame.getByRole("button", { name: "关闭设置" }).focus();
   await page.keyboard.press("Delete");
-  await page.keyboard.press("Control+z");
+  await page.keyboard.press(`${primaryModifier}+z`);
   await page.keyboard.press("Escape");
   await frame
     .getByRole("dialog", { name: "设置" })
@@ -943,11 +949,155 @@ try {
     assert.ok(actualTarget.hash);
   }
   await frame.getByRole("button", { name: "设置", exact: true }).click();
-  await frame.locator('input[type="color"]').first().fill("#edf2ed");
+  const shell = frame.locator("main.canvas-app");
+  const readBg = () =>
+    shell.evaluate((el) =>
+      getComputedStyle(el).getPropertyValue("--bg").trim().toLowerCase(),
+    );
+  const paperBg = await readBg();
+  assert.match(paperBg, /f6f1e6|rgb\(246,\s*241,\s*230\)/);
+  await page.screenshot({ path: "artifacts/theme-paper.png", fullPage: true });
   await frame
-    .getByRole("button", { name: "应用自定义外观", exact: true })
+    .locator(".theme-settings")
+    .getByRole("button", { name: "黑白", exact: true })
     .click();
-  await until((b) => b.theme?.background === "#edf2ed");
+  await page.waitForTimeout(700);
+  for (let i = 0; i < 80; i++) {
+    if (/f5f5f5|rgb\(245,\s*245,\s*245\)/.test(await readBg())) break;
+    await page.waitForTimeout(60);
+  }
+  assert.match(
+    await readBg(),
+    /f5f5f5|rgb\(245,\s*245,\s*245\)/,
+    "切换到黑白后背景变量应变",
+  );
+  await page.screenshot({ path: "artifacts/theme-mono.png", fullPage: true });
+  await undo();
+  await page.waitForTimeout(400);
+  for (let i = 0; i < 80; i++) {
+    if (/f6f1e6|rgb\(246,\s*241,\s*230\)/.test(await readBg())) break;
+    await page.waitForTimeout(60);
+  }
+  assert.match(await readBg(), /f6f1e6|rgb\(246,\s*241,\s*230\)/);
+  const fontSize = frame
+    .locator(".theme-settings label")
+    .filter({ hasText: "字号" })
+    .locator("input");
+  await fontSize.focus();
+  await page.keyboard.press("End");
+  await page.waitForTimeout(1000);
+  assert.equal(
+    await shell.evaluate((el) =>
+      getComputedStyle(el).getPropertyValue("--font-size").trim(),
+    ),
+    "20px",
+  );
+  await frame
+    .locator(".theme-settings")
+    .getByRole("button", { name: "恢复默认", exact: true })
+    .click();
+  await page.waitForTimeout(1000);
+  assert.equal(
+    await shell.evaluate((el) =>
+      getComputedStyle(el).getPropertyValue("--font-size").trim(),
+    ),
+    "14px",
+  );
+  if (v3) {
+    await frame.getByRole("button", { name: "关闭设置" }).click();
+    const live0 = await call("app_view", {
+      action: "get",
+      viewId: "local-human",
+    });
+    if (live0?.board?.id !== boardId) {
+      await frame.locator(".breadcrumbs button").first().click();
+      for (let i = 0; i < 50; i++) {
+        const live = await call("app_view", {
+          action: "get",
+          viewId: "local-human",
+        });
+        if (live?.board?.id === boardId) break;
+        await page.waitForTimeout(100);
+      }
+    }
+    await frame
+      .locator(`[data-instance-id="${container.id}"]`)
+      .getByRole("button", { name: "进入白板" })
+      .click();
+    for (let i = 0; i < 50; i++) {
+      const live = await call("app_view", {
+        action: "get",
+        viewId: "local-human",
+      });
+      if (live?.board?.id === child) break;
+      await page.waitForTimeout(100);
+    }
+    await frame.getByRole("button", { name: "设置", exact: true }).click();
+    await frame
+      .locator('label.file-choice:has-text("只覆盖当前白板主题") input')
+      .check();
+    await frame
+      .locator(".theme-settings")
+      .getByRole("button", { name: "黑白", exact: true })
+      .click();
+    await frame
+      .locator(".theme-settings input[type='color']")
+      .first()
+      .fill("#ddeeff");
+    await frame
+      .locator(".theme-settings")
+      .getByRole("button", { name: "恢复默认", exact: true })
+      .click();
+    await page.waitForTimeout(1000);
+    assert.match(
+      await readBg(),
+      /f5f5f5|rgb\(245,\s*245,\s*245\)/,
+      "白板恢复默认保留当前黑白预设",
+    );
+    await frame
+      .locator(".theme-settings input[type='color']")
+      .first()
+      .fill("#ddeeff");
+    await frame
+      .locator(".theme-settings")
+      .getByRole("button", { name: "跟随工作空间", exact: true })
+      .click();
+    await page.waitForTimeout(1000);
+    assert.match(
+      await readBg(),
+      /f6f1e6|rgb\(246,\s*241,\s*230\)/,
+      "跟随工作空间不被待写入的旧覆盖反转",
+    );
+    await frame
+      .locator(".theme-settings input[type='color']")
+      .first()
+      .fill("#ddeeff");
+    await page.waitForTimeout(700);
+    for (let i = 0; i < 80; i++) {
+      const bg = await readBg();
+      if (bg.includes("ddeeff") || bg.includes("221, 238, 255")) break;
+      await page.waitForTimeout(60);
+    }
+    const onChild = await readBg();
+    assert.ok(
+      onChild.includes("ddeeff") || onChild.includes("221, 238, 255"),
+      "进入子白板后背景应使用覆盖色",
+    );
+    await frame.locator(".breadcrumbs button").first().click();
+    for (let i = 0; i < 50; i++) {
+      const live = await call("app_view", {
+        action: "get",
+        viewId: "local-human",
+      });
+      if (live?.board?.id === boardId) break;
+      await page.waitForTimeout(100);
+    }
+    const homeAgain = await readBg();
+    assert.ok(
+      /f6f1e6|rgb\(246,\s*241,\s*230\)/.test(homeAgain),
+      "返回首页后应恢复工作空间主题",
+    );
+  }
   await page.screenshot({
     path: "artifacts/composed-canvas.png",
     fullPage: true,
@@ -1553,13 +1703,13 @@ try {
       card: ReturnType<typeof frame.locator>,
       options?: { modifiers?: Array<"Alt" | "Control" | "Meta" | "Shift"> },
     ) => {
-      const add = Boolean(options?.modifiers?.includes("Control"));
+      const add = Boolean(options?.modifiers?.includes(primaryModifier));
       for (let attempt = 0; attempt < 3; attempt += 1) {
         await card.focus();
-        if (add) await page.keyboard.down("Control");
+        if (add) await page.keyboard.down(primaryModifier);
         await page.keyboard.press("Space");
         if (add) {
-          await page.keyboard.up("Control");
+          await page.keyboard.up(primaryModifier);
           return;
         }
         const selected = ((await card.getAttribute("class")) || "").includes(
@@ -1575,7 +1725,7 @@ try {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         await page.keyboard.press("Escape");
         await clickCard(cardA);
-        await clickCard(cardB, { modifiers: ["Control"] });
+        await clickCard(cardB, { modifiers: [primaryModifier] });
         for (let i = 0; i < 25; i += 1) {
           if ((await frame.locator(".component-card.selected").count()) === 2)
             return;
@@ -1599,14 +1749,15 @@ try {
           el.ownerDocument.defaultView?.dispatchEvent(
             new KeyboardEvent("keydown", {
               key: spec.key,
-              ctrlKey: true,
+              ctrlKey: !spec.isMac,
+              metaKey: spec.isMac,
               shiftKey: spec.shift,
               bubbles: true,
               cancelable: true,
             }),
           );
         },
-        { key, shift },
+        { key, shift, isMac },
       );
     };
     const retryShortcut = async (
@@ -1854,7 +2005,7 @@ try {
       .x;
     await frame.getByRole("button", { name: "设置", exact: true }).click();
     await frame.getByRole("button", { name: "关闭设置" }).focus();
-    await page.keyboard.press("Control+v");
+    await page.keyboard.press(`${primaryModifier}+v`);
     await page.keyboard.press("ArrowRight");
     await page.waitForTimeout(800);
     const duringSettings = await read();
@@ -1998,7 +2149,7 @@ try {
       await page.keyboard.press("Escape");
       for (let index = 0; index < ids.length; index += 1) {
         await clickCard(arrangeCard(ids[index]!), {
-          ...(index > 0 ? { modifiers: ["Control" as const] } : {}),
+          ...(index > 0 ? { modifiers: [primaryModifier] } : {}),
         });
       }
       await untilUiSelection(ids.length);

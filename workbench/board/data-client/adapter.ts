@@ -17,6 +17,35 @@ import type {
   SpaceLink,
   ThemeConfig,
 } from "./spaces.ts";
+import {
+  boardThemeSettingKey,
+  coerceTheme,
+  mergeThemes,
+  THEME_SETTING_KEY,
+  type Theme,
+} from "../theme/tokens.ts";
+import { presetOfBase } from "../theme/presets.ts";
+
+function toThemeConfig(theme: Theme): ThemeConfig {
+  return {
+    name: theme.name,
+    base: theme.base,
+    background: theme.colors.background,
+    surface: theme.colors.surface,
+    ink: theme.colors.ink,
+    muted: theme.colors.muted,
+    line: theme.colors.line,
+    accent: theme.colors.accent,
+    font: theme.font,
+    density: theme.density,
+    radius: theme.radius,
+    reduceMotion: theme.motion.reduce,
+    fontSize: theme.fontSize,
+    lineHeight: theme.lineHeight,
+    shadow: theme.shadow,
+    motion: { ...theme.motion },
+  };
+}
 import type { ObjectRelation, WorkspaceObject } from "./objects.ts";
 import type {
   V3Cache,
@@ -386,14 +415,23 @@ function toComponentPack(row: V3PackRow): ComponentPack {
   };
 }
 
-/** 外观：设置表里的 theme 就是现有的主题配置。 */
-function toTheme(
+function workspaceThemeOf(settings: Map<string, { value: unknown }>): Theme {
+  return (
+    coerceTheme(settings.get(THEME_SETTING_KEY)?.value) ?? presetOfBase("paper")
+  );
+}
+
+/** 外观：工作空间主题与白板覆盖合并后的有效主题。 */
+function effectiveThemeOf(
   settings: Map<string, { value: unknown }>,
-): ThemeConfig | null {
-  const row = settings.get("theme");
-  const value = row?.value;
-  if (!value || typeof value !== "object") return null;
-  return value as ThemeConfig;
+  boardId: string,
+): ThemeConfig {
+  const workspace = workspaceThemeOf(settings);
+  const overrideRow = settings.get(boardThemeSettingKey(boardId));
+  const merged = overrideRow?.value
+    ? mergeThemes(workspace, overrideRow.value)
+    : workspace;
+  return toThemeConfig(merged);
 }
 
 /** 界面这一侧看到的视角。 */
@@ -584,7 +622,8 @@ export function toBoard(
     spaceLinks,
     assets: [],
     componentPacks: packs,
-    theme: toTheme(cache.settings),
+    theme: effectiveThemeOf(cache.settings, options.boardId),
+    themeWorkspace: toThemeConfig(workspaceThemeOf(cache.settings)),
     intents: [],
     proposals: [],
     validations: [],

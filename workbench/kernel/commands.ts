@@ -46,6 +46,7 @@ const PUBLIC_OPS = new Set([
   "relation.update",
   "relation.delete",
   "setting.set",
+  "setting.delete",
   "pack.enable",
   "pack.disable",
   "pack.import",
@@ -296,6 +297,8 @@ function execute(
       return deleteRelation(ctx, command, index);
     case "setting.set":
       return setSetting(ctx, command, index);
+    case "setting.delete":
+      return deleteSetting(ctx, command, index);
     case "pack.enable":
       return setPackEnabled(ctx, command.id, true, index);
     case "pack.disable":
@@ -775,6 +778,23 @@ function setSetting(
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, rev = excluded.rev, deleted_rev = NULL`,
     )
     .run(command.key, json, ctx.rev);
+  pushChange(ctx, "settings", command.key, before);
+}
+
+function deleteSetting(
+  ctx: Ctx,
+  command: Extract<Command, { op: "setting.delete" }>,
+  index: number,
+) {
+  if (typeof command.key !== "string" || !command.key.trim())
+    throw new CommandError("INVALID_DATA", "设置名不能为空。", index);
+  if (Array.from(command.key).length > 200)
+    throw new CommandError("LIMIT", "设置名不能超过 200 个字。", index);
+  const before = snapshotSetting(ctx.db, command.key);
+  if (!before || !before.alive) return;
+  ctx.db
+    .prepare(`UPDATE settings SET deleted_rev = ?, rev = ? WHERE key = ?`)
+    .run(ctx.rev, ctx.rev, command.key);
   pushChange(ctx, "settings", command.key, before);
 }
 
