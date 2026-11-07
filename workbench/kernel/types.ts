@@ -173,6 +173,7 @@ export type Command =
     }
   | { op: "relation.delete"; id: string }
   | { op: "setting.set"; key: string; value: unknown }
+  | { op: "setting.delete"; key: string }
   | { op: "pack.enable"; id: string }
   | { op: "pack.disable"; id: string }
   | { op: "pack.import"; manifest: Record<string, unknown> }

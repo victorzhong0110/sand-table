@@ -127,6 +127,7 @@ const command = {
     ),
     op("relation.delete", { id: text }, ["id"]),
     op("setting.set", { key: text, value: {} }, ["key", "value"]),
+    op("setting.delete", { key: text }, ["key"]),
     ...["pack.enable", "pack.disable", "pack.remove"].map((name) =>
       op(name, { id: text }, ["id"]),
     ),

@@ -3,7 +3,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { HostTaskEvent } from "./data-client/objects.ts";
@@ -17,7 +16,14 @@ import type { HistorySnapshot } from "./data-client/history.ts";
 import { safeUrl, findComponentSpec } from "./data-client/spaces.ts";
 import { FlowCanvas } from "./canvas/FlowCanvas.tsx";
 import { Toolbox } from "./Toolbox.tsx";
-import { ThemePanel } from "./ThemePanel.tsx";
+import {
+  systemPrefersReducedMotion,
+  themeClassName,
+  themeStyle,
+} from "./theme/apply.ts";
+import { presetOfBase } from "./theme/presets.ts";
+import { coerceTheme, type Theme } from "./theme/tokens.ts";
+import { ThemeSettings } from "./theme/ThemeSettings.tsx";
 import { Inspector } from "./views/Inspector.tsx";
 import { ChangePanel } from "./ChangePanel.tsx";
 import { WorkspacePanel, type WorkspacePanelProps } from "./WorkspacePanel.tsx";
@@ -100,7 +106,7 @@ export function CanvasShell({
     [panel, setPanel] = useState(""),
     [query, setQuery] = useState(""),
     [arrows, setArrows] = useState(false),
-    [theme, setTheme] = useState<"paper" | "mono" | "custom">("paper"),
+    [boardScope, setBoardScope] = useState(false),
     [name, setName] = useState(b.title),
     [prompt, setPrompt] = useState(""),
     [handoff, setHandoff] = useState(""),
@@ -130,11 +136,12 @@ export function CanvasShell({
   const collapseRef = useRef(collapse);
   collapseRef.current = collapse;
 
+  const workspaceTheme = coerceTheme(b.themeWorkspace) ?? presetOfBase("paper");
+  const [previewTheme, setPreviewTheme] = useState<Theme | null>(null);
   useEffect(() => setName(b.title), [b.title]);
   useEffect(() => {
-    if (b.theme) setTheme("custom");
-    else if (theme === "custom") setTheme("paper");
-  }, [JSON.stringify(b.theme)]);
+    setPreviewTheme(null);
+  }, [JSON.stringify(b.theme), b.id, b.revision]);
   useEffect(() => {
     setSource(undefined);
     if (panel === "ai") return;
@@ -200,25 +207,9 @@ export function CanvasShell({
     }
   }, [shell.revealSeq]);
 
-  const custom = theme === "custom" ? b.theme : undefined;
-  const style = custom
-    ? ({
-        "--bg": custom.background,
-        "--surface": custom.surface,
-        "--ink": custom.ink,
-        "--muted": custom.muted,
-        "--line": custom.line,
-        "--accent": custom.accent,
-        "--soft": custom.background,
-        "--radius": custom.radius + "px",
-        fontFamily:
-          custom.font === "mono"
-            ? "ui-monospace,monospace"
-            : custom.font === "serif"
-              ? "Georgia,serif"
-              : "system-ui,sans-serif",
-      } as CSSProperties)
-    : undefined;
+  const effectiveTheme = previewTheme ?? coerceTheme(b.theme) ?? workspaceTheme;
+  const style = themeStyle(effectiveTheme, systemPrefersReducedMotion());
+  const themeClasses = themeClassName(effectiveTheme);
   const closeNav = (id: NavId) => {
     applyNav(null);
     railRefs.current[id]?.focus();
@@ -373,15 +364,7 @@ export function CanvasShell({
   };
 
   return (
-    <main
-      className={
-        "canvas-app " +
-        (theme === "custom" ? b.theme?.base || "paper" : theme) +
-        (custom?.density === "compact" ? " compact" : "") +
-        (custom?.reduceMotion ? " reduce-motion" : "")
-      }
-      style={style}
-    >
+    <main className={`canvas-app ${themeClasses}`} style={style}>
       <Rail
         open={nav}
         connected={shell.connected}
@@ -529,25 +512,14 @@ export function CanvasShell({
             ) : nav === "settings" ? (
               <>
                 <section>
-                  <h3>外观</h3>
-                  <div className="settings-presets">
-                    {[
-                      ["paper", "纸张"],
-                      ["mono", "黑白"],
-                      ...(b.theme ? [["custom", "自定义"]] : []),
-                    ].map(([id, label]) => (
-                      <button
-                        key={id}
-                        type="button"
-                        aria-pressed={theme === id}
-                        onClick={() =>
-                          setTheme(id as "paper" | "mono" | "custom")
-                        }
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
+                  <label className="file-choice">
+                    <input
+                      type="checkbox"
+                      checked={boardScope}
+                      onChange={(e) => setBoardScope(e.target.checked)}
+                    />{" "}
+                    只覆盖当前白板主题
+                  </label>
                   <label>
                     <input
                       type="checkbox"
@@ -614,10 +586,13 @@ export function CanvasShell({
                     <WorkspacePanel {...workspacePanel} />
                   </section>
                 )}
-                <ThemePanel
-                  board={b}
-                  operate={operate}
-                  onUseCustom={() => setTheme("custom")}
+                <ThemeSettings
+                  boardId={view?.spaceId ?? b.id}
+                  workspaceTheme={workspaceTheme}
+                  activeTheme={coerceTheme(b.theme) ?? workspaceTheme}
+                  boardScope={boardScope}
+                  call={call}
+                  onPreview={setPreviewTheme}
                 />
               </>
             ) : (

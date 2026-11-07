@@ -943,11 +943,99 @@ try {
     assert.ok(actualTarget.hash);
   }
   await frame.getByRole("button", { name: "设置", exact: true }).click();
-  await frame.locator('input[type="color"]').first().fill("#edf2ed");
+  const shell = frame.locator("main.canvas-app");
+  const readBg = () =>
+    shell.evaluate((el) =>
+      getComputedStyle(el).getPropertyValue("--bg").trim().toLowerCase(),
+    );
+  const paperBg = await readBg();
+  assert.match(paperBg, /f6f1e6|rgb\(246,\s*241,\s*230\)/);
+  await page.screenshot({ path: "artifacts/theme-paper.png", fullPage: true });
   await frame
-    .getByRole("button", { name: "应用自定义外观", exact: true })
+    .locator(".theme-settings")
+    .getByRole("button", { name: "黑白", exact: true })
     .click();
-  await until((b) => b.theme?.background === "#edf2ed");
+  await page.waitForTimeout(700);
+  for (let i = 0; i < 80; i++) {
+    if (/f5f5f5|rgb\(245,\s*245,\s*245\)/.test(await readBg())) break;
+    await page.waitForTimeout(60);
+  }
+  assert.match(
+    await readBg(),
+    /f5f5f5|rgb\(245,\s*245,\s*245\)/,
+    "切换到黑白后背景变量应变",
+  );
+  await page.screenshot({ path: "artifacts/theme-mono.png", fullPage: true });
+  await undo();
+  await page.waitForTimeout(400);
+  for (let i = 0; i < 80; i++) {
+    if (/f6f1e6|rgb\(246,\s*241,\s*230\)/.test(await readBg())) break;
+    await page.waitForTimeout(60);
+  }
+  assert.match(await readBg(), /f6f1e6|rgb\(246,\s*241,\s*230\)/);
+  if (v3) {
+    await frame.getByRole("button", { name: "关闭设置" }).click();
+    const live0 = await call("app_view", {
+      action: "get",
+      viewId: "local-human",
+    });
+    if (live0?.board?.id !== boardId) {
+      await frame.locator(".breadcrumbs button").first().click();
+      for (let i = 0; i < 50; i++) {
+        const live = await call("app_view", {
+          action: "get",
+          viewId: "local-human",
+        });
+        if (live?.board?.id === boardId) break;
+        await page.waitForTimeout(100);
+      }
+    }
+    await frame
+      .locator(`[data-instance-id="${container.id}"]`)
+      .getByRole("button", { name: "进入白板" })
+      .click();
+    for (let i = 0; i < 50; i++) {
+      const live = await call("app_view", {
+        action: "get",
+        viewId: "local-human",
+      });
+      if (live?.board?.id === child) break;
+      await page.waitForTimeout(100);
+    }
+    await frame.getByRole("button", { name: "设置", exact: true }).click();
+    await frame
+      .locator('label.file-choice:has-text("只覆盖当前白板主题") input')
+      .check();
+    await frame
+      .locator(".theme-settings input[type='color']")
+      .first()
+      .fill("#ddeeff");
+    await page.waitForTimeout(700);
+    for (let i = 0; i < 80; i++) {
+      const bg = await readBg();
+      if (bg.includes("ddeeff") || bg.includes("221, 238, 255")) break;
+      await page.waitForTimeout(60);
+    }
+    const onChild = await readBg();
+    assert.ok(
+      onChild.includes("ddeeff") || onChild.includes("221, 238, 255"),
+      "进入子白板后背景应使用覆盖色",
+    );
+    await frame.locator(".breadcrumbs button").first().click();
+    for (let i = 0; i < 50; i++) {
+      const live = await call("app_view", {
+        action: "get",
+        viewId: "local-human",
+      });
+      if (live?.board?.id === boardId) break;
+      await page.waitForTimeout(100);
+    }
+    const homeAgain = await readBg();
+    assert.ok(
+      /f6f1e6|rgb\(246,\s*241,\s*230\)/.test(homeAgain),
+      "返回首页后应恢复工作空间主题",
+    );
+  }
   await page.screenshot({
     path: "artifacts/composed-canvas.png",
     fullPage: true,
