@@ -28,6 +28,7 @@ import { presetOfBase } from "../theme/presets.ts";
 
 function toThemeConfig(theme: Theme): ThemeConfig {
   return {
+    name: theme.name,
     base: theme.base,
     background: theme.colors.background,
     surface: theme.colors.surface,
@@ -39,6 +40,10 @@ function toThemeConfig(theme: Theme): ThemeConfig {
     density: theme.density,
     radius: theme.radius,
     reduceMotion: theme.motion.reduce,
+    fontSize: theme.fontSize,
+    lineHeight: theme.lineHeight,
+    shadow: theme.shadow,
+    motion: { ...theme.motion },
   };
 }
 import type { ObjectRelation, WorkspaceObject } from "./objects.ts";

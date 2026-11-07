@@ -141,7 +141,15 @@ export function CanvasShell({
   useEffect(() => setName(b.title), [b.title]);
   useEffect(() => {
     setPreviewTheme(null);
-  }, [JSON.stringify(b.theme), b.id, b.revision]);
+  }, [b.id, b.workspaceId]);
+  useEffect(() => {
+    const saved = coerceTheme(b.theme) ?? workspaceTheme;
+    setPreviewTheme((preview) =>
+      preview && JSON.stringify(preview) === JSON.stringify(saved)
+        ? null
+        : preview,
+    );
+  }, [JSON.stringify(b.theme), JSON.stringify(workspaceTheme)]);
   useEffect(() => {
     setSource(undefined);
     if (panel === "ai") return;
@@ -588,6 +596,7 @@ export function CanvasShell({
                 )}
                 <ThemeSettings
                   boardId={view?.spaceId ?? b.id}
+                  workspaceId={b.workspaceId}
                   workspaceTheme={workspaceTheme}
                   activeTheme={coerceTheme(b.theme) ?? workspaceTheme}
                   boardScope={boardScope}

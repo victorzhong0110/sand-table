@@ -791,8 +791,7 @@ function deleteSetting(
   if (Array.from(command.key).length > 200)
     throw new CommandError("LIMIT", "设置名不能超过 200 个字。", index);
   const before = snapshotSetting(ctx.db, command.key);
-  if (!before || !before.alive)
-    throw new CommandError("NOT_FOUND", "找不到这项设置。", index);
+  if (!before || !before.alive) return;
   ctx.db
     .prepare(`UPDATE settings SET deleted_rev = ?, rev = ? WHERE key = ?`)
     .run(ctx.rev, ctx.rev, command.key);

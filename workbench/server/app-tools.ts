@@ -125,9 +125,11 @@ export function registerAppTools(
     {
       intentId: z.string().min(1).max(200).optional(),
       label: z.string().min(1).max(200).optional(),
+      workspaceId: z.string().min(1).optional(),
       commands: z.array(z.record(z.string(), z.unknown())).min(1).max(200),
     },
     (args, ctx) => {
+      assertSameWorkspace(host.session().workspaceId, args.workspaceId);
       const result = applyCommands(ctx.db, ctx.registry, {
         actor: ctx.actor,
         ...(args.intentId ? { intentId: args.intentId } : {}),

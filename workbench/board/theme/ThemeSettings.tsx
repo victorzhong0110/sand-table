@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createThemeWriter } from "./persistence.ts";
 import { presetOfBase, THEME_PRESETS } from "./presets.ts";
 import {
   boardThemeSettingKey,
@@ -15,24 +16,9 @@ type CallFn = (
   args?: Record<string, unknown>,
 ) => Promise<unknown>;
 
-function debouncePersist(
-  fn: () => void,
-  delay: number,
-  timer: { current?: ReturnType<typeof setTimeout> },
-) {
-  if (timer.current) clearTimeout(timer.current);
-  timer.current = setTimeout(fn, delay);
-}
-
-async function persistCommands(
-  call: CallFn,
-  commands: Record<string, unknown>[],
-) {
-  await call("sand_edit", { commands });
-}
-
 export function ThemeSettings({
   boardId,
+  workspaceId,
   workspaceTheme,
   activeTheme,
   boardScope,
@@ -40,6 +26,7 @@ export function ThemeSettings({
   onPreview,
 }: {
   boardId: string;
+  workspaceId?: string;
   workspaceTheme: Theme | null;
   activeTheme: Theme;
   /** 为 true 时编辑当前白板的覆盖主题。 */
@@ -53,11 +40,44 @@ export function ThemeSettings({
   );
   const [draft, setDraft] = useState<Theme>(activeTheme);
   const [importErrors, setImportErrors] = useState<string[]>([]);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [saveError, setSaveError] = useState("");
+  const callRef = useRef(call);
+  callRef.current = call;
+  const writerRef = useRef<ReturnType<typeof createThemeWriter> | undefined>(
+    undefined,
+  );
+  if (!writerRef.current) {
+    writerRef.current = createThemeWriter(
+      async (write) => {
+        if (!write.workspaceId)
+          throw Error("工作空间尚未准备好，请重新打开设置后再试。");
+        await callRef.current("app_edit", {
+          workspaceId: write.workspaceId,
+          commands: write.commands,
+        });
+        setSaveError("");
+      },
+      (error) =>
+        setSaveError(
+          `外观未能保存：${error instanceof Error ? error.message : String(error)}。请重新调整后再试。`,
+        ),
+    );
+  }
+  const writer = writerRef.current;
+  const scope = JSON.stringify([workspaceId, boardId, boardScope]);
+  const previousScope = useRef(scope);
   const previewRef = useRef(onPreview);
   previewRef.current = onPreview;
 
+  useEffect(
+    () => () => writer.flush(),
+    [writer, boardId, boardScope, workspaceId],
+  );
+
   useEffect(() => {
+    const scopeChanged = previousScope.current !== scope;
+    previousScope.current = scope;
+    if (!scopeChanged && writer.isBusy()) return;
     const next = boardScope ? activeTheme : workspace;
     setDraft(next);
     previewRef.current(next);
@@ -66,30 +86,19 @@ export function ThemeSettings({
     JSON.stringify(activeTheme),
     boardScope,
     boardId,
+    workspaceId,
   ]);
 
   const inkContrast = contrastRatio(draft.colors.ink, draft.colors.surface);
 
   const persist = (next: Theme) => {
-    debouncePersist(
-      () => {
-        if (boardScope) {
-          const diff = themeOverrideDiff(workspace, next);
-          const key = boardThemeSettingKey(boardId);
-          const commands =
-            Object.keys(diff).length === 0
-              ? [{ op: "setting.delete", key }]
-              : [{ op: "setting.set", key, value: diff }];
-          void persistCommands(call, commands);
-          return;
-        }
-        void persistCommands(call, [
-          { op: "setting.set", key: THEME_SETTING_KEY, value: next },
-        ]);
-      },
-      500,
-      timer,
-    );
+    const diff = boardScope ? themeOverrideDiff(workspace, next) : null;
+    const key = boardScope ? boardThemeSettingKey(boardId) : THEME_SETTING_KEY;
+    const commands =
+      diff && !Object.keys(diff).length
+        ? [{ op: "setting.delete", key }]
+        : [{ op: "setting.set", key, value: diff ?? next }];
+    writer.schedule({ workspaceId, commands });
   };
 
   const update = (patch: Partial<Theme>) => {
@@ -112,10 +121,6 @@ export function ThemeSettings({
   };
 
   const restoreDefault = () => {
-    if (boardScope) {
-      void followWorkspace();
-      return;
-    }
     const next = presetOfBase(draft.base);
     setDraft(next);
     onPreview(next);
@@ -124,9 +129,18 @@ export function ThemeSettings({
 
   const followWorkspace = async () => {
     const key = boardThemeSettingKey(boardId);
-    await persistCommands(call, [{ op: "setting.delete", key }]);
     setDraft(workspace);
     onPreview(workspace);
+    try {
+      await writer.writeNow({
+        workspaceId,
+        commands: [{ op: "setting.delete", key }],
+      });
+    } catch (error) {
+      setSaveError(
+        `外观未能保存：${error instanceof Error ? error.message : String(error)}。请重试。`,
+      );
+    }
   };
 
   const exportTheme = () => {
@@ -191,6 +205,7 @@ export function ThemeSettings({
           ? "只保存与本工作空间主题不同的项；进入这块白板时自动合并。"
           : "调整会立即预览；停止操作约半秒后写入，每一步可撤销。"}
       </p>
+      {saveError && <p role="alert">{saveError}</p>}
       {inkContrast < 4.5 && (
         <p className="theme-contrast-warn" role="status">
           正文与组件背景的对比度约为 {inkContrast.toFixed(1)}:1，低于推荐的

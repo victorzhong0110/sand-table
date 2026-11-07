@@ -408,6 +408,12 @@ function Workbench() {
       }
       case "app_asset":
         return callTool("app_asset", args);
+      case "app_edit": {
+        const result = await callTool("app_edit", args);
+        await storeRef.current?.sync();
+        refreshV3Board();
+        return result;
+      }
       case "sand_edit_space": {
         /* 宿主桥（DSH）把 AI 的结果写成一次白板操作：
            v3 下翻译成内核命令，写完立刻拉一次增量。 */

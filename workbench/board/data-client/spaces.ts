@@ -36,6 +36,7 @@ export type Asset = {
   bytes: number;
 };
 export type ThemeConfig = {
+  name?: string;
   base: "paper" | "mono";
   background: string;
   surface: string;
@@ -47,6 +48,10 @@ export type ThemeConfig = {
   density: "comfortable" | "compact";
   radius: number;
   reduceMotion: boolean;
+  fontSize?: number;
+  lineHeight?: number;
+  shadow?: "none" | "soft" | "strong";
+  motion?: { speed: number; reduce: boolean };
 };
 export const componentTypes = [
   { type: "object", title: "对象引用", width: 252, height: 120 },

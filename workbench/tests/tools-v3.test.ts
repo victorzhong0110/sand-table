@@ -159,6 +159,45 @@ test("界面专用工具都在，且 visibility 是 app", async () => {
   }
 });
 
+test("带工作空间编号的界面写入不会落到切换后的工作空间", async () => {
+  const session = await open("test");
+  try {
+    const commands = [
+      { op: "setting.set", key: "theme", value: { base: "paper" } },
+    ];
+    const stale = await call(session.client, "app_edit", {
+      workspaceId: "another",
+      commands,
+    });
+    assert.equal(stale.isError, true);
+    assert.equal(
+      session
+        .db()
+        .prepare("SELECT key FROM settings WHERE key = 'theme'")
+        .get(),
+      undefined,
+    );
+    const accepted = await call(session.client, "app_edit", {
+      workspaceId: "test",
+      commands,
+    });
+    assert.equal(accepted.isError, false, accepted.text);
+    assert.equal(
+      (
+        session
+          .db()
+          .prepare(
+            "SELECT actor_kind FROM audit WHERE action = 'apply' ORDER BY seq DESC LIMIT 1",
+          )
+          .get() as { actor_kind: string }
+      ).actor_kind,
+      "human",
+    );
+  } finally {
+    await session.close();
+  }
+});
+
 test("完整流程：状态、类型、写入、查询、读回、撤销、重做", async () => {
   const session = await open();
   try {
