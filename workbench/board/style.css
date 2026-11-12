@@ -1682,6 +1682,39 @@ main.canvas-app {
   border-radius: 18px;
   box-shadow: 0 8px 32px #0000000c;
 }
+.canvas-app .whiteboard-ai {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.whiteboard-ai[hidden] { display: none; }
+.whiteboard-ai .inspector-heading { flex-shrink: 0; margin: 0; }
+.ai-connect, .ai-scope, .ai-compose { padding: 14px; }
+.ai-connect p, .ai-welcome p, .ai-session-note { color: var(--muted); font-size: 12px; }
+.ai-scope { border-bottom: 1px solid var(--line); }
+.ai-scope label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.ai-scope select { min-width: 0; width: auto; }
+.ai-targets { display: flex; flex-wrap: wrap; gap: 5px; max-height: 95px; overflow: auto; margin-top: 10px; }
+.ai-targets small { flex-basis: 100%; color: var(--muted); }
+.ai-targets span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; padding: 3px 7px; background: var(--soft); border-radius: 6px; }
+.ai-conversation { flex: 1; min-height: 80px; overflow: auto; padding: 0 14px; }
+.ai-welcome { padding: 20px 0; }
+.ai-welcome h2, .ai-connect h2 { font-size: 15px; }
+.ai-turn { padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 12px; overflow-wrap: anywhere; }
+.ai-user-message { background: var(--soft); border-radius: 12px; padding: 10px; white-space: pre-wrap; margin-top: 0; }
+.ai-turn-context { display: block; color: var(--muted); margin-bottom: 10px; }
+.ai-response { white-space: pre-wrap; }
+.ai-compose { flex-shrink: 0; border-top: 1px solid var(--line); }
+.ai-suggestions { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+.ai-suggestions button { padding: 4px 7px; font-size: 11px; }
+.ai-compose textarea { width: 100%; min-height: 90px; max-height: 160px; resize: vertical; font: inherit; font-size: 12px; }
+.ai-compose-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.ai-compose-actions small, .ai-session-note small { font-size: 10px; color: var(--muted); }
+.ai-compose-actions button { background: var(--ink); color: var(--surface); }
+.ai-session-note { margin-top: 10px; }
+.ai-session-note button { font-size: 10px; border: 0; padding: 4px 0; display: block; }
+.ai-selection-trigger { position: absolute; z-index: 6; bottom: 85px; left: 50%; transform: translateX(-50%); border-radius: 20px; background: var(--surface); box-shadow: 0 3px 18px #00000012; }
 .board-library {
   border-bottom: 1px solid var(--line);
   padding-bottom: 12px;
