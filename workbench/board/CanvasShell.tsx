@@ -5,7 +5,9 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import type { HostTaskEvent } from "./data-client/objects.ts";
+import { WhiteboardAI } from "./ai/WhiteboardAI.tsx";
+import type { AIScope } from "./ai/context.ts";
+import type { HostTaskEvent, HostTaskRequest } from "./data-client/objects.ts";
 import type {
   Activity,
   Board,
@@ -67,7 +69,6 @@ export function CanvasShell({
   call,
   operate,
   openLink,
-  sendMessage,
   history,
   onUndo,
   onRedo,
@@ -75,7 +76,7 @@ export function CanvasShell({
   aiMode = "mcp",
   sendToHost,
   workspacePanel,
-  hostTask,
+  hostEvents,
   onCancelHostTask,
 }: {
   board: Board;
@@ -86,16 +87,15 @@ export function CanvasShell({
   call: Action;
   operate: (op: any) => Promise<any>;
   openLink: (url: string) => void;
-  sendMessage: (text: string) => Promise<void>;
   history?: HistorySnapshot;
   onUndo?: () => void;
   onRedo?: () => void;
   onJump?: (recordId: string) => void;
   aiMode?: "host" | "mcp";
-  sendToHost?: (text: string) => Promise<void>;
+  sendToHost?: (request: HostTaskRequest) => Promise<{ taskId: string }>;
   workspacePanel?: WorkspacePanelProps;
-  hostTask?: HostTaskEvent;
-  onCancelHostTask?: () => Promise<void>;
+  hostEvents?: HostTaskEvent[];
+  onCancelHostTask?: (taskId: string) => Promise<void>;
 }) {
   const [mode, setMode] = useState("browse"),
     [focusRevision, setFocusRevision] = useState(0),
@@ -108,11 +108,17 @@ export function CanvasShell({
     [arrows, setArrows] = useState(false),
     [boardScope, setBoardScope] = useState(false),
     [name, setName] = useState(b.title),
-    [prompt, setPrompt] = useState(""),
-    [handoff, setHandoff] = useState(""),
     [source, setSource] = useState<any>(),
     [shell, setShell] = useState<HostShellMessage>(EMPTY_SHELL);
-  const field = useRef<HTMLTextAreaElement>(null);
+  const [aiFocus, setAIFocus] = useState<{ scope: AIScope; seq: number }>({
+    scope: "board",
+    seq: 0,
+  });
+  const openAI = (scope: AIScope) => {
+    setPanel("ai");
+    setAIFocus((current) => ({ scope, seq: current.seq + 1 }));
+    applyNav(null);
+  };
   const panelRef = useRef<HTMLElement | null>(null);
   const railRefs = useRef<Partial<Record<NavId, HTMLButtonElement | null>>>({});
   const navRef = useRef(nav);
@@ -328,44 +334,6 @@ export function CanvasShell({
     const result = await action("sand_read_source", { objectId: o.id });
     if (result) setSource({ ...result, objectId: o.id });
   }
-  async function handToAI() {
-    if (view)
-      await operate({
-        kind: "select",
-        ids: [...view.selection],
-        keepGuide: true,
-      });
-    if (sendToHost) {
-      try {
-        await sendToHost(prompt);
-        setHandoff("已把请求连同选中对象与版本发给宿主 AI。");
-        setPrompt("");
-      } catch (e) {
-        setHandoff(e instanceof Error ? e.message : String(e));
-      }
-      return;
-    }
-    const message =
-      '使用 Sand Table 已有白板 boardId="' +
-      b.id +
-      '"，viewId="' +
-      viewId +
-      '"，当前 spaceId="' +
-      (view?.spaceId || "overview") +
-      '"。不要另建板子。先 sand_read_context 和 sand_read_spaces，读清当前空间、选区和我的编排，再按这个请求配置组件：' +
-      prompt +
-      "。使用 sand_edit_space 维护白板，用 sand_report_space_activity 如实报告你在这个空间做什么；不得把编排请求当作修改源码授权。需要源码修改时先读取明确意图并提交具体提案，等待我确认。";
-    try {
-      await sendMessage(message);
-      setHandoff("已交给宿主，等它的回应。");
-    } catch (e) {
-      setHandoff(
-        "宿主没有接受这条消息（" +
-          ((e as Error)?.message || "未知原因") +
-          "）。你的 AI 仍然可以用 MCP 工具直接操作这张白板。",
-      );
-    }
-  }
   const askSelection = () => {
     if (window.parent === window) return;
     window.parent.postMessage({ type: "sand-table:shell-ask" }, "*");
@@ -413,19 +381,15 @@ export function CanvasShell({
           >
             浏览
           </button>
-          {aiMode === "host" && (
-            <button
-              type="button"
-              aria-pressed={panel === "ai"}
-              onClick={() => {
-                setMode("ai");
-                applyNav(null);
-                setPanel("ai");
-              }}
-            >
-              AI 编排
-            </button>
-          )}
+          <button
+            type="button"
+            aria-pressed={panel === "ai"}
+            onClick={() =>
+              openAI(view?.selection.length ? "selection" : "board")
+            }
+          >
+            和 AI 协作
+          </button>
         </div>
       </header>
       {error && (
@@ -632,8 +596,8 @@ export function CanvasShell({
             motionPaused={nav === "settings"}
             insets={shellOcclusion({
               panelWidth: nav ? shownWidth : null,
-              inspectorRight: Boolean(panel) && panel !== "ai",
-              contextLeft: panel === "ai",
+              inspectorRight: Boolean(panel),
+              contextLeft: false,
             })}
             query={query}
             kind="all"
@@ -662,18 +626,22 @@ export function CanvasShell({
                 </button>
               </div>
             )}
+          {view && view.selection.length > 0 && panel !== "ai" && (
+            <button
+              type="button"
+              className="ai-selection-trigger"
+              onClick={() => openAI("selection")}
+            >
+              询问选区 · {view.selection.length}
+            </button>
+          )}
           <ActivityLayer
             board={b}
             onOpen={(activity, space) => void openActivity(activity, space)}
           />
         </section>
-        {panel && panel !== "theme" && (
-          <aside
-            className={
-              "studio-inspector " + (panel === "ai" ? "is-context" : "")
-            }
-            aria-label="组件详情"
-          >
+        {panel && panel !== "theme" && panel !== "ai" && (
+          <aside className="studio-inspector" aria-label="组件详情">
             <div className="inspector-heading">
               <span>
                 {
@@ -729,49 +697,6 @@ export function CanvasShell({
                 busy={busy}
                 action={action}
               />
-            ) : panel === "ai" ? (
-              <section className="ai-composer">
-                {aiMode === "host" ? (
-                  <>
-                    <h2>你想怎么搭？</h2>
-                    <textarea
-                      ref={field}
-                      aria-label="给 AI 的编排请求"
-                      placeholder="例如：给我搭一个比较两个方案的白板，留出证据、图表和结论…"
-                      value={prompt}
-                      onChange={(e) => setPrompt(e.target.value)}
-                      maxLength={8000}
-                    />
-                    <button
-                      type="button"
-                      disabled={!prompt.trim()}
-                      onClick={() => void handToAI()}
-                    >
-                      交给我的 AI
-                    </button>
-                  </>
-                ) : (
-                  <p>接入方式在「帮助」里。这里不放对话框。</p>
-                )}
-                {handoff && <p role="status">{handoff}</p>}
-                {hostTask && (
-                  <div role="status" aria-label="AI 任务状态">
-                    <p>{hostTask.message || hostTask.state}</p>
-                    {hostTask.state === "running" && onCancelHostTask && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void onCancelHostTask().catch((e) =>
-                            setHandoff(String(e)),
-                          )
-                        }
-                      >
-                        停止 AI
-                      </button>
-                    )}
-                  </div>
-                )}
-              </section>
             ) : (
               <section className="source-inspector">
                 <GuidePanel
@@ -855,6 +780,21 @@ export function CanvasShell({
           </aside>
         )}
       </div>
+      <WhiteboardAI
+        board={b}
+        viewId={viewId}
+        open={panel === "ai"}
+        focusScope={aiFocus}
+        ready={aiMode === "host" && Boolean(sendToHost)}
+        hostEvents={hostEvents}
+        send={sendToHost}
+        cancel={onCancelHostTask}
+        onClose={() => setPanel("")}
+        onConnect={() => {
+          setPanel("");
+          applyNav("help");
+        }}
+      />
     </main>
   );
 }
