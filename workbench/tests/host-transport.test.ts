@@ -78,7 +78,7 @@ test("late cross-origin handshake, requests, actual response events, cancel and 
   );
   client.dispose();
 });
-test("DSH rpcId maps only its own turn, reply, structured plugin result and cancellation", async () => {
+test("DSH keeps replies in the conversation and publishes only structured tool artifacts", async () => {
   const file = "../dsh-plugin/tasks.js";
   const { createTaskChannel } = await import(file);
   let onEvent: (s: any, e: any) => void = () => {},
@@ -129,6 +129,16 @@ test("DSH rpcId maps only its own turn, reply, structured plugin result and canc
       },
     },
   );
+  const replyStatus = channel.status(task.taskId, { id: "session" });
+  assert.deepEqual(
+    replyStatus.events.map((event: any) => event.message),
+    ["已提交给宿主会话", "AI 正在处理", "actual response"],
+  );
+  assert.deepEqual(
+    replyStatus.events.flatMap((event: any) => event.results ?? []),
+    [],
+    "ordinary replies must not become board artifacts",
+  );
   onEvent(
     { id: "session" },
     {
@@ -148,7 +158,16 @@ test("DSH rpcId maps only its own turn, reply, structured plugin result and canc
     },
   );
   const status = channel.status(task.taskId, { id: "session" });
-  assert.equal(status.events.flatMap((e: any) => e.results ?? []).length, 2);
+  assert.deepEqual(
+    status.events.flatMap((e: any) => e.results ?? []),
+    [
+      {
+        kind: "dataset",
+        rows: [["x"], [1]],
+        source: "DSH session / tool result 4",
+      },
+    ],
+  );
   assert.equal(status.events[2].message, "actual response");
   assert.throws(() => channel.status(task.taskId, { id: "other" }), /找不到/);
   await channel.cancel(task.taskId, { id: "session" });

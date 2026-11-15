@@ -64,6 +64,9 @@ for path in root.rglob('*.md'):
 if errors:
     raise SystemExit('\n'.join(errors))
 future = [v for k, v in cards.items() if int(k[1:]) >= 20 and k not in ['T66', 'T69']]
-count = sum(v[1] == 'minimax' for v in future)
+owners = {}
+for _, owner, _ in future:
+    label = owner.split("（", 1)[0]
+    owners[label] = owners.get(label, 0) + 1
 print(f'PASS: {len(cards)} cards; dependencies acyclic; index owners/dependencies and links consistent.')
-print(f'Future coding cards: minimax {count}/{len(future)} ({count/len(future):.0%}); grok {len(future)-count}.')
+print('Coding-card owners: ' + ', '.join(f'{owner} {count}' for owner, count in sorted(owners.items())) + '.')

@@ -40,15 +40,7 @@ export function createTaskChannel(ctx) {
               .filter((p) => p.type === "text")
               .map((p) => p.text)
               .join("\n");
-            if (text)
-              emit(task, "running", text, [
-                {
-                  kind: "text",
-                  title: "AI 回复",
-                  text,
-                  source: `DSH ${session.id} / turn ${task.turn}`,
-                },
-              ]);
+            if (text) emit(task, "running", text);
           }
           if (event.type === "tool/result" && !event.data.message?.isError) {
             for (const part of event.data.message?.content ?? []) {

@@ -188,6 +188,21 @@ try {
     .last()
     .getByText("已完成", { exact: true })
     .waitFor();
+  assert.equal(await board.locator(".component-card").count(), 1);
+  assert.equal(
+    await board
+      .locator(".component-card")
+      .filter({ hasText: "Host response 1" })
+      .count(),
+    0,
+  );
+  const firstArtifacts = JSON.parse(
+    await tools.get("sand_table_read_board").execute({
+      boardId: listed.boards[0].boardId,
+    }),
+  );
+  assert.ok(JSON.stringify(firstArtifacts).includes("Plugin table"));
+  assert.ok(!JSON.stringify(firstArtifacts).includes("AI 回复"));
   await ai.getByRole("button", { name: "收起 AI 协作" }).click();
   await table.click();
   await board.getByRole("button", { name: /询问选区/ }).click();
@@ -308,7 +323,7 @@ try {
   assert.equal(await board.getByText(/此版本不支持组件类型/).count(), 0);
   assert.deepEqual(errors, []);
   console.log(
-    "HOST BROWSER PASSED: actual local service and plugin, cross-origin nested canvas, late capability, real request ID, response and table persisted, follow-up and cancellation (scripted DSH execution fixture).",
+    "HOST BROWSER PASSED: actual local service and plugin, cross-origin nested canvas, real request ID, replies remain in conversation, structured table persisted, follow-up and cancellation (scripted DSH execution fixture).",
   );
 } catch (error) {
   for (const frame of page?.frames() ?? [])
