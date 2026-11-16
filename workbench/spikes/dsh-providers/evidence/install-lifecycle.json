@@ -1,0 +1,17 @@
+{
+  "dsh": "0.2.2-rc.1",
+  "context": "0.85.1",
+  "pnpm": "10.32.1",
+  "node": "v24.22.1",
+  "checks": {
+    "diagramRejectedWithoutExemption": true,
+    "contextInstalled": true,
+    "contextUninstalled": true,
+    "contextReinstalled": true,
+    "whiteboardLinked": true
+  },
+  "diagramDiagnostic": "dsh: installation rejected: Plugin dsh-diagram@0.6.1 is incompatible with dsh 0.2.2-rc.1",
+  "limits": [
+    "Profile lifecycle only; browser rendering and model execution are separate checks."
+  ]
+}
