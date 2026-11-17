@@ -50,3 +50,15 @@
 正式方向见 [DSH 插件组合契约](../../docs/kernel-v3/06-plugin-composition.md) 和 [复用清单](../../docs/kernel-v3/07-plugin-reuse.md)。当前包仍是桥接实现，清单中的版本范围只是声明；目标版本、真实安装及插件组合由 T77/T66 验证。任务映射仍在内存中，结果写入仍依赖打开的页面，刷新恢复与服务端产物接收尚未实现。T79 负责接宿主日志与状态投影；不得用浏览器缓存或第二份聊天日志填补。
 
 **尚未宣称通过**：在真实 DSH 中安装插件、官方侧栏／主面板槽位装载、真实模型与第三方插件执行、真人任务验收。测试夹具不代替这些验证。若目标 DSH 的 API 变化，应重新检查 `sessionController.prompt/cancel`、`session/event`、`sidebar.panellist` 和 `main`。
+
+### 原生资源提供者
+
+DSH 插件注入 `sandTableResources` 后，在自己的生命周期中注册能力：
+
+```js
+ctx.effect(() => ctx.sandTableResources.register(provider));
+```
+
+`provider` 遵循 `workbench/resources/types.ts`，按 `providerId + namespace` 隔离。read/open 必须自行验证权限并返回实际版本；固定版本不可读须返回 version_unavailable，不能回退当前版。注册表不加载插件、不保存资源正文。白板保存的 ObjectSource.resource 是唯一绑定；UI 预览与 sand_table_read_object 在读取前后核对本地引用版本。
+
+默认白板提供者复用 MCP/内核；外部提供者停用后显示缺失并保留本地说明。原生编辑适配的幂等范围目前为 process，未知结果不自动重试。完整组合分发与跨重启操作确认分别由 T82/T79 验收。

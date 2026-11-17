@@ -405,7 +405,8 @@ function Workbench() {
         };
       }
       case "app_asset":
-        return callTool("app_asset", args);
+      case "app_resource":
+        return callTool(name, args);
       case "app_edit": {
         const result = await callTool("app_edit", args);
         await storeRef.current?.sync();

@@ -24,6 +24,10 @@ import {
 import { modelText, overBudget } from "./output.ts";
 
 export type CoreToolsHost = {
+  resourceRead?: (
+    objectId: string,
+    expectedVersion: number,
+  ) => Promise<unknown>;
   /** 宿主能力：告诉模型这个宿主能做什么。 */
   host: () => { taskSubmit: boolean };
   /** 写入之后同步包工具的启停。 */
@@ -108,11 +112,12 @@ export function registerCoreTools(
 
   registrar.tool(
     "sand_read",
-    "Read full objects by id, including where they are placed and how they relate to other objects. Long text fields are cut; use textOffset to read more.",
+    "Read full objects by id, including where they are placed and how they relate to other objects. Long text fields are cut; use textOffset to read more. Set resolveResources to preview saved plugin resources at their actual versions.",
     {
       ids: z.array(z.string().min(1)).min(1).max(20),
       include: z.array(z.enum(["presentations", "relations"])).optional(),
       textLimit: z.number().int().min(1).max(20_000).optional(),
+      resolveResources: z.boolean().optional(),
       textOffset: z
         .object({
           id: z.string().min(1),
@@ -121,12 +126,22 @@ export function registerCoreTools(
         })
         .optional(),
     },
-    (args, ctx) =>
-      readObjects(ctx.db, ctx.registry, args.ids, {
+    async (args, ctx) => {
+      const result = readObjects(ctx.db, ctx.registry, args.ids, {
         ...(args.include ? { include: args.include } : {}),
         ...(args.textLimit ? { textLimit: args.textLimit } : {}),
         ...(args.textOffset ? { textOffset: args.textOffset } : {}),
-      }),
+      });
+      if (!args.resolveResources || !host.resourceRead) return result;
+      const resources = await Promise.all(
+        result.objects.map(async (row) => ({
+          objectId: row.id,
+          objectVersion: row.version,
+          resource: await host.resourceRead!(row.id, row.version),
+        })),
+      );
+      return { ...result, resources };
+    },
     { readOnly: true },
   );
 

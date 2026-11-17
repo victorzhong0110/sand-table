@@ -81,6 +81,85 @@ export function apply(ctx, config) {
         .execute({ boardId: board.boardId });
       assert.ok(readBack.includes("DSH provider probe"));
       checks.whiteboardReadWrite = true;
+      const resources = ctx.get("sandTableResources");
+      assert.equal(typeof resources?.register, "function");
+      const external = {
+        providerId: "verification",
+        namespace: "isolated-workspace",
+        resourceId: "fixture",
+        revision: "fixed-1",
+      };
+      const provider = {
+        describe: () => ({
+          providerId: external.providerId,
+          namespace: external.namespace,
+          title: "Fixture resource provider; not a drawing plugin",
+          capabilities: { read: true },
+          idempotency: "none",
+        }),
+        read: (ref) => ({
+          status: "available",
+          ref,
+          revision: "fixed-1",
+          title: "Host resource",
+          summary: "Fixture content stays with this provider",
+          capabilities: { read: true },
+        }),
+      };
+      const disposeProvider = ctx.effect(
+        () => resources.register(provider),
+        "probe: fixture resource",
+      );
+      const currentBoard = JSON.parse(
+        await ctx.tools.get("sand_table_list_boards").execute({}),
+      ).boards[0];
+      const resourceWrite = JSON.parse(
+        await ctx.tools.get("sand_table_edit_space").execute({
+          boardId: board.boardId,
+          revision: currentBoard.revision,
+          operation: JSON.stringify({
+            commands: [
+              {
+                op: "object.create",
+                ref: "resource",
+                type: "base.resource_reference",
+                title: "Host resource reference",
+                data: { note: "Local explanation only" },
+                source: { origin: "human", resource: external },
+              },
+              {
+                op: "presentation.create",
+                boardId: board.boardId,
+                objectId: "@resource",
+              },
+            ],
+          }),
+        }),
+      );
+      const resourceId = resourceWrite.created.resource;
+      const readResource = async () =>
+        JSON.parse(
+          await ctx.tools
+            .get("sand_table_read_object")
+            .execute({ boardId: board.boardId, objectId: resourceId }),
+        );
+      const resolved = await readResource();
+      assert.equal(resolved.resource.value.status, "available");
+      assert.equal(resolved.resource.value.revision, "fixed-1");
+      assert.deepEqual(resolved.source.resource, external);
+      assert.deepEqual(resolved.data, { note: "Local explanation only" });
+      disposeProvider();
+      assert.equal(
+        (await readResource()).resource.value.status,
+        "provider_missing",
+      );
+      ctx.effect(
+        () => resources.register(provider),
+        "probe: reinstall fixture resource",
+      );
+      assert.equal((await readResource()).resource.value.status, "available");
+      checks.nativeResourceRegistration = true;
+      checks.resourceUnloadReinstall = true;
       const result = {
         ok: Object.values(checks).every(Boolean),
         checks,

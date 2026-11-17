@@ -390,7 +390,8 @@ window.__ModuleLoader__.load({
               ref: frameRef,
               src: state.boardUrl,
               title: "Sand Table 白板",
-              sandbox: "allow-scripts allow-same-origin allow-forms allow-downloads",
+              sandbox:
+                "allow-scripts allow-same-origin allow-forms allow-downloads",
               onLoad: () => injectHostBridge(frameRef.current),
               style: {
                 flex: 1,
@@ -450,6 +451,32 @@ window.__ModuleLoader__.load({
               return;
             if (data.type === "sand-table:bridge-ready") {
               injectHostBridge(frame);
+              return;
+            }
+            if (data.type === "sand-table:resource-request") {
+              const id = String(data.id ?? "");
+              const session = resolveSessionId();
+              const resourceFrame = frame;
+              void callHost(
+                session,
+                `/${COMMAND_NAME} resource ${JSON.stringify(data.request)}`,
+              )
+                .then((value) => {
+                  if (currentFrame !== resourceFrame) return;
+                  send({
+                    type: "sand-table:resource-result",
+                    id,
+                    result: JSON.parse(value),
+                  });
+                })
+                .catch((error) => {
+                  if (currentFrame !== resourceFrame) return;
+                  send({
+                    type: TASK_ERROR_MESSAGE,
+                    id,
+                    message: String(error),
+                  });
+                });
               return;
             }
             if (![TASK_MESSAGE, "sand-table:cancel-task"].includes(data.type))

@@ -82,3 +82,7 @@
 - [dsh-diagram 作者文档](https://github.com/hanzhangzzz/dsh-diagram)
 
 以上网页可能滚动更新。T77 的精确包与源码记录才是后续实现的 API 依据，不能用本表里的未锁定网页证明某个发布版本支持某方法。
+
+### 2026-11-17 槽位证据更正
+
+ADR 0008 的原判断只查看 SlotCore，遗漏 renderer 提供的 SlotRegistry。后者在同一固定版本中提供公开 slots.inject(key, callback)，现有白板与 dsh-context 的调用无需因此改写。verify-api 同时核对两层发布源码；原始 client-api.json 另存为 client-api-2026-11-16.json，保留更正过程。静态接口匹配仍不计组合界面通过。

@@ -1,12 +1,12 @@
 # ADR 0008：DSH 提供者版本与接口验证
 
-日期：2026-11-16。任务：T77。状态：基础宿主验证完成；白板客户端和绘图提供者需要适配，组合 UI 与真实模型未通过验收。
+日期：2026-11-16。任务：T77。状态：基础宿主验证完成；绘图提供者需要适配，组合 UI 与真实模型仍需验收。2026-11-17 修正槽位接口判断。
 
 ## 结论
 
 以 `@deepseek-ai/dsh@0.2.2-rc.1` 作为本轮适配基线，CLI 的 Node 要求是 `>=24.9.0`。保持独立白板自己的 Node 22.18+ 要求，不为 DSH 改写整个项目的运行时。`dsh-context@0.85.1` 可复用其 Host 状态投影；其 UI 的嵌入/组合仍需实测。`dsh-diagram@0.6.1` 被该版本宿主的兼容性检查拒绝，不选为可直接安装的默认绘图提供者，也不使用版本豁免绕过。
 
-当前 Sand Table 的四个 Host 工具在真实 DSH 中完成了白板创建/读取；客户端仍调用已不存在的 `slots.inject()`。因此“Host 可用”“清单可安装”不代表完整白板 UI 可用。下一步先适配客户端注册方式，再落实资源提供者。
+当前 Sand Table 的四个 Host 工具在真实 DSH 中完成了白板创建/读取。2026-11-17 核对两层发布源码后确认：`ctx.slots` 是 renderer 所有的 SlotRegistry，仍提供 `inject(key, callback)` 声明生命周期接口；底层 SlotCore 没有此方法。原先由底层原型推断客户端不兼容的结论错误，已修正验证脚本。`register({inject: factory})` 是另一项业务属性接口，不能用于替代声明生命周期。组合 UI 仍需浏览器实测。
 
 ## 固定组合与环境
 
@@ -40,7 +40,7 @@
 | 压缩 | 组合确认，实际摘要未测 | Web 的压缩器在 Agent preset 内隔离；sdk-minimal 的默认组合包含基础压缩器；未调用模型压缩 |
 | 绘图 0.6.1 安装 | 明确拒绝 | 返回 incompatible with dsh 0.2.2-rc.1，profile 未添加该依赖 |
 | Web 基础 UI | Mac 通过 | 基础导航、预览说明可见，无 pageerror；未含插件组合验收 |
-| 白板客户端 API | 发现不兼容 | 发布版 SlotCore 无 inject 方法，当前白板代码仍调用它 |
+| 白板客户端 API | 2026-11-17 更正：接口匹配 | ctx.slots 是 renderer 的 SlotRegistry，实际提供 inject 与 register；已加载固定发布包的客户端工厂核对原型 |
 | 上下文/白板组合 UI | 未测 | 后续 Mac 设备请求超时；Cloud Chromium 的 Unix socket 权限不支持此浏览器检查 |
 | 实际 prompt/cancel/follow 往返 | 未测 | 已验证真实控制服务公开方法，未用真实模型完成一轮 |
 | Desktop、跨插件产物、图形分叉/导出 | 未测 / 阻塞 | Desktop 不是本次 CLI web；图形须先适配后验收 |
@@ -62,7 +62,7 @@
 | 用户消息 | `@deepseek-ai/dsh-session/lib/types/types.d.ts` | user/message 的 data 是 UserMessage，自带稳定 id/source；requestId 在人类来源 rpcId 中关联 |
 | 任务控制 | `@deepseek-ai/dsh-api-session-controller/lib/types/{index,types}.d.ts` | `prompt({requestId,sessionId,mode,content}, signal)` 回 accepted；`follow/projections` 读真实状态；排队回执不是完成 |
 | 客户端命令 | `@deepseek-ai/dsh-commands/lib/typert.remote-client.d.ts` | commands.execute(agentId, line, attachments, signal?) 仍存在；不要把 Host 的 Agent 参数误当客户端调用形状 |
-| UI slots | `@deepseek-ai/dsh-client-ui-slots/lib/types/index.d.ts` | `slots.register({name,key,inject: factory,...}, Component)`；旧的 `slots.inject(name, callback)` 不存在 |
+| UI slots | `@deepseek-ai/dsh-client-ui-renderer/lib/types/client/registry.d.ts` + `lib/client.js`，以及 ui-slots 的 SlotCore | ctx.slots:SlotRegistry 同时提供 inject(key, callback) 和 register；前者跟随声明生命周期，后者的 inject factory 组装组件业务属性 |
 | Web 组合 | `@deepseek-ai/dsh-web-app/cordis.patch.yml` | root 压缩器关闭，preset 中提供隔离实例；root 插件注入 compaction 会一直 pending，须按 Agent composition 获取 |
 
 ### 自定义记录不是稳定持久事件的任意扩展
@@ -77,7 +77,7 @@ TypeScript 的 SessionEventMap 可声明合并，不等于发布版存储校验�
 
 最小适配范围：
 
-1. `workbench/dsh-plugin/client.js`：改用新版 register 的 inject 工厂注册 main/侧栏，并声明实际客户端依赖；保留会话和命令接口的正确归属。真实 Web UI 里核对入口、面板、能力握手及卸载。
+1. `workbench/dsh-plugin/client.js`：保留 slots.inject 的声明生命周期调用；真实 Web UI 里核对入口、面板、能力握手及卸载。不能把 register 的业务属性工厂当作同义替换。
 2. `workbench/dsh-plugin/` 的分发/配置：显式桥接地址可以作为开发模式；T82 的预构建包必须携带 bridge 或通过声明的服务依赖取得它。
 3. T79 按已验证的 handle、projection 和 controller 做关联、重连及服务侧产物写入；不要复制 Host 日志或把浏览器缓存当恢复。
 4. T54 对 dsh-diagram 的客户端 slots、工具/skills、storage-domain、会话持久化与 webServer 路由逐一做版本适配；需要固定 fork/patch 及许可证来源。其旧版 sidecar 分叉/导出与多媒体限制仍须独立解决。

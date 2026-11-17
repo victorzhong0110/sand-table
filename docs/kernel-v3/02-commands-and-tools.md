@@ -404,3 +404,10 @@ DSH 插件（`workbench/dsh-plugin/`）的 4 个工具改为转调 `sand_status`
 ## 后续阶段契约补充
 
 新增评论/引用、运行、时间/分支/观察者及组件接口的正式约束见 [05-delivery-contracts.md](05-delivery-contracts.md)。各责任卡实现时同步本文件的具体类型/表/工具签名；不能仅根据旧的基础清单拒绝已经授权的扩展。
+
+## 8. 资源读取与来源修改（T78）
+
+- object.create/source 和 object.update/source 接受 01 §11 的 ResourceRef；不能同时提供 external 和 resource。object.update 改 source 时必须携带 expectedVersion；清除资源绑定使用完整的新 source（省略 resource），不另开写库入口。
+- sand_read 增加可选 resolveResources:boolean。开启后返回 resources，逐项包含 objectId、objectVersion 和资源解析结果；默认仍只读白板对象。提供者不可用明确返回分类，不回退固定版本，不把预览写回 data。核心工具仍为 8 个。
+- 新增界面专用 app_resource，参数 objectId、expectedVersion、可选 workspaceId、action=read|open|binding。只从当前工作空间的已保存对象解析绑定；客户端不能传任意 ResourceRef。返回 workspaceId、objectId、objectVersion、ref，以及 read/open 的 value。binding 不读取外部正文。异步完成后再次核对工作空间、引用和版本。
+- DSH 的 sand_table_read_object 和白板预览走同一资源注册表；第三方 native provider 在自身 read/open 中验证权限。保存了引用不代表获得文件、网络或其他资源的读取授权。打开只允许宿主生成的 board-object 路由或经校验的 http/https URL。

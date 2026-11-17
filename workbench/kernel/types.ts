@@ -11,10 +11,21 @@ export type ExternalLocator = {
   fingerprint?: string;
 };
 
+export type ResourceIdentity = {
+  providerId: string;
+  namespace: string;
+  resourceId: string;
+};
+export type ResourceRef = ResourceIdentity & {
+  revision?: string;
+  anchor?: string;
+};
+
 export type ObjectSource = {
   origin: "human" | "imported" | "ai-generated" | "ai-inferred" | "derived";
   basis?: string;
   external?: ExternalLocator;
+  resource?: ResourceRef;
 };
 
 export type ObjectRow = {

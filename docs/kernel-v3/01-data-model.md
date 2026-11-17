@@ -1,6 +1,6 @@
 # 内核 v3：数据模型
 
-本文件的数据库权威、不变量与事务只覆盖默认白板文档提供者。DSH 会话及外部资源的权威边界见 [06](06-plugin-composition.md) §2。T78 将按 06 §3 在 ObjectSource 增加可选 ResourceRef 并同步此文件的类型、Schema、导入导出与运行时；当前类型仍为下文已实现形状，T76 不新增持久字段。
+本文件的数据库权威、不变量与事务只覆盖默认白板文档提供者。DSH 会话及外部资源的权威边界见 [06](06-plugin-composition.md) §2。T78 按 06 §3 增加可选 ResourceRef；引用保存在既有 source JSON 中，旧库无需重写。引用对象只保存本地说明，外部正文由原提供者管理。
 
 依据：`00-decisions.md` 的 K2、K4。本文的表结构、字段名和规则是实现依据，不要自行增删字段；需要改，先在 PR 里提“需要架构确认”。
 
@@ -243,10 +243,14 @@ export type ExternalLocator = {
   fingerprint?: string; // 内容指纹，用来识别外部内容变化
 };
 
+export type ResourceIdentity = { providerId: string; namespace: string; resourceId: string };
+export type ResourceRef = ResourceIdentity & { revision?: string; anchor?: string };
+
 export type ObjectSource = {
   origin: "human" | "imported" | "ai-generated" | "ai-inferred" | "derived";
   basis?: string; // ai-inferred 必填
   external?: ExternalLocator;
+  resource?: ResourceRef;
 };
 
 export type ObjectRow = {
@@ -444,3 +448,9 @@ type Change = {
 ## 后续阶段契约补充
 
 新增评论/引用、运行、时间/分支/观察者及组件接口的正式约束见 [05-delivery-contracts.md](05-delivery-contracts.md)。各责任卡实现时同步本文件的具体类型/表/工具签名；不能仅根据旧的基础清单拒绝已经授权的扩展。
+
+## 11. 资源引用（T78）
+
+ResourceRef 的三个身份字段非空；上限分别 128/512/512 字符，revision 256、anchor 2048 字符。可选字段缺省表示未指定，若给出则不能为空。不透明标识不拼接路径或 URL。source.resource 与 source.external 互斥，修改 source 必须携带 expectedVersion；仍由 object.update 进入事务与撤销历史。
+
+base.resource_reference 的 data 仅含可选 note（本地说明，最多 20000 字符），不复制 ResourceRef 或外部正文。T25 导出导入原样保留 source.resource，不携带外部文档或安装插件；旧来源缺省 resource 不变。默认白板 providerId=sand-table.board，namespace 由存储根目录的稳定哈希与 workspaceId 组合，避免两个实例的 default 工作空间相撞。

@@ -156,7 +156,8 @@ test("X7：Host 半导出 apply，并且不 import 宿主包", () => {
   assert.ok(specifiers.length > 0, "Host 半要 import node 内置模块");
   for (const specifier of specifiers)
     assert.ok(
-      specifier.startsWith("node:") || specifier === "./tasks.js",
+      specifier.startsWith("node:") ||
+        ["./tasks.js", "./resources.js"].includes(specifier),
       `运行时代码不 import ${specifier}（不引宿主包、不引第三方包）`,
     );
 });

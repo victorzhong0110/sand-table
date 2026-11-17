@@ -16,6 +16,7 @@ export type HostBridgeClientOptions = {
   onCapabilities?: (host: InjectedHost) => void;
 };
 export function installHostBridgeClient(options: HostBridgeClientOptions) {
+  const requestNonce = globalThis.crypto.randomUUID();
   const pending = new Map<
     string,
     {
@@ -34,7 +35,7 @@ export function installHostBridgeClient(options: HostBridgeClientOptions) {
         reject(Error("宿主桥尚未连接。"));
         return;
       }
-      const id = `st-${++seq}`;
+      const id = `st-${requestNonce}-${++seq}`;
       const timer = setTimeout(() => {
         pending.delete(id);
         reject(Error("宿主响应超时，请检查连接后重试。"));
@@ -71,6 +72,10 @@ export function installHostBridgeClient(options: HostBridgeClientOptions) {
       origin = event.origin;
       const injected: InjectedHost = {
         ...host,
+        resourceRequest: host.capabilities?.resourceRead
+          ? (resource) =>
+              request("sand-table:resource-request", { request: resource })
+          : undefined,
         submitTask: host.capabilities?.taskSubmit ? submit : undefined,
         cancelTask: host.capabilities?.eventStream
           ? async (taskId) => {
@@ -88,6 +93,7 @@ export function installHostBridgeClient(options: HostBridgeClientOptions) {
       for (const listener of listeners) listener(data.event);
     } else if (
       data.type === SUBMIT_RESULT_MESSAGE ||
+      data.type === "sand-table:resource-result" ||
       data.type === SUBMIT_ERROR_MESSAGE
     ) {
       const entry = pending.get(String(data.id));
@@ -96,6 +102,8 @@ export function installHostBridgeClient(options: HostBridgeClientOptions) {
       clearTimeout(entry.timer);
       if (data.type === SUBMIT_ERROR_MESSAGE)
         entry.reject(Error(String(data.message ?? "宿主操作失败。")));
+      else if (data.type === "sand-table:resource-result")
+        entry.resolve(data.result);
       else entry.resolve({ taskId: String(data.taskId ?? "") });
     }
   };

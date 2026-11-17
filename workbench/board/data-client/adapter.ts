@@ -314,7 +314,8 @@ const isBoardType = (type: string) => type === "base.board";
 function toContentObject(row: V3ObjectRow): WorkspaceObject {
   return {
     id: row.id,
-    kind: "native",
+    kind: row.source?.resource ? "reference" : "native",
+    ...(row.source ? { source: structuredClone(row.source) } : {}),
     type: v2TypeOf(row.type),
     typeVersion: row.typeVersion,
     title: row.title,
