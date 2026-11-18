@@ -79,11 +79,18 @@ try {
   assert.equal(await frame.getByText("代码入口", { exact: true }).count(), 0);
   mkdirSync("artifacts", { recursive: true });
   await page.screenshot({ path: "artifacts/blank-canvas.png", fullPage: true });
+  await frame.getByRole("button", { name: "和 AI 协作", exact: true }).click();
+  const ai = frame.getByRole("complementary", {
+    name: "和 AI 协作",
+    exact: true,
+  });
+  await ai.getByRole("heading", { name: "让 AI 和你一起编辑" }).waitFor();
+  assert.equal(await ai.getByRole("textbox").count(), 0);
+  await ai.getByRole("button", { name: "查看连接方式" }).click();
   const help = frame.locator(".app-rail").getByRole("button", {
     name: "帮助",
     exact: true,
   });
-  await help.click();
   const jsonField = frame.locator("#json");
   await jsonField.waitFor();
   let jsonText = "";

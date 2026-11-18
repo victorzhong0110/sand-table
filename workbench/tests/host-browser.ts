@@ -1,6 +1,6 @@
 // Real cross-origin browser + actual local service/plugin. DSH session execution is a scripted contract fixture, not a model.
 import { createServer } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,12 +13,16 @@ const disposers: (() => any)[] = [];
 let command: any, local: any, browser: any, page: any;
 const events = new Set<(s: any, e: any) => void>();
 let turn = 0;
+const prompts: any[] = [];
 const emit = (type: string, data: any) => {
   for (const listener of events)
     listener({ id: "session" }, { type, data, seq: 1 });
 };
 const controller = {
   prompt: async (request: any) => {
+    prompts.push(request);
+    if (request.content[0].text.startsWith("reject"))
+      return { accepted: false };
     const current = ++turn;
     setTimeout(() => {
       emit("turn/start", { turn: current });
@@ -158,11 +162,11 @@ try {
   const shell = page.frameLocator('iframe[title="Sand Table 白板"]');
   const board = shell.frameLocator("iframe");
   await board.getByRole("heading", { name: "从一块空白开始" }).waitFor();
-  await board.getByRole("button", { name: "AI 编排", exact: true }).click();
+  await board.getByRole("button", { name: "和 AI 协作", exact: true }).click();
   const input = board.getByRole("textbox", { name: "给 AI 的编排请求" });
   await input.waitFor();
   await input.fill("hello");
-  await board.getByRole("button", { name: "交给我的 AI", exact: true }).click();
+  await board.getByRole("button", { name: "发送", exact: true }).click();
   await board.getByText("Host response 1", { exact: true }).first().waitFor();
   await board
     .locator(".component-card")
@@ -173,14 +177,94 @@ try {
     .filter({ hasText: "Plugin table" });
   assert.match(await table.innerText(), /Round/);
   assert.match(await table.innerText(), /Score/);
+  const ai = board.getByRole("complementary", {
+    name: "和 AI 协作",
+    exact: true,
+  });
+  const conversation = ai.getByRole("log", { name: "白板协作对话" });
+  await conversation.getByText("Host response 1", { exact: true }).waitFor();
+  await ai
+    .getByLabel("AI 任务状态")
+    .last()
+    .getByText("已完成", { exact: true })
+    .waitFor();
+  await ai.getByRole("button", { name: "收起 AI 协作" }).click();
+  await table.click();
+  await board.getByRole("button", { name: /询问选区/ }).click();
+  assert.equal(await ai.getByLabel("AI 讨论范围").inputValue(), "selection");
+  await ai
+    .getByLabel("AI 目标预览")
+    .getByText("Plugin table", { exact: true })
+    .first()
+    .waitFor();
+  assert.equal(
+    await conversation.getByText("hello", { exact: true }).count(),
+    1,
+  );
   await input.fill("follow up");
-  await board.getByRole("button", { name: "交给我的 AI", exact: true }).click();
+  await board.getByRole("button", { name: "发送", exact: true }).click();
   await board.getByText("Host response 2", { exact: true }).first().waitFor();
+  await conversation.getByText("Host response 2", { exact: true }).waitFor();
+  await ai
+    .getByLabel("AI 任务状态")
+    .last()
+    .getByText("已完成", { exact: true })
+    .waitFor();
+  const selectedTargets = JSON.parse(
+    prompts[1].content[0].text.match(/targets: (.+)/)[1],
+  );
+  assert.equal(selectedTargets.length, 1);
+  assert.ok(selectedTargets[0].objectId);
+  assert.ok(selectedTargets[0].version > 0);
+  mkdirSync("artifacts", { recursive: true });
+  await page.screenshot({
+    path: "artifacts/whiteboard-ai.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const panelBounds = await ai.boundingBox();
+  assert.ok(
+    panelBounds &&
+      panelBounds.x >= 0 &&
+      panelBounds.x + panelBounds.width <= 390,
+  );
+  assert.ok(
+    await ai.getByRole("button", { name: "发送", exact: true }).isVisible(),
+  );
+  await page.screenshot({
+    path: "artifacts/whiteboard-ai-mobile.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await ai.getByLabel("AI 讨论范围").selectOption("board");
+  await ai
+    .getByLabel("AI 目标预览")
+    .getByText("Plugin table", { exact: true })
+    .first()
+    .waitFor();
+  await ai.getByRole("button", { name: "找出遗漏", exact: true }).click();
+  assert.match(await input.inputValue(), /遗漏、矛盾/);
+  await input.fill("reject this request");
+  await ai.getByRole("button", { name: "发送", exact: true }).click();
+  await conversation.getByText("发送失败", { exact: true }).waitFor();
+  assert.equal(await input.inputValue(), "reject this request");
+  assert.equal(
+    await conversation.getByText("follow up", { exact: true }).count(),
+    1,
+  );
   await input.fill("wait for cancellation");
-  await board.getByRole("button", { name: "交给我的 AI", exact: true }).click();
+  const before = prompts.length;
+  await ai
+    .getByRole("button", { name: "发送", exact: true })
+    .evaluate((button: HTMLButtonElement) => {
+      button.click();
+      button.click();
+    });
   await board.getByRole("button", { name: "停止 AI", exact: true }).click();
+  assert.equal(prompts.length, before + 1, "重复点击只发送一次");
   await board
     .getByLabel("AI 任务状态")
+    .last()
     .getByText("已取消", { exact: true })
     .waitFor();
   // Responses must be visible to the independent Agent tool through the same running service.
