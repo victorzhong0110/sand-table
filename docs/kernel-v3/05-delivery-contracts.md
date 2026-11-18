@@ -2,7 +2,11 @@
 
 本文件与 00–04 同为正式设计，负责跨任务卡接口。任务卡不得以 ADR 或历史 issue 覆盖这些边界。实现本文件各节的责任卡标在节内；未完成的实现不得宣称已可用。
 
+DSH 插件组合与迁移同时遵循 [06-plugin-composition.md](06-plugin-composition.md)。以下白板事务与沙箱约束保留；外部资源不强制复制进白板库。§7 的 runs 仅承担领域运行记录与提交/写入保护，宿主执行和会话状态由 T79 的绑定服务读取或投影，T64/T65 复用它；原有每秒刷新可作不支持变更流的适配回退，不自建第二套执行调度。未完成的规则卡依任务索引增加的前置条件开工。
+
 ## 1. 执行、文件与验收
+
+新增能力先读 06/07，检查已有提供者、版本、公开接口和复用缺口。图形、网络、上下文、恢复等不默认转为自研任务；选型卡记录复用决定，不能用成熟底层库冒充现成 DSH 插件。
 
 - 从最新 main 创建分支；依赖必须已合并。先读 AGENTS、本文件、任务卡及其列出的代码。历史 issue 提供产品动机，不覆盖正式契约。
 - 可自主处理路径移动、导出名调整、类型推断、私有函数拆分；在 PR 写明对应位置。不因这些机械差异暂停。真正改变存储权威、工具权限、用户语义时才请求架构修订。
@@ -42,7 +46,7 @@ T26 读迁移不写库，写迁移与字段修改在同一事务；只改标题�
 
 T34 的 ViewProps.dispatch 只允许更新自身对象；创建评论、引用、图表、关系等由外壳明确的用户动作服务执行，不能放宽沙箱 dispatch。T34 提供 actions（宿主注入）：focusObject、openObjectPicker、createLinkedComponent；实现复用 app_edit，校验类型、范围和 expectedVersion。沙箱不获得这些跨对象动作。
 
-T40 的 readBindings/readVersion 必须带读取者 objectId 与槽 slot，服务端按实际绑定校验，不能仅让 UI 检查。readVersion 参数 `{objectId,slot,targetId,version}`，禁止裸 id 任意读；当前对象自读可显式用 self。历史搜索 before 和 after，限定对象 id/version；多个快照不一致时报歧义，找不到报不可用，绝不回退当前值假装旧版本。返回版本、来源、unavailable 和 revision。删除目标仍级联软删除关系；仅当来源存活且目标已删除时，可读取该槽的关系墓碑用于“来源已删除”；用户单独删绑定关系不能因此恢复授权，不授予其他对象访问权；物理裁剪后明确不可用。
+T40 的 readBindings/readVersion 必须带读取者 objectId 与槽 slot，服务端按实际绑定校验，不能仅让 UI 检查。readVersion 参数 `{objectId,slot,targetId,version}`，禁止裸 id 任意读；当前对象自读可显式用 self。历史搜索 before 和 after，限定对象 id/version；多个快照不一致时报歧义，找不到报不可用，绝不回退当前值假装旧版本。返回版本、来源、unavailable 和 revision。历史快照没有行级 rev，以 null 表示；最外层 revision 仍为本次读取的库修订号。删除目标仍级联软删除关系；仅当来源存活且目标已删除时，可读取该槽的关系墓碑用于“来源已删除”；用户单独删绑定关系不能因此恢复授权，不授予其他对象访问权；物理裁剪后明确不可用。
 
 readBindings 字段必须属于被绑定目标的声明或当前可读数据，不回传宿主会话/凭据。取消订阅、卸载、包停用和工作空间切换均释放状态；并发响应按 workspaceId+请求代号+revision 拒绝过期结果。
 
@@ -106,3 +110,11 @@ T61 验证下面已定模型与有界查询，不再把实现卡留待未来编�
 ## 9. 已合并卡的补齐规则
 
 本修订不把已合并的 T17/T20 等重新标为未完成。T74 对当前 main 做差距审计并实施 05 对早期接口新增的要求，T24 等 T74。T17 的相对坐标、T20 的元数据/活动读接口及已有实现以测试证据核对，已满足的直接记录通过，缺的在 T74 补齐。
+
+
+## 10. T79 宿主绑定服务
+
+- DSH 暴露 `sandTableTasks.submit(request, agent, signal)`、`get(taskId, agent)`、`follow({workspaceId, boardId}, agent)`、`cancel(taskId, agent)`、`reconcile(taskId, agent)`。follow 返回当前序号和有界快照，是浏览器轮询和后续领域运行适配的入口。
+- requestId 在提交端生成，提交前将会话编号/创建时间、工作空间命名空间、白板、指令及对象版本写入 DSH 持久记录。关联落盘后提交给 DSH，原请求仍可由 rpcId 对账。回执未知保留待核对。终态只接受对应 turn/end。取消只作用于当前仍在执行且能唯一归属的轮次。
+- 投影重建不触发执行或作品写入。宿主收到指定工具的结构化产物后先记交付，再在白板事务内提交作品及 operationId 回执。重启后 `reconcile` 先查回执，再处理未提交的交付。候选与原对象关联，保留提交时版本。作品送达和 DSH 执行状态独立。
+- 绑定采用 DSH 0.2.2-rc.1 的实验 plugin record，格式为 `plugin:sand-table/workbench-v1`。跨 DSH 版本迁移依赖上游对该记录的保留规则。浏览器重开后可在原 DSH 会话中看到关联记录。独立本地/MCP 模式沿用白板编辑能力。

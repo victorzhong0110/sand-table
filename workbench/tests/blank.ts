@@ -81,11 +81,18 @@ try {
   assert.equal(await frame.getByText("代码入口", { exact: true }).count(), 0);
   mkdirSync("artifacts", { recursive: true });
   await page.screenshot({ path: "artifacts/blank-canvas.png", fullPage: true });
+  await frame.getByRole("button", { name: "和 AI 协作", exact: true }).click();
+  const ai = frame.getByRole("complementary", {
+    name: "和 AI 协作",
+    exact: true,
+  });
+  await ai.getByRole("heading", { name: "让 AI 和你一起编辑" }).waitFor();
+  assert.equal(await ai.getByRole("textbox").count(), 0);
+  await ai.getByRole("button", { name: "查看连接方式" }).click();
   const help = frame.locator(".app-rail").getByRole("button", {
     name: "帮助",
     exact: true,
   });
-  await help.click();
   const jsonField = frame.locator("#json");
   await jsonField.waitFor();
   let jsonText = "";
@@ -3175,6 +3182,495 @@ try {
   await frame
     .getByRole("button", { name: "撤销", exact: true })
     .waitFor({ state: "hidden" });
+  const resourceBoard = (await v3View()).spaceId;
+  const resourceWorkspace = (
+    await call("app_board", { boardId: resourceBoard })
+  ).workspaceId;
+  const resourceCamera = await cameraOf();
+  const resourceX = (80 - resourceCamera.x) / resourceCamera.zoom;
+  const resourceY = (80 - resourceCamera.y) / resourceCamera.zoom;
+  const origin = await call("app_edit", {
+    commands: [
+      {
+        op: "object.create",
+        ref: "origin",
+        type: "base.note",
+        title: "资源原文",
+        data: { body: "原插件正文预览" },
+      },
+      {
+        op: "presentation.create",
+        ref: "originPlace",
+        boardId: resourceBoard,
+        objectId: "@origin",
+        x: resourceX,
+        y: resourceY + 360,
+        z: 9999,
+      },
+    ],
+  });
+  const nativeBinding = await call("app_resource", {
+    objectId: origin.created.origin,
+    expectedVersion: 1,
+    workspaceId: resourceWorkspace,
+    action: "binding",
+  });
+  await call("app_edit", {
+    commands: [
+      {
+        op: "object.create",
+        ref: "native",
+        type: "base.resource_reference",
+        title: "资源跟随当前版",
+        data: { note: "自己的说明" },
+        source: { origin: "human", resource: nativeBinding.ref },
+      },
+      {
+        op: "presentation.create",
+        boardId: resourceBoard,
+        objectId: "@native",
+        x: resourceX,
+        y: resourceY,
+        width: 320,
+        height: 320,
+        z: 9999,
+      },
+      {
+        op: "object.create",
+        ref: "missing",
+        type: "base.resource_reference",
+        title: "停用的图形插件",
+        data: { note: "插件停用后仍保留" },
+        source: {
+          origin: "human",
+          resource: {
+            providerId: "drawing",
+            namespace: "isolated-test",
+            resourceId: "scene",
+          },
+        },
+      },
+      {
+        op: "presentation.create",
+        boardId: resourceBoard,
+        objectId: "@missing",
+        x: resourceX + 360,
+        y: resourceY,
+        width: 320,
+        height: 320,
+        z: 9999,
+      },
+      {
+        op: "object.create",
+        ref: "pinned",
+        type: "base.resource_reference",
+        title: "固定的旧版本",
+        source: {
+          origin: "human",
+          resource: { ...nativeBinding.ref, revision: "999" },
+        },
+      },
+      {
+        op: "presentation.create",
+        boardId: resourceBoard,
+        objectId: "@pinned",
+        x: resourceX + 720,
+        y: resourceY,
+        width: 320,
+        height: 320,
+        z: 9999,
+      },
+    ],
+  });
+  const nativeCard = frame
+    .locator(".component-card", { hasText: "资源跟随当前版" })
+    .first();
+  await nativeCard.getByText("原插件正文预览", { exact: true }).waitFor();
+  await nativeCard
+    .getByRole("button", { name: "打开原资源", exact: true })
+    .waitFor();
+  const missingCard = frame
+    .locator(".component-card", { hasText: "停用的图形插件" })
+    .first();
+  await missingCard.getByText("插件停用后仍保留", { exact: true }).waitFor();
+  await missingCard
+    .getByText("资源插件尚未加载。请启用原插件；引用和本地说明仍保留。", {
+      exact: true,
+    })
+    .waitFor();
+  const pinnedCard = frame
+    .locator(".component-card", { hasText: "固定的旧版本" })
+    .first();
+  await pinnedCard
+    .getByText(
+      "无法读取指定历史版本；请保留固定版本，或明确改为跟随当前版本。",
+      { exact: true },
+    )
+    .waitFor();
+  await page.screenshot({
+    path: "artifacts/resource-references.png",
+    fullPage: true,
+  });
+  await nativeCard
+    .getByRole("button", { name: "打开原资源", exact: true })
+    .click();
+  let openedOriginal = false;
+  for (let i = 0; i < 30; i++) {
+    if ((await v3View()).selection.includes(origin.created.originPlace)) {
+      openedOriginal = true;
+      break;
+    }
+    await page.waitForTimeout(100);
+  }
+  assert.equal(openedOriginal, true, "打开资源会定位原对象的展示");
+  /* 注册表驱动的工具箱与组件包管理。 */
+  await railButton("设置").click();
+  const packManager = frame.getByRole("region", { name: "组件包管理" });
+  await packManager.waitFor();
+  const t39Pack = {
+    format: "sand-table-pack",
+    formatVersion: 2,
+    id: "t39",
+    title: "探针包",
+    version: 1,
+    types: [
+      {
+        type: "t39.item",
+        title: "探针卡片",
+        description: "测试注册表组件",
+        icon: "text",
+        version: 1,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["mode"],
+          properties: {
+            text: { type: "string" },
+            mode: {
+              type: "string",
+              enum: ["one", "two"],
+              "x-sand-default": "one",
+            },
+          },
+        },
+        display: {
+          material: "paper",
+          defaultSize: { width: 200, height: 120 },
+        },
+      },
+      {
+        type: "t39.required",
+        title: "必填卡片",
+        description: "创建前填写内容",
+        icon: "text",
+        version: 1,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["text"],
+          properties: {
+            text: {
+              type: "string",
+              minLength: 1,
+              "x-sand-label": "必填正文",
+              "x-sand-widget": "text",
+            },
+          },
+        },
+        display: {
+          material: "paper",
+          defaultSize: { width: 180, height: 100 },
+        },
+      },
+    ],
+    relationKinds: [
+      {
+        kind: "t39.related",
+        title: "连接",
+        inverseTitle: "连接",
+        allowsInferred: false,
+      },
+    ],
+    presets: [
+      {
+        key: "same",
+        type: "t39.item",
+        title: "探针预设一",
+        data: { text: "甲" },
+      },
+      {
+        key: "same",
+        type: "t39.item",
+        title: "探针预设二",
+        data: { text: "乙" },
+      },
+    ],
+    templates: [
+      {
+        id: "t39.pair",
+        title: "探针模板",
+        commands: [
+          {
+            op: "object.create",
+            ref: "a",
+            type: "t39.item",
+            title: "模板甲",
+            data: { mode: "two" },
+          },
+          {
+            op: "object.create",
+            ref: "b",
+            type: "t39.item",
+            title: "模板乙",
+            data: { mode: "two" },
+          },
+          { op: "presentation.create", boardId: "$board", objectId: "@a" },
+          { op: "presentation.create", boardId: "$board", objectId: "@b" },
+          {
+            op: "relation.create",
+            kind: "t39.related",
+            sourceId: "@a",
+            targetId: "@b",
+          },
+        ],
+      },
+    ],
+  };
+  const t39File = join(root, "t39-pack.json");
+  writeFileSync(t39File, JSON.stringify(t39Pack));
+  await packManager.locator('input[type="file"]').setInputFiles(t39File);
+  await packManager.getByText("组件包已导入。可以在工具箱中使用。").waitFor();
+  await frame.getByRole("button", { name: "关闭设置" }).click();
+  await railButton("组件").click();
+  const toolbox = frame.getByRole("complementary", { name: "组件工具箱" });
+  await toolbox.getByRole("button", { name: "基础", exact: true }).click();
+  await toolbox
+    .getByRole("textbox", { name: "搜索组件" })
+    .fill("测试注册表组件");
+  await toolbox
+    .getByRole("button", { name: "探针卡片", exact: true })
+    .waitFor();
+  await toolbox.getByRole("textbox", { name: "搜索组件" }).fill("");
+  await toolbox.getByRole("button", { name: "探针包", exact: true }).click();
+  const paletteStatus: any = await call("sand_status");
+  for (const pack of paletteStatus.packs.filter((item: any) => item.enabled))
+    assert.equal(
+      await toolbox
+        .getByRole("button", { name: pack.title, exact: true })
+        .count(),
+      1,
+    );
+  const beforeCreateCanvas = await frame.locator(".canvas").boundingBox();
+  const beforeCreateToolbox = await toolbox.boundingBox();
+  const inspectorBeforeCreate = await frame
+    .locator(".studio-inspector")
+    .isVisible();
+  assert.ok(beforeCreateCanvas && beforeCreateToolbox);
+  const expectedCenter = {
+    x:
+      (beforeCreateToolbox.x +
+        beforeCreateToolbox.width +
+        16 +
+        beforeCreateCanvas.x +
+        beforeCreateCanvas.width -
+        (inspectorBeforeCreate ? 332 : 16)) /
+      2,
+    y: beforeCreateCanvas.y + (120 + beforeCreateCanvas.height - 60) / 2,
+  };
+  await toolbox.getByRole("button", { name: "探针卡片", exact: true }).click();
+  for (let i = 0; i < 100; i++) {
+    if ((await call("sand_query", { types: ["t39.item"] })).total === 1) break;
+    await page.waitForTimeout(50);
+  }
+  assert.equal((await call("sand_query", { types: ["t39.item"] })).total, 1);
+  const initialItem = (await call("sand_query", { types: ["t39.item"] }))
+    .rows[0];
+  assert.equal(
+    (await call("sand_read", { ids: [initialItem.id] })).objects[0].data.mode,
+    "one",
+  );
+  const createdBox = await frame
+    .locator(".component-card", { hasText: "探针卡片" })
+    .first()
+    .boundingBox();
+  assert.ok(createdBox);
+  assert.ok(
+    Math.abs(createdBox.x + createdBox.width / 2 - expectedCenter.x) < 25,
+    "点击组件时放在可见画布中央",
+  );
+  assert.ok(
+    Math.abs(createdBox.y + createdBox.height / 2 - expectedCenter.y) < 25,
+    "点击组件时垂直居中",
+  );
+  await toolbox.getByRole("button", { name: "必填卡片", exact: true }).click();
+  const createDialog = frame.getByRole("dialog", { name: "填写必填卡片" });
+  await createDialog.waitFor();
+  await page.screenshot({
+    path: "artifacts/t39-create-dialog.png",
+    fullPage: true,
+  });
+  await createDialog.getByRole("button", { name: "创建组件" }).click();
+  await createDialog.getByRole("alert").waitFor();
+  assert.match(
+    await createDialog.getByRole("alert").innerText(),
+    /请填写：必填正文。/,
+  );
+  await createDialog
+    .getByRole("textbox", { name: "必填正文" })
+    .fill("点击创建");
+  await createDialog.getByRole("button", { name: "创建组件" }).click();
+  await createDialog.waitFor({ state: "hidden" });
+  assert.equal(
+    (await call("sand_query", { types: ["t39.required"] })).total,
+    1,
+  );
+  const canvasBeforeRequiredDrop = await frame.locator(".canvas").boundingBox();
+  await toolbox
+    .getByRole("button", { name: "必填卡片", exact: true })
+    .dragTo(frame.locator(".canvas"), { targetPosition: { x: 380, y: 240 } });
+  await createDialog.waitFor();
+  await createDialog
+    .getByRole("textbox", { name: "必填正文" })
+    .fill("拖入创建");
+  await createDialog.getByRole("button", { name: "创建组件" }).click();
+  await createDialog.waitFor({ state: "hidden" });
+  const requiredQuery: any = await call("sand_query", {
+    types: ["t39.required"],
+    limit: 10,
+  });
+  assert.equal(requiredQuery.total, 2);
+  const requiredObjects: any = await call("sand_read", {
+    ids: requiredQuery.rows.map((row: any) => row.id),
+  });
+  const droppedObject = requiredObjects.objects.find(
+    (object: any) => object.data.text === "拖入创建",
+  );
+  assert.ok(droppedObject && canvasBeforeRequiredDrop);
+  const requiredBoardId = (await call("sand_context")).board.id as string;
+  const requiredBoard: any = await call("app_board", {
+    boardId: requiredBoardId,
+  });
+  const droppedPresentation = requiredBoard.presentations.find(
+    (item: any) => item.objectId === droppedObject.id,
+  );
+  assert.ok(droppedPresentation);
+  const droppedBox = await frame
+    .locator(`[data-instance-id="${droppedPresentation.id}"]`)
+    .boundingBox();
+  assert.ok(droppedBox);
+  assert.ok(
+    Math.abs(droppedBox.x - (canvasBeforeRequiredDrop.x + 380)) < 4,
+    "填写后保留拖入横坐标",
+  );
+  assert.ok(
+    Math.abs(droppedBox.y - (canvasBeforeRequiredDrop.y + 240)) < 4,
+    "填写后保留拖入纵坐标",
+  );
+  await toolbox.getByRole("tab", { name: "场景" }).click();
+  await toolbox
+    .getByRole("button", { name: "探针预设一 探针卡片", exact: true })
+    .waitFor();
+  await toolbox
+    .getByRole("button", { name: "探针预设二 探针卡片", exact: true })
+    .waitFor();
+  await toolbox
+    .getByRole("button", { name: "探针预设一 探针卡片", exact: true })
+    .click();
+  for (let i = 0; i < 100; i++) {
+    if ((await call("sand_query", { types: ["t39.item"] })).total === 2) break;
+    await page.waitForTimeout(50);
+  }
+  assert.equal((await call("sand_query", { types: ["t39.item"] })).total, 2);
+  await toolbox.getByRole("button", { name: "探针模板", exact: true }).click();
+  for (let i = 0; i < 100; i++) {
+    if ((await call("sand_query", { types: ["t39.item"] })).total === 4) break;
+    await page.waitForTimeout(50);
+  }
+  assert.equal((await call("sand_query", { types: ["t39.item"] })).total, 4);
+  const activeBoard = (await call("sand_context")).board.id as string;
+  const t39Board: any = await call("app_board", { boardId: activeBoard });
+  assert.equal(
+    t39Board.relations.filter(
+      (relation: any) => relation.kind === "t39.related",
+    ).length,
+    1,
+  );
+  await railButton("设置").click();
+  const t39Row = packManager
+    .locator(".pack-group")
+    .filter({ hasText: "探针包" });
+  await t39Row.getByText("2 个类型").waitFor();
+  const downloadPromise = page.waitForEvent("download");
+  await t39Row.getByRole("button", { name: "导出", exact: true }).click();
+  const t39Download = await downloadPromise;
+  assert.equal(
+    JSON.parse(readFileSync((await t39Download.path())!, "utf8")).id,
+    "t39",
+  );
+  await t39Row.getByRole("button", { name: "停用", exact: true }).click();
+  const packConfirmation = frame.getByRole("alertdialog", {
+    name: "确认组件包更改",
+  });
+  await packConfirmation
+    .getByText("这个包的 6 个对象会变成只读，数据不会丢失。")
+    .waitFor();
+  await packConfirmation.getByRole("button", { name: "确认停用" }).click();
+  await t39Row.getByRole("button", { name: "启用", exact: true }).waitFor();
+  await undo();
+  for (let i = 0; i < 100; i++) {
+    const state: any = await call("sand_status");
+    if (state.packs.find((pack: any) => pack.id === "t39")?.enabled) break;
+    await page.waitForTimeout(50);
+  }
+  assert.equal(
+    (await call("sand_status")).packs.find((pack: any) => pack.id === "t39")
+      ?.enabled,
+    true,
+  );
+  await t39Row.getByRole("button", { name: "移除", exact: true }).click();
+  await packConfirmation
+    .getByText("这个包的 6 个对象会变成只读，数据不会丢失。")
+    .waitFor();
+  await packConfirmation.getByRole("button", { name: "确认移除" }).click();
+  await t39Row.waitFor({ state: "hidden" });
+  assert.equal((await call("sand_query", { types: ["t39.item"] })).total, 4);
+  await undo();
+  await t39Row.waitFor();
+  assert.equal(
+    (await call("sand_query", { types: ["t39.required"] })).total,
+    2,
+  );
+  const badPackFile = join(root, "t39-bad.json");
+  writeFileSync(
+    badPackFile,
+    JSON.stringify({
+      format: "sand-table-pack",
+      formatVersion: 2,
+      id: "bad",
+      title: "错误包",
+      version: 1,
+      types: [
+        {
+          type: "bad.item",
+          title: 1,
+          description: "保留三处校验问题",
+          icon: "text",
+          version: 0,
+          display: {
+            material: "paper",
+            defaultSize: { width: 180, height: 100 },
+          },
+        },
+      ],
+    }),
+  );
+  await packManager.locator('input[type="file"]').setInputFiles(badPackFile);
+  const packErrors = packManager.getByRole("alert", { name: "组件包清单错误" });
+  await packErrors.waitFor();
+  assert.deepEqual(
+    (await packErrors.locator("code").allTextContents()).sort(),
+    ["/types/0/schema", "/types/0/title", "/types/0/version"],
+  );
 
   // 两个独立页面通过同一服务修改和订阅绑定，视图使用与画布相同的挂载组件。
   const bindingSlot = {

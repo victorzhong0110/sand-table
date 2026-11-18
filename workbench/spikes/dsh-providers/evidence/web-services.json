@@ -1,0 +1,22 @@
+{
+  "dsh": "0.2.2-rc.1",
+  "node": "v24.22.1",
+  "ok": true,
+  "checks": {
+    "sessionController": true,
+    "webSeam": true,
+    "standardPreset": true,
+    "presetCompositions": true,
+    "tokenMeter": true,
+    "contextHostProjections": true,
+    "whiteboardTools": true,
+    "whiteboardReadWrite": true
+  },
+  "contextProjectionKeys": [
+    "contextTimeline",
+    "contextHeaders",
+    "contextActivity",
+    "contextPressure",
+    "contextBreakdown"
+  ]
+}

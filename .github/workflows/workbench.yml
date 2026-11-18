@@ -85,3 +85,4 @@ jobs:
             workbench/artifacts/blank-canvas.png
             workbench/artifacts/composed-canvas.png
             workbench/artifacts/blank-mobile.png
+            workbench/artifacts/resource-references.png

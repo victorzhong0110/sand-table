@@ -69,57 +69,6 @@ function available(
   return undefined;
 }
 
-/** 只有能从当前历史路径证明由目标删除级联产生的墓碑才用于失效提示。 */
-function cascadeProven(
-  db: Db,
-  relationId: string,
-  targetId: string,
-  rev: number,
-): boolean {
-  const audit = db
-    .prepare(
-      "SELECT action, history_id, detail FROM audit WHERE json_extract(detail, '$.revision') = ? ORDER BY seq DESC LIMIT 1",
-    )
-    .get(rev) as
-    { action: string; history_id: string | null; detail: string } | undefined;
-  if (!audit || !["apply", "redo", "jump"].includes(audit.action)) return false;
-  const cursor = getMeta(db, "history_cursor");
-  if (!cursor) return false;
-  const path = db
-    .prepare(
-      `WITH RECURSIVE path(id, parent_id, changes, depth) AS (
-    SELECT id, parent_id, changes, 0 FROM history WHERE id = ?
-    UNION ALL SELECT h.id, h.parent_id, h.changes, p.depth + 1 FROM history h JOIN path p ON h.id = p.parent_id
-  ) SELECT id, changes FROM path ORDER BY depth`,
-    )
-    .all(cursor) as { id: string; changes: string }[];
-  const history = path.find((entry) =>
-    (JSON.parse(entry.changes) as Change[]).some(
-      (change) => change.table === "relations" && change.id === relationId,
-    ),
-  );
-  if (!history) return false;
-  const changes = JSON.parse(history.changes) as Change[];
-  const singleDeletion = (change: Change) =>
-    change.before?.alive === true &&
-    change.after?.alive === false &&
-    typeof change.before.version === "number" &&
-    change.after.version === change.before.version + 1;
-  const objIndex = changes.findIndex(
-    (change) =>
-      change.table === "objects" &&
-      change.id === targetId &&
-      singleDeletion(change),
-  );
-  const relIndex = changes.findIndex(
-    (change) =>
-      change.table === "relations" &&
-      change.id === relationId &&
-      singleDeletion(change),
-  );
-  return objIndex >= 0 && relIndex > objIndex;
-}
-
 function targets(
   db: Db,
   registry: Registry,
@@ -141,7 +90,7 @@ function targets(
   const other = slot.direction === "out" ? "target_id" : "source_id";
   const relations = db
     .prepare(
-      `SELECT r.id AS relation_id, r.deleted_rev AS relation_deleted_rev, o.* FROM relations r JOIN objects o ON o.id = r.${other} WHERE r.${mine} = ? AND r.kind = ? ORDER BY o.id, r.id`,
+      `SELECT r.cascade_object_id, r.deleted_rev AS relation_deleted_rev, o.* FROM relations r JOIN objects o ON o.id = r.${other} WHERE r.${mine} = ? AND r.kind = ? ORDER BY o.id, r.id`,
     )
     .all(objectId, slot.kind) as Raw[];
   const result = new Map<string, ObjectRow>();
@@ -149,19 +98,9 @@ function targets(
     const row = toObjectRow(rawTarget);
     if (slot.targetTypes?.length && !slot.targetTypes.includes(row.type))
       continue;
-    const relDeleted = rawTarget.relation_deleted_rev;
     if (
-      relDeleted != null &&
-      !(
-        row.deleted &&
-        Number(rawTarget.deleted_rev) === Number(relDeleted) &&
-        cascadeProven(
-          db,
-          String(rawTarget.relation_id),
-          row.id,
-          Number(relDeleted),
-        )
-      )
+      rawTarget.relation_deleted_rev != null &&
+      !(row.deleted && rawTarget.cascade_object_id === row.id)
     )
       continue;
     result.set(row.id, row);

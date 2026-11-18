@@ -1,3 +1,4 @@
+import { sourceResourceProblem } from "./resource.ts";
 // 工作空间整包导出与导入。
 //
 // 在线编辑必须走命令事务。这里是例外：只在尚未发布的临时库里直接恢复内容行，
@@ -1433,6 +1434,8 @@ function normalizeSource(value: unknown, id: string): ObjectSource | null {
     );
   if (value.external !== undefined)
     normalizeLocator(value.external, `对象「${id}」的外部定位`);
+  const problem = sourceResourceProblem(value);
+  if (problem) throw new CommandError("INVALID_DATA", problem, null);
   return value as ObjectSource;
 }
 

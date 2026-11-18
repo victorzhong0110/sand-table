@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { sourceResourceProblem } from "./resource.ts";
 import { getMeta, setMeta, transaction, type Db } from "./db.ts";
 import { CommandError } from "./errors.ts";
 import { historyKind, recordHistory } from "./history-record.ts";
@@ -108,6 +110,68 @@ export function applyCommands(
   });
 }
 
+/** Receipts outlive undo and distinguish a lost acknowledgement from a new write. */
+export function deliveryReceipt(
+  db: Db,
+  operationId: string,
+): CommandResult | undefined {
+  return deliveryRow(db, operationId)?.result;
+}
+
+function deliveryRow(db: Db, operationId: string) {
+  const row = db
+    .prepare(
+      "SELECT fingerprint, result FROM delivery_receipts WHERE operation_id = ?",
+    )
+    .get(operationId) as { fingerprint: string; result: string } | undefined;
+  if (row)
+    return {
+      fingerprint: row.fingerprint,
+      result: JSON.parse(row.result) as CommandResult,
+    };
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value))
+    return "[" + value.map(canonicalJson).join(",") + "]";
+  if (value !== null && typeof value === "object") {
+    return (
+      "{" +
+      Object.entries(value)
+        .filter(([, item]) => item !== undefined)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([key, item]) => JSON.stringify(key) + ":" + canonicalJson(item))
+        .join(",") +
+      "}"
+    );
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+export function applyDelivery(
+  db: Db,
+  registry: Registry,
+  operationId: string,
+  batch: CommandBatch,
+): CommandResult {
+  if (!/^[a-f0-9]{64}$/.test(operationId))
+    throw new CommandError(
+      "INVALID_DATA",
+      "交付编号格式不对，请重新核对宿主记录。",
+      null,
+    );
+  assertActor(batch.actor);
+  assertBatch(batch.commands);
+  const fingerprint = createHash("sha256")
+    .update(canonicalJson(batch))
+    .digest("hex");
+  return run(db, registry, batch.actor, batch.commands, "public", {
+    record: true,
+    label: batch.label,
+    delivery: { operationId, fingerprint },
+  });
+}
+
 export function applySystemCommands(
   db: Db,
   registry: Registry,
@@ -144,13 +208,31 @@ function run(
   actor: Actor,
   commands: AnyCommand[],
   mode: "public" | "system",
-  options: { record: boolean; label?: string; intentId?: string },
+  options: {
+    record: boolean;
+    label?: string;
+    intentId?: string;
+    delivery?: { operationId: string; fingerprint: string };
+  },
 ): CommandResult {
   const staged = stageRegistry(registry);
   const afterCommit: Array<() => void> = [];
   try {
-    const result = transaction(db, () =>
-      executeAll(
+    const result = transaction(db, () => {
+      const delivery = options.delivery;
+      if (delivery) {
+        const previous = deliveryRow(db, delivery.operationId);
+        if (previous) {
+          if (previous.fingerprint !== delivery.fingerprint)
+            throw new CommandError(
+              "INVALID_DATA",
+              "同一交付编号不能用于不同作品。请核对原交付记录。",
+              null,
+            );
+          return previous.result;
+        }
+      }
+      const result = executeAll(
         db,
         registry,
         staged,
@@ -159,8 +241,17 @@ function run(
         mode,
         options,
         afterCommit,
-      ),
-    );
+      );
+      if (delivery)
+        db.prepare(
+          "INSERT INTO delivery_receipts (operation_id, fingerprint, result) VALUES (?, ?, ?)",
+        ).run(
+          delivery.operationId,
+          delivery.fingerprint,
+          JSON.stringify(result),
+        );
+      return result;
+    });
     for (const job of afterCommit) job();
     return result;
   } catch (error) {
@@ -374,6 +465,12 @@ function updateObject(
       "这是从外部重新算出来的内容，不能直接修改。",
       index,
     );
+  if (command.source !== undefined && command.expectedVersion === undefined)
+    throw new CommandError(
+      "INVALID_DATA",
+      "修改来源必须提供读取时的对象版本，请重新读取后再提交。",
+      index,
+    );
   assertVersion(row.version, command.expectedVersion, row.title, index);
   if (command.title !== undefined) {
     if (typeof command.title !== "string")
@@ -481,7 +578,12 @@ function deleteObject(
     .run(ctx.rev, ctx.rev, ctx.now, ctx.actor.id, row.id);
   for (const item of presentations)
     softDeleteVersioned(ctx, "presentations", item.id);
-  for (const item of relations) softDeleteVersioned(ctx, "relations", item.id);
+  for (const item of relations) {
+    softDeleteVersioned(ctx, "relations", item.id);
+    ctx.db
+      .prepare("UPDATE relations SET cascade_object_id = ? WHERE id = ?")
+      .run(row.id, item.id);
+  }
   pushChange(ctx, "objects", row.id, beforeObject);
   for (const item of beforePresentations)
     pushChange(ctx, "presentations", item.id, item.before);
@@ -681,6 +783,18 @@ function createRelation(
 ) {
   const source = objectById(ctx, command.sourceId, index);
   const target = objectById(ctx, command.targetId, index);
+  assertVersion(
+    source.version,
+    command.expectedSourceVersion,
+    source.title,
+    index,
+  );
+  assertVersion(
+    target.version,
+    command.expectedTargetVersion,
+    target.title,
+    index,
+  );
   const status = command.status ?? "confirmed";
   assertStatus(status, index);
   const basis = command.basis ?? null;
@@ -834,7 +948,7 @@ function importPack(
         "INVALID_DATA",
         problem ? problem.message : "组件包清单不合格。",
         index,
-        problem ? { path: problem.path, message: problem.message } : undefined,
+        problem ? { ...problem, packProblems: error.problems } : undefined,
       );
     }
     throw error;
@@ -1649,6 +1763,9 @@ function snapshotRelation(db: Db, id: string): Snapshot {
     updatedAt: row.updatedAt,
     updatedBy: row.updatedBy,
     alive: !row.deleted,
+    ...(typeof raw.cascade_object_id === "string"
+      ? { cascadeObjectId: raw.cascade_object_id }
+      : {}),
   };
 }
 
@@ -1895,6 +2012,8 @@ function assertDataSize(data: unknown, index: number) {
 }
 
 function assertSource(source: ObjectSource, index: number) {
+  const problem = sourceResourceProblem(source);
+  if (problem) throw new CommandError("INVALID_DATA", problem, index);
   if (!ORIGINS.has(source.origin))
     throw new CommandError("INVALID_DATA", "对象来源无法识别。", index, {
       path: "/source/origin",

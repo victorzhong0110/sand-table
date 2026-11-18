@@ -1,6 +1,6 @@
 # 内核 v3 任务总览
 
-设计依据：`docs/kernel-v3/00-decisions.md` 到 `05-delivery-contracts.md`。
+设计依据：`docs/kernel-v3/00-decisions.md` 到 `06-plugin-composition.md`；复用证据见 `07-plugin-reuse.md`。
 
 ## 角色
 
@@ -33,7 +33,24 @@
 
 ## 阶段与任务
 
-沿用 main 的所有者分工要求：约 80% 的实现交给 minimax，T15/T24 保留 grok；本轮后续 grok 负责 T24/T30/T40/T54/T61/T64/T65/T70，其余编码卡由 minimax 执行。已合并卡不重做，新增早期契约由 T74 补齐。任务表与卡头必须一致。
+当前增量：[T76 DSH 插件组合契约](T76-dsh-plugin-composition.md)，项目所有者本轮授权 chatgpt 直接设计并实现。T75 保留直接对话和选区交互；T77–T82 逐步接通现有插件、宿主恢复和跨资源工作流。后续能力先核对 07，不把复用清单当已实现。
+
+沿用所有者分工要求，大部分实现交给 minimax；grok 负责表中标明的关键内核、执行和技术验证卡，新增 T77/T79 也由 grok 执行。T75/T76 为本轮直接授权 chatgpt 的增量。已合并卡不重做，新增早期契约由 T74 补齐。任务表与卡头必须一致。
+
+### DSH 插件组合增量
+
+| 卡 | 标题 | 执行 | 依赖 |
+|---|---|---|---|
+| [T75](T75-whiteboard-dialogue.md) | 白板内的直接 AI 协作 | chatgpt（项目所有者本轮直接授权设计与实现） | main `aa0b806`：T31、T37、T38 与已有宿主桥 |
+| [T76](T76-dsh-plugin-composition.md) | DSH 插件组合契约与回复归属 | chatgpt（项目所有者本轮直接授权设计与实现） | T75（PR #101；未合并时以该分支为 base 提交叠加 PR，不改 main） |
+| [T77](T77-dsh-provider-verification.md) | 固定 DSH 版本与提供者实测 | grok | T76 |
+| [T78](T78-resource-provider-contract.md) | 资源契约与默认白板提供者 | minimax | T77 |
+| [T79](T79-dsh-session-bindings.md) | 宿主会话绑定、恢复与服务侧产物接收 | grok | T78、T75 |
+| [T80](T80-spatial-resource-context.md) | 空间选区与跨资源上下文 | minimax | T79 |
+| [T81](T81-drawing-provider-integration.md) | 外部绘图插件与白板资源联通 | minimax | T54、T80 |
+| [T82](T82-dsh-workbench-bundle.md) | 可安装工作台组合与跨插件验收 | minimax | T81 |
+
+T77 先锁定真实宿主与候选包；T78–T80 建立资源、恢复和空间上下文；T54/T81 接绘图；T82 交付可安装组合。T66/T69 继续承担最终真人观察，不能用 fixture 代替。现有 T39/T40 分支按白板提供者边界继续，不在其中新增宿主能力。
 
 ### Phase 0：让现有版本能用（与 Phase 1 并行）
 
@@ -120,8 +137,8 @@ T30 后可开始 T31、T33、T34；T32 等 T31，T37 等 T31 和 T33。同文件
 | [T51](T51-comments.md) | 评论与局部批注 | minimax | T34 | #41 |
 | [T52](T52-compare-diff.md) | 并排比较与差异 | minimax | T40、T26、T47、T32 | #41 |
 | [T53](T53-anchors.md) | 精确锚点与失效重定位 | minimax | T43、T45、T51、T47 | #38、#41 |
-| [T54](T54-design-spike.md) | 技术验证：图形、交互原型与白板导出 | grok | T41 | #42 |
-| [T55](T55-shapes-prototype.md) | 图形与交互原型 | minimax | T54、T35、T38、T39、T72 | #42 |
+| [T54](T54-design-spike.md) | 技术验证：图形、交互原型与白板导出 | grok | T41、T77 | #42 |
+| [T55](T55-shapes-prototype.md) | 图形与交互原型 | minimax | T54、T35、T38、T39、T72、T81 | #42 |
 | [T56](T56-board-export.md) | 白板导出为图片、PDF 和静态网页 | minimax | T54、T37、T32、T44、T51、T55、T72、T47 | #42 |
 
 T41 是所有带新依赖的组件的前提，Phase 3 一开始就可以做。T41 先行；T42/T46/T54 等 T41。T72 将 T41 的结论落地，资源加载实现完成后组件才能接入。
@@ -132,16 +149,16 @@ T41 是所有带新依赖的组件的前提，Phase 3 一开始就可以做。T4
 |---|---|---|---|---|
 | [T60](T60-intersection-context.md) | 交叉情境 | minimax | T34、T49 | #35 |
 | [T61](T61-time-change-spike.md) | 技术验证：时间、变化、分支与观察者 | grok | T60、T50 | #35、#40 |
-| [T62](T62-rules-contract.md) | 规则：契约与运行记录 | minimax | T34、T40 | #36 |
+| [T62](T62-rules-contract.md) | 规则：契约与运行记录 | minimax | T34、T40、T79 | #36 |
 | [T63](T63-controls.md) | 输入控件组件 | minimax | T62 | #36 |
-| [T66](T66-dsh-device-check.md) | DSH 真机验证 | **项目所有者**（需要一台装了 DeepSeek Harness 的机器；遇到问题可以让 grok 在那台机器上协助排查） | T23（DSH 插件已改接 v3 工具面） | #18 |
-| [T64](T64-rule-execution.md) | 规则执行与宿主接入 | grok | T62、T63、T66（至少在一个真实宿主上确认了任务提交能用） | #36、#18 |
+| [T66](T66-dsh-device-check.md) | DSH 真机验证 | **项目所有者**（需要一台装了 DeepSeek Harness 的机器；遇到问题可以让 grok 在那台机器上协助排查） | T23、T77、T79、T80、T81 | #18 |
+| [T64](T64-rule-execution.md) | 规则执行与宿主接入 | grok | T62、T63、T66（至少在一个真实宿主上确认了任务提交能用）、T79 | #36、#18 |
 | [T65](T65-rule-reliability.md) | 规则可靠性 | grok | T64 | #36 |
 | [T67](T67-sandboxed-views.md) | 二级扩展：沙箱里的自定义视图 | minimax | T40、T39、T55 | — |
 | [T68](T68-prototype-feedback-to-agent.md) | 原型元素批注交给宿主 Agent 修改 | minimax | T53、T55、T64、T65、T52 | #41、#42 |
 | [T69](T69-release-acceptance.md) | 发布验收 | **项目所有者**做真人任务；发现的文档不一致交给 minimax 按本卡最后一节修正 | 每次准备发布时执行一次。第一次在 T24 合并后（v3 成为默认），之后每个阶段收尾各一次 | #15 |
 
-T66 只依赖 T23，Phase 2 一结束你就可以做，越早做越好：T64 和 T68 都依赖它的结论。T61 验证固定模型后直接执行 T70、T71、T73；研究记录不代替实现验收。
+T77 负责最早的真实 DSH 安装/API 验证；T66 在 T79–T81 接通后做最终真人任务，T64/T68 依赖它的真实任务能力结论。T61 验证固定模型后直接执行 T70、T71、T73；研究记录不代替实现验收。
 
 ### 补齐的实现与集成卡
 
@@ -186,6 +203,7 @@ Phase 1、2 期间你继续用 v2，发现问题照常开 issue（用 `.github/I
 | 关系图、时间轴、交叉、时间状态/关系、分支、观察者、过程范围 | T49–T50、T60、T70–T71、T73 | T69 同一事实多入口与范围不改历史 |
 | 图形、交互原型、分享、候选修改 | T55–T56、T68 | T69 草图→真机修改→分享 |
 | 规则、控件、实际运行与可靠性 | T62–T65 | T66 真机能力 + T69 实际任务 |
+| DSH 资源、恢复、空间上下文、绘图与可安装组合 | T76–T82 | T77 固定版本 + T66/T69 真人跨插件任务 |
 | 资源加载、第三方视图 | T72、T67 | T69 宿主能力与受限项明示 |
 
 T41/T42/T46/T54/T61 是验证，不算对应功能完成。最终运行能力需要 T66 真实宿主，体验需要 T69 真人；没有设备时记录阻塞，不能用“所有卡写完”替代完成。运行 `python3 docs/kernel-v3/check_plan.py` 核对卡片编号、执行者、依赖无环、索引一致与文档链接。

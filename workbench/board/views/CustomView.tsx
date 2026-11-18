@@ -8,7 +8,9 @@ import type {
 } from "../../kernel/index.ts";
 import { createBindings, type BindingSession } from "./bindings.ts";
 import type { TypeSpecView } from "./format.ts";
-import { customView, useViewRuntime } from "./registry.tsx";
+import { customView, useViewRuntime, type ViewProps } from "./registry.tsx";
+import { openObjectPicker, planLinkedComponent } from "./actions.ts";
+import { useTypeCatalog } from "./catalog.tsx";
 
 export function CustomView({
   objectId,
@@ -20,6 +22,7 @@ export function CustomView({
   spec: TypeSpecView;
 }) {
   const runtime = useViewRuntime();
+  const catalog = useTypeCatalog();
   const [active, setActive] = useState<{
     objectId: string;
     workspaceId: string;
@@ -76,6 +79,60 @@ export function CustomView({
       ...(options?.intentId ? { intentId: options.intentId } : {}),
     });
   };
+  const requireActive = () => {
+    if (
+      runtime.store.workspaceId !== workspaceId ||
+      runtime.store.cache.objects.get(objectId)?.deleted !== false ||
+      runtime.store.cache.boardId !== presentation.boardId
+    )
+      throw Error("组件已离开当前工作空间，请重新打开。");
+  };
+  const requireSlot = (key: string) => {
+    requireActive();
+    const slot = spec.relationSlots?.find(({ key: id }) => id === key);
+    if (!slot) throw Error("组件没有声明这个关系槽。");
+    return slot;
+  };
+  const actions: ViewProps["actions"] = {
+    async focusObject(slot, targetId) {
+      const result = await active.session.read(slot, { ids: [targetId] });
+      requireActive();
+      if (
+        !result.items.some((item) => item.id === targetId && !item.unavailable)
+      )
+        throw Error("这个绑定的来源无法打开。");
+      if (!runtime.focusObject) throw Error("请在画布里打开这个组件。");
+      await runtime.focusObject(targetId);
+    },
+    async openObjectPicker(key, text) {
+      const slot = requireSlot(key);
+      const matches = await openObjectPicker(runtime.call, {
+        text,
+        types: slot.targetTypes,
+      });
+      requireActive();
+      return matches;
+    },
+    async createLinkedComponent(key, input) {
+      const slot = requireSlot(key);
+      if (object.migrationError || !catalog.specs.has(object.type))
+        throw Error("当前组件是只读的。");
+      if (slot.targetTypes?.length && !slot.targetTypes.includes(input.type))
+        throw Error("目标类型不符合这个关系槽的声明。");
+      if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1)
+        throw Error("请提供创建时看到的组件版本。");
+      const plan = planLinkedComponent({
+        ...input,
+        sourceId: objectId,
+        sourceVersion: object.version,
+        relationKind: slot.kind,
+        direction: slot.direction,
+        specs: catalog.specs,
+      });
+      if (!plan.ok) throw Error(plan.error);
+      return runtime.call("app_edit", { workspaceId, commands: plan.commands });
+    },
+  };
   return (
     <View
       object={object as unknown as ObjectRow}
@@ -85,6 +142,7 @@ export function CustomView({
       readOnly={Boolean(object.migrationError)}
       dispatch={dispatch}
       bindings={active.session}
+      actions={actions}
     />
   );
 }

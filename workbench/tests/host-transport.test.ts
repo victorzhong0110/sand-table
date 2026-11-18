@@ -78,89 +78,92 @@ test("late cross-origin handshake, requests, actual response events, cancel and 
   );
   client.dispose();
 });
-test("DSH rpcId maps only its own turn, reply, structured plugin result and cancellation", async () => {
-  const file = "../dsh-plugin/tasks.js";
-  const { createTaskChannel } = await import(file);
-  let onEvent: (s: any, e: any) => void = () => {},
-    request: any,
-    cancelled: any;
-  const channel = createTaskChannel({
-    get: () => ({
-      prompt: async (r: any) => {
-        request = r;
-        return { accepted: true };
-      },
-      cancel: async (r: any) => {
-        cancelled = r;
-      },
-    }),
-    on: (_: string, fn: any) => {
-      onEvent = fn;
-      return () => {};
+test("资源桥保留能力门控、父页校验与请求关联", async () => {
+  let listener: (event: any) => void = () => {};
+  const sent: any[] = [];
+  const scope = {
+    addEventListener: (_: string, fn: any) => {
+      listener = fn;
+    },
+    removeEventListener: () => {},
+  };
+  const parent = { postMessage: (data: any) => sent.push(data) };
+  const transport = installHostBridgeClient({ scope, parent, timeoutMs: 100 });
+  const origin = "https://host.example";
+  listener({
+    source: parent,
+    origin,
+    data: {
+      type: "sand-table:host-bridge",
+      host: { host: "dsh", capabilities: { resourceRead: true } },
     },
   });
-  const task = await channel.submit(
-    { boardId: "board", instruction: "read", targets: [], contextVersion: 1 },
-    { id: "session" },
-  );
-  assert.equal(task.taskId, request.requestId);
-  onEvent({ id: "session" }, { type: "turn/start", data: { turn: 2 } });
-  onEvent(
-    { id: "session" },
-    { type: "user/message", data: { source: { rpcId: request.requestId } } },
-  );
-  onEvent(
-    { id: "session" },
-    {
-      type: "assistant/message",
-      data: {
-        turn: 1,
-        message: { content: [{ type: "text", text: "unrelated" }] },
-      },
+  const bridge = readInjectedBridge(scope)!;
+  assert.equal(bridge.capabilities().resourceRead, true);
+  const args = {
+    objectId: "reference",
+    expectedVersion: 2,
+    workspaceId: "a",
+    action: "read" as const,
+  };
+  const reading = bridge.resourceRequest!(args);
+  const request = sent.at(-1);
+  assert.deepEqual(request.request, args);
+  listener({
+    source: {},
+    origin,
+    data: {
+      type: "sand-table:resource-result",
+      id: request.id,
+      result: "wrong",
     },
-  );
-  onEvent(
-    { id: "session" },
-    {
-      type: "assistant/message",
-      data: {
-        turn: 2,
-        message: { content: [{ type: "text", text: "actual response" }] },
-      },
+  });
+  const value = {
+    objectId: "reference",
+    objectVersion: 2,
+    value: { status: "provider_missing" },
+  };
+  listener({
+    source: parent,
+    origin,
+    data: { type: "sand-table:resource-result", id: request.id, result: value },
+  });
+  assert.deepEqual(await reading, value);
+  transport.dispose();
+  const reconnected = installHostBridgeClient({
+    scope,
+    parent,
+    timeoutMs: 100,
+  });
+  listener({
+    source: parent,
+    origin,
+    data: {
+      type: "sand-table:host-bridge",
+      host: { host: "dsh", capabilities: { resourceRead: true } },
     },
-  );
-  onEvent(
-    { id: "session" },
-    {
-      type: "tool/result",
-      seq: 4,
-      data: {
-        turn: 2,
-        message: {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({ kind: "dataset", rows: [["x"], [1]] }),
-            },
-          ],
-        },
-      },
+  });
+  const next = readInjectedBridge(scope)!.resourceRequest!(args);
+  const nextRequest = sent.at(-1);
+  assert.notEqual(nextRequest.id, request.id);
+  listener({
+    source: parent,
+    origin,
+    data: {
+      type: "sand-table:resource-result",
+      id: request.id,
+      result: "old page reply",
     },
-  );
-  const status = channel.status(task.taskId, { id: "session" });
-  assert.equal(status.events.flatMap((e: any) => e.results ?? []).length, 2);
-  assert.equal(status.events[2].message, "actual response");
-  assert.throws(() => channel.status(task.taskId, { id: "other" }), /找不到/);
-  await channel.cancel(task.taskId, { id: "session" });
-  assert.equal(cancelled.sessionId, "session");
-  assert.equal(channel.status(task.taskId, { id: "session" }).state, "running");
-  onEvent(
-    { id: "session" },
-    { type: "turn/end", data: { turn: 2, reason: { kind: "aborted" } } },
-  );
-  assert.equal(
-    channel.status(task.taskId, { id: "session" }).state,
-    "cancelled",
-  );
-  channel.dispose();
+  });
+  listener({
+    source: parent,
+    origin,
+    data: {
+      type: "sand-table:resource-result",
+      id: nextRequest.id,
+      result: value,
+    },
+  });
+  assert.deepEqual(await next, value);
+  reconnected.dispose();
 });

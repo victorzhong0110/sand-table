@@ -12,6 +12,8 @@ export type {
   JsonSchema,
   ObjectRow,
   ObjectSource,
+  ResourceIdentity,
+  ResourceRef,
   PackSpec,
   PresentationRow,
   PresetSpec,
@@ -23,6 +25,7 @@ export type {
   ToolRegistrar,
   TypeSpec,
 } from "./types.ts";
+export { isResourceRef } from "./resource.ts";
 export { CommandError } from "./errors.ts";
 export { readBindings, readObjectVersion } from "./bindings.ts";
 export type {
@@ -43,6 +46,8 @@ export type { Db } from "./db.ts";
 export { newId } from "./ids.ts";
 export {
   applyCommands,
+  applyDelivery,
+  deliveryReceipt,
   applySystemCommands,
   parsePublicCommands,
 } from "./commands.ts";

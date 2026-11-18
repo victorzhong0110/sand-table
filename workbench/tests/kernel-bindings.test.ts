@@ -315,6 +315,7 @@ test("批量删除目标与独立解除关系可区分，重做仍显示失效",
       }).items.some((item) => item.id === s.one && !item.unavailable),
     );
     redo(s.db, actor);
+    s.db.exec("DELETE FROM audit; DELETE FROM history;");
     assert.match(
       readBindings(s.db, s.registry, {
         objectId: s.reader,
@@ -496,6 +497,46 @@ test("合并历史中区分级联删除和先解除绑定", () => {
         slot: "source",
         ids: [s.one],
       }),
+    );
+  } finally {
+    s.close();
+  }
+});
+
+test("创建关联组件时端点旧版本使整批回滚", () => {
+  const s = scene();
+  try {
+    s.edit([{ op: "object.update", id: s.reader, title: "并发修改" }]);
+    const rev = s.db
+      .prepare("SELECT value FROM meta WHERE key = 'revision'")
+      .get();
+    assert.throws(
+      () =>
+        s.edit([
+          {
+            op: "object.create",
+            ref: "linked",
+            type: "demo.table",
+            title: "应回滚",
+          },
+          {
+            op: "relation.create",
+            kind: "demo.source",
+            sourceId: s.reader,
+            targetId: "@linked",
+            expectedSourceVersion: 1,
+          },
+        ]),
+      (error: unknown) =>
+        error instanceof CommandError && error.code === "VERSION_CONFLICT",
+    );
+    assert.deepEqual(
+      s.db.prepare("SELECT value FROM meta WHERE key = 'revision'").get(),
+      rev,
+    );
+    assert.equal(
+      s.db.prepare("SELECT id FROM objects WHERE title = '应回滚'").get(),
+      undefined,
     );
   } finally {
     s.close();

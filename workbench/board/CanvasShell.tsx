@@ -1,3 +1,5 @@
+import type { HostBridge } from "../core/host-bridge.ts";
+import { ViewRuntimeContext, useViewRuntime } from "./views/registry.tsx";
 import { initialData } from "./domain-ui.ts";
 import {
   useEffect,
@@ -5,6 +7,8 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { WhiteboardAI } from "./ai/WhiteboardAI.tsx";
+import type { AIScope } from "./ai/context.ts";
 import type { HostTaskEvent } from "./data-client/objects.ts";
 import type {
   Activity,
@@ -14,6 +18,7 @@ import type {
 } from "./data-client/model.ts";
 import type { HistorySnapshot } from "./data-client/history.ts";
 import { safeUrl, findComponentSpec } from "./data-client/spaces.ts";
+import { v3TypeOf } from "./data-client/adapter.ts";
 import { FlowCanvas } from "./canvas/FlowCanvas.tsx";
 import { Toolbox } from "./Toolbox.tsx";
 import {
@@ -24,6 +29,9 @@ import {
 import { presetOfBase } from "./theme/presets.ts";
 import { coerceTheme, type Theme } from "./theme/tokens.ts";
 import { ThemeSettings } from "./theme/ThemeSettings.tsx";
+import { PackManager } from "./packs/PackManager.tsx";
+import { CreateObjectDialog } from "./packs/CreateObjectDialog.tsx";
+import type { JsonSchema } from "./views/format.ts";
 import { Inspector } from "./views/Inspector.tsx";
 import { ChangePanel } from "./ChangePanel.tsx";
 import { WorkspacePanel, type WorkspacePanelProps } from "./WorkspacePanel.tsx";
@@ -67,16 +75,18 @@ export function CanvasShell({
   call,
   operate,
   openLink,
-  sendMessage,
   history,
   onUndo,
   onRedo,
   onJump,
   aiMode = "mcp",
   sendToHost,
+  followHostTasks,
+  reconcileHostTask,
   workspacePanel,
-  hostTask,
+  hostEvents,
   onCancelHostTask,
+  downloadFile,
 }: {
   board: Board;
   viewId: string;
@@ -86,16 +96,18 @@ export function CanvasShell({
   call: Action;
   operate: (op: any) => Promise<any>;
   openLink: (url: string) => void;
-  sendMessage: (text: string) => Promise<void>;
   history?: HistorySnapshot;
   onUndo?: () => void;
   onRedo?: () => void;
   onJump?: (recordId: string) => void;
   aiMode?: "host" | "mcp";
-  sendToHost?: (text: string) => Promise<void>;
+  sendToHost?: HostBridge["submitTask"];
+  followHostTasks?: HostBridge["followTasks"];
+  reconcileHostTask?: HostBridge["reconcileTask"];
   workspacePanel?: WorkspacePanelProps;
-  hostTask?: HostTaskEvent;
-  onCancelHostTask?: () => Promise<void>;
+  hostEvents?: HostTaskEvent[];
+  onCancelHostTask?: HostBridge["cancelTask"];
+  downloadFile: (filename: string, text: string) => Promise<void>;
 }) {
   const [mode, setMode] = useState("browse"),
     [focusRevision, setFocusRevision] = useState(0),
@@ -108,20 +120,49 @@ export function CanvasShell({
     [arrows, setArrows] = useState(false),
     [boardScope, setBoardScope] = useState(false),
     [name, setName] = useState(b.title),
-    [prompt, setPrompt] = useState(""),
-    [handoff, setHandoff] = useState(""),
     [source, setSource] = useState<any>(),
-    [shell, setShell] = useState<HostShellMessage>(EMPTY_SHELL);
-  const field = useRef<HTMLTextAreaElement>(null);
+    [shell, setShell] = useState<HostShellMessage>(EMPTY_SHELL),
+    [creationError, setCreationError] = useState(""),
+    [pendingCreate, setPendingCreate] = useState<{
+      operation: any;
+      schema: JsonSchema;
+    }>();
+  const [aiFocus, setAIFocus] = useState<{ scope: AIScope; seq: number }>({
+    scope: "board",
+    seq: 0,
+  });
+  const openAI = (scope: AIScope) => {
+    setPanel("ai");
+    setAIFocus((current) => ({ scope, seq: current.seq + 1 }));
+    applyNav(null);
+  };
   const panelRef = useRef<HTMLElement | null>(null);
+  const centerPositionRef = useRef<
+    | ((size: {
+        width: number;
+        height: number;
+      }) => { x: number; y: number } | undefined)
+    | null
+  >(null);
   const railRefs = useRef<Partial<Record<NavId, HTMLButtonElement | null>>>({});
   const navRef = useRef(nav);
+  const createSequence = useRef(0);
+  const createScope = useRef({ workspaceId: b.workspaceId, boardId: b.id });
+  createScope.current = {
+    workspaceId: b.workspaceId,
+    boardId: b.views[viewId]?.spaceId ?? b.id,
+  };
   const revealSeen = useRef(0);
   navRef.current = nav;
   const view = b.views[viewId],
     selected = b.instances.find((c) => c.id === view?.selection.at(-1)),
     object = b.objects.find((o) => o.id === selected?.objectId);
   const shownWidth = nav === "settings" ? Math.max(width, 420) : width;
+  useEffect(() => {
+    createSequence.current += 1;
+    setPendingCreate(undefined);
+    setCreationError("");
+  }, [b.workspaceId, b.id]);
 
   const applyNav = (id: NavId | null) => {
     setNav(id);
@@ -242,12 +283,42 @@ export function CanvasShell({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+  const requestCreate = (operation: any, requiresFields: boolean) => {
+    const sequence = ++createSequence.current;
+    setCreationError("");
+    if (!requiresFields || operation.objectId) {
+      void operate(operation);
+      return;
+    }
+    void (async () => {
+      try {
+        const type = v3TypeOf(operation.type, operation.data ?? {});
+        const result = await call("sand_types", { types: [type] });
+        if (sequence !== createSequence.current) return;
+        if (
+          operation.workspaceId !== createScope.current.workspaceId ||
+          operation.boardId !== createScope.current.boardId
+        )
+          throw Error("白板已切换，请在当前白板重新添加组件。");
+        const spec = (result?.types ?? []).find(
+          (item: any) => item.type === type,
+        );
+        if (!spec?.schema)
+          throw Error("组件类型已不可用，请检查组件包后重试。");
+        setPendingCreate({ operation, schema: spec.schema });
+      } catch (e) {
+        if (sequence === createSequence.current)
+          setCreationError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+  };
   const create = (
     type: string,
     title: string,
     data?: any,
     objectId?: string,
     size?: { width: number; height: number },
+    requiresFields = false,
   ) => {
     setQuery("");
     setMode("arrange");
@@ -257,25 +328,37 @@ export function CanvasShell({
     const camera = view?.camera || { x: 24, y: 24, zoom: 1 };
     const offset =
       (b.instances.filter((c) => c.spaceId === view?.spaceId).length % 6) * 24;
-    void operate({
-      kind: "create",
-      type,
-      title,
-      data: data ?? initialData(type, title),
-      rect: {
-        x: ((narrow ? 24 : 280) + offset - camera.x) / camera.zoom,
-        y: (160 + offset - 36 - camera.y) / camera.zoom,
-        width: size?.width || size_?.width || 280,
-        height: size?.height || size_?.height || 180,
-        pinned: false,
+    const componentSize = {
+      width: size?.width || size_?.width || 280,
+      height: size?.height || size_?.height || 180,
+    };
+    const centered = centerPositionRef.current?.(componentSize);
+    requestCreate(
+      {
+        kind: "create",
+        workspaceId: b.workspaceId,
+        boardId: view?.spaceId ?? b.id,
+        type,
+        title,
+        data: data ?? initialData(type, title),
+        rect: {
+          x:
+            centered?.x ??
+            ((narrow ? 24 : 280) + offset - camera.x) / camera.zoom,
+          y: centered?.y ?? (160 + offset - 36 - camera.y) / camera.zoom,
+          ...componentSize,
+          pinned: false,
+        },
+        ...(objectId ? { objectId } : {}),
       },
-      ...(objectId ? { objectId } : {}),
-    });
+      requiresFields,
+    );
   };
   const focusInstance = async (id: string) => {
     await operate({ kind: "select", ids: [id] });
     setFocusRevision((n) => n + 1);
   };
+  const viewRuntime = useViewRuntime();
   async function focusObject(objectId: string) {
     const data = await call("sand_read", {
       ids: [objectId],
@@ -328,44 +411,6 @@ export function CanvasShell({
     const result = await action("sand_read_source", { objectId: o.id });
     if (result) setSource({ ...result, objectId: o.id });
   }
-  async function handToAI() {
-    if (view)
-      await operate({
-        kind: "select",
-        ids: [...view.selection],
-        keepGuide: true,
-      });
-    if (sendToHost) {
-      try {
-        await sendToHost(prompt);
-        setHandoff("已把请求连同选中对象与版本发给宿主 AI。");
-        setPrompt("");
-      } catch (e) {
-        setHandoff(e instanceof Error ? e.message : String(e));
-      }
-      return;
-    }
-    const message =
-      '使用 Sand Table 已有白板 boardId="' +
-      b.id +
-      '"，viewId="' +
-      viewId +
-      '"，当前 spaceId="' +
-      (view?.spaceId || "overview") +
-      '"。不要另建板子。先 sand_read_context 和 sand_read_spaces，读清当前空间、选区和我的编排，再按这个请求配置组件：' +
-      prompt +
-      "。使用 sand_edit_space 维护白板，用 sand_report_space_activity 如实报告你在这个空间做什么；不得把编排请求当作修改源码授权。需要源码修改时先读取明确意图并提交具体提案，等待我确认。";
-    try {
-      await sendMessage(message);
-      setHandoff("已交给宿主，等它的回应。");
-    } catch (e) {
-      setHandoff(
-        "宿主没有接受这条消息（" +
-          ((e as Error)?.message || "未知原因") +
-          "）。你的 AI 仍然可以用 MCP 工具直接操作这张白板。",
-      );
-    }
-  }
   const askSelection = () => {
     if (window.parent === window) return;
     window.parent.postMessage({ type: "sand-table:shell-ask" }, "*");
@@ -413,21 +458,22 @@ export function CanvasShell({
           >
             浏览
           </button>
-          {aiMode === "host" && (
-            <button
-              type="button"
-              aria-pressed={panel === "ai"}
-              onClick={() => {
-                setMode("ai");
-                applyNav(null);
-                setPanel("ai");
-              }}
-            >
-              AI 编排
-            </button>
-          )}
+          <button
+            type="button"
+            aria-pressed={panel === "ai"}
+            onClick={() =>
+              openAI(view?.selection.length ? "selection" : "board")
+            }
+          >
+            和 AI 协作
+          </button>
         </div>
       </header>
+      {creationError && (
+        <div className="canvas-error" role="alert">
+          {creationError}
+        </div>
+      )}
       {error && (
         <div className="canvas-error" role="alert">
           {error}
@@ -472,6 +518,7 @@ export function CanvasShell({
             action={action}
             call={call}
             showPanel={setPanel}
+            openPackSettings={() => applyNav("settings")}
           />
           <PanelResize onResizeStart={resizeFrom} />
         </div>
@@ -603,6 +650,13 @@ export function CanvasShell({
                   call={call}
                   onPreview={setPreviewTheme}
                 />
+                <PackManager
+                  call={call}
+                  boardId={view?.spaceId ?? b.id}
+                  workspaceId={b.workspaceId}
+                  revision={b.revision}
+                  download={downloadFile}
+                />
               </>
             ) : (
               <HelpPanel
@@ -622,32 +676,38 @@ export function CanvasShell({
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          <FlowCanvas
-            board={b}
-            viewId={viewId}
-            mode={mode}
-            focusRevision={focusRevision}
-            edgePan={edgePan}
-            edgeSpeed={edgeSpeed}
-            motionPaused={nav === "settings"}
-            insets={shellOcclusion({
-              panelWidth: nav ? shownWidth : null,
-              inspectorRight: Boolean(panel) && panel !== "ai",
-              contextLeft: panel === "ai",
-            })}
-            query={query}
-            kind="all"
-            scope="all"
-            arrows={arrows}
-            busy={busy}
-            operate={operate}
-            call={call}
-            clearFilters={() => setQuery("")}
-            onOpenLink={(url) => {
-              const safe = safeUrl(url);
-              if (safe) openLink(safe);
-            }}
-          />
+          <ViewRuntimeContext.Provider
+            value={viewRuntime ? { ...viewRuntime, focusObject } : null}
+          >
+            <FlowCanvas
+              board={b}
+              viewId={viewId}
+              mode={mode}
+              focusRevision={focusRevision}
+              edgePan={edgePan}
+              edgeSpeed={edgeSpeed}
+              motionPaused={nav === "settings"}
+              centerPositionRef={centerPositionRef}
+              requestCreate={requestCreate}
+              insets={shellOcclusion({
+                panelWidth: nav ? shownWidth : null,
+                inspectorRight: Boolean(panel),
+                contextLeft: false,
+              })}
+              query={query}
+              kind="all"
+              scope="all"
+              arrows={arrows}
+              busy={busy}
+              operate={operate}
+              call={call}
+              clearFilters={() => setQuery("")}
+              onOpenLink={(url) => {
+                const safe = safeUrl(url);
+                if (safe) openLink(safe);
+              }}
+            />
+          </ViewRuntimeContext.Provider>
           {view &&
             !b.instances.some((c) => c.spaceId === view.spaceId) &&
             !query && (
@@ -662,18 +722,22 @@ export function CanvasShell({
                 </button>
               </div>
             )}
+          {view && view.selection.length > 0 && panel !== "ai" && (
+            <button
+              type="button"
+              className="ai-selection-trigger"
+              onClick={() => openAI("selection")}
+            >
+              询问选区 · {view.selection.length}
+            </button>
+          )}
           <ActivityLayer
             board={b}
             onOpen={(activity, space) => void openActivity(activity, space)}
           />
         </section>
-        {panel && panel !== "theme" && (
-          <aside
-            className={
-              "studio-inspector " + (panel === "ai" ? "is-context" : "")
-            }
-            aria-label="组件详情"
-          >
+        {panel && panel !== "theme" && panel !== "ai" && (
+          <aside className="studio-inspector" aria-label="组件详情">
             <div className="inspector-heading">
               <span>
                 {
@@ -729,49 +793,6 @@ export function CanvasShell({
                 busy={busy}
                 action={action}
               />
-            ) : panel === "ai" ? (
-              <section className="ai-composer">
-                {aiMode === "host" ? (
-                  <>
-                    <h2>你想怎么搭？</h2>
-                    <textarea
-                      ref={field}
-                      aria-label="给 AI 的编排请求"
-                      placeholder="例如：给我搭一个比较两个方案的白板，留出证据、图表和结论…"
-                      value={prompt}
-                      onChange={(e) => setPrompt(e.target.value)}
-                      maxLength={8000}
-                    />
-                    <button
-                      type="button"
-                      disabled={!prompt.trim()}
-                      onClick={() => void handToAI()}
-                    >
-                      交给我的 AI
-                    </button>
-                  </>
-                ) : (
-                  <p>接入方式在「帮助」里。这里不放对话框。</p>
-                )}
-                {handoff && <p role="status">{handoff}</p>}
-                {hostTask && (
-                  <div role="status" aria-label="AI 任务状态">
-                    <p>{hostTask.message || hostTask.state}</p>
-                    {hostTask.state === "running" && onCancelHostTask && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void onCancelHostTask().catch((e) =>
-                            setHandoff(String(e)),
-                          )
-                        }
-                      >
-                        停止 AI
-                      </button>
-                    )}
-                  </div>
-                )}
-              </section>
             ) : (
               <section className="source-inspector">
                 <GuidePanel
@@ -855,6 +876,45 @@ export function CanvasShell({
           </aside>
         )}
       </div>
+      {pendingCreate &&
+        pendingCreate.operation.workspaceId === b.workspaceId &&
+        pendingCreate.operation.boardId === (view?.spaceId ?? b.id) && (
+          <CreateObjectDialog
+            title={pendingCreate.operation.title}
+            schema={pendingCreate.schema}
+            initial={pendingCreate.operation.data ?? {}}
+            onCancel={() => setPendingCreate(undefined)}
+            onCreate={async (data) => {
+              const result = await operate({
+                ...pendingCreate.operation,
+                data,
+                reportError: true,
+              });
+              if (result?.error)
+                return result.error.message || "没有创建组件，请重试。";
+              if (!result) return "没有创建组件，请重试。";
+              setPendingCreate(undefined);
+              return undefined;
+            }}
+          />
+        )}
+      <WhiteboardAI
+        board={b}
+        viewId={viewId}
+        open={panel === "ai"}
+        focusScope={aiFocus}
+        ready={aiMode === "host" && Boolean(sendToHost)}
+        hostEvents={hostEvents}
+        send={sendToHost}
+        follow={followHostTasks}
+        reconcile={reconcileHostTask}
+        cancel={onCancelHostTask}
+        onClose={() => setPanel("")}
+        onConnect={() => {
+          setPanel("");
+          applyNav("help");
+        }}
+      />
     </main>
   );
 }

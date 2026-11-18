@@ -1,4 +1,5 @@
 import type { JsonSchema } from "./types.ts";
+import { RESOURCE_REF_SCHEMA } from "./resource.ts";
 const text = { type: "string", minLength: 1 },
   version = { type: "integer", minimum: 1 };
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -17,6 +18,7 @@ const source = obj(
       enum: ["human", "imported", "ai-generated", "ai-inferred", "derived"],
     },
     basis: { type: "string" },
+    resource: RESOURCE_REF_SCHEMA,
     external: obj(
       {
         kind: { enum: ["file", "git", "pdf", "url", "dataset", "symbol"] },
@@ -30,6 +32,12 @@ const source = obj(
   },
   ["origin"],
 );
+Object.assign(source, {
+  not: {
+    properties: { resource: {}, external: {} },
+    required: ["resource", "external"],
+  },
+});
 const appearance = obj({
   detail: { enum: ["full", "label", "icon"] },
   coverBlob: text,

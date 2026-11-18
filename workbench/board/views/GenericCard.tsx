@@ -22,6 +22,7 @@ export function GenericCard({
   editor,
   editingField,
   onEnter,
+  footer,
 }: {
   title: string;
   kernelType: string;
@@ -36,6 +37,7 @@ export function GenericCard({
   editor?: ReactNode;
   editingField?: "title" | "text";
   onEnter?: () => void;
+  footer?: ReactNode;
 }) {
   if (!catalogReady) return editor ?? <strong>{title}</strong>;
   if (!spec)
@@ -114,6 +116,7 @@ export function GenericCard({
           进入白板
         </button>
       )}
+      {footer}
       <span className="card-type">
         <Icon name={spec.icon || "board"} size={14} /> {spec.title}
       </span>

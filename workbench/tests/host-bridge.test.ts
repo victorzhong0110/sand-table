@@ -118,19 +118,43 @@ test("X3：提交任务只带对象引用与版本，不带整份内容快照", 
   );
 });
 
-test("X5：没有事件流时订阅是空操作，不伪造进度", () => {
+test("X5：可提交但没有事件流时不启用对话，不伪造进度", () => {
   const scope = {
     [HOST_BRIDGE_KEY]: {
       host: "dsh",
       capabilities: { taskSubmit: true, eventStream: false },
+      submitTask: async () => ({ taskId: "submitted" }),
     },
   };
   const bridge = readInjectedBridge(scope);
   assert.ok(bridge);
+  assert.equal(bridge.capabilities().taskSubmit, true);
+  assert.equal(canShowTaskEntry(bridge), false);
   const seen: HostTaskEvent[] = [];
   const off = bridge.subscribe((e) => seen.push(e));
   off();
   assert.equal(seen.length, 0);
+});
+
+test("DSH 持久投影提供终态时，无事件流也可打开对话", () => {
+  const bridge = readInjectedBridge({
+    [HOST_BRIDGE_KEY]: {
+      host: "dsh",
+      capabilities: {
+        taskSubmit: true,
+        eventStream: false,
+        taskRecovery: true,
+      },
+      submitTask: async () => ({ taskId: "durable" }),
+      followTasks: async () => ({
+        session: { id: "session", createdAt: 1 },
+        seq: 0,
+        tasks: [],
+      }),
+    },
+  });
+  assert.ok(bridge);
+  assert.equal(canShowTaskEntry(bridge), true);
 });
 
 test("有事件流时能收到事件，退订后不再收到", () => {
@@ -172,8 +196,9 @@ test("resolveBridge 优先用宿主注入，没有才退回本地模式", () => 
     {
       [HOST_BRIDGE_KEY]: {
         host: "dsh",
-        capabilities: { taskSubmit: true },
+        capabilities: { taskSubmit: true, eventStream: true },
         submitTask: async () => ({ taskId: "real" }),
+        subscribe: () => () => {},
       },
     },
     "mcp",

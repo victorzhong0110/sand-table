@@ -21,6 +21,7 @@ import { useTypeCatalog } from "../views/catalog.tsx";
 import { GenericCard } from "../views/GenericCard.tsx";
 import { CustomView } from "../views/CustomView.tsx";
 import { customView } from "../views/registry.tsx";
+import { ResourceReference } from "../views/ResourceReference.tsx";
 import { UnknownType } from "../views/UnknownType.tsx";
 import {
   componentTypes,
@@ -479,6 +480,37 @@ export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
           call={api.call}
           editor={editor ?? undefined}
           editingField={editingHere?.field}
+          footer={
+            kernelType === "base.resource_reference" && instance.objectId ? (
+              <ResourceReference
+                objectId={instance.objectId}
+                objectVersion={
+                  api.board.contentObjects.find(
+                    (object) => object.id === instance.objectId,
+                  )?.version ?? 0
+                }
+                workspaceId={String(api.board.workspaceId ?? "")}
+                call={api.call}
+                onOpen={async (route) => {
+                  if (route.kind === "url") {
+                    api.onOpenLink(route.url);
+                    return;
+                  }
+                  if (route.workspaceId !== api.board.workspaceId)
+                    throw Error("原资源位于另一个工作空间，请切换后打开。");
+                  await api.operate({
+                    kind: "navigate",
+                    spaceId: route.boardId,
+                  });
+                  if (route.presentationId)
+                    await api.operate({
+                      kind: "select",
+                      ids: [route.presentationId],
+                    });
+                }}
+              />
+            ) : undefined
+          }
           onEnter={
             spec?.capabilities?.container
               ? () =>

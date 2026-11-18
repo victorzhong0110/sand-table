@@ -57,11 +57,27 @@ export type ViewProps = {
     options?: { intentId?: string },
   ) => Promise<CommandResult>;
   bindings: Bindings;
+  actions: {
+    focusObject(slot: string, targetId: string): Promise<void>;
+    openObjectPicker(
+      slot: string,
+      text?: string,
+    ): Promise<{ id: string; title: string; type: string }[]>;
+    createLinkedComponent(
+      slot: string,
+      input: {
+        type: string;
+        title: string;
+        expectedVersion: number;
+      },
+    ): Promise<CommandResult>;
+  };
 };
 
 export const ViewRuntimeContext = createContext<{
   store: V3Store;
   call: V3Tool;
+  focusObject?: (objectId: string) => Promise<void>;
 } | null>(null);
 export function useViewRuntime() {
   return useContext(ViewRuntimeContext);

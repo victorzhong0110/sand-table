@@ -32,6 +32,7 @@ const runtimeDirs = [
   "kernel",
   "local",
   "packs",
+  "resources",
   "server",
   "dist",
 ];
