@@ -8,6 +8,7 @@ import {
   openWorkspace,
   type Command,
   type CommandResult,
+  type PresentationRow,
 } from "../../kernel/index.ts";
 import { builtinPacks } from "../../packs/index.ts";
 import {
@@ -15,9 +16,16 @@ import {
   boardNamespace,
 } from "../../resources/board-provider.ts";
 import { assertWorkspaceId } from "../workspaces.ts";
-import type { Binding, Delivery } from "./contracts.ts";
+import type { Binding, Delivery, SpatialContext } from "./contracts.ts";
 
 type Scope = Pick<Binding, "boardId" | "workspaceId" | "workspaceNamespace">;
+
+function position(
+  row: PresentationRow,
+): SpatialContext["presentations"][number] {
+  const { id, objectId, version, parentId, x, y, width, height, z } = row;
+  return { id, objectId, version, parentId, x, y, width, height, z };
+}
 
 export function createArtifactWriter(root: string) {
   function withWorkspace<T>(
@@ -50,8 +58,11 @@ export function createArtifactWriter(root: string) {
         scope.workspaceNamespace === boardNamespace(root, scope.workspaceId)
       );
     },
-    verify(scope: Scope, targets: Binding["targets"]) {
-      withWorkspace(scope, ({ db }, registry) => {
+    verify(
+      scope: Scope,
+      request: Pick<Binding, "targets" | "selection" | "contextVersion">,
+    ): SpatialContext | undefined {
+      return withWorkspace(scope, ({ db }, registry) => {
         const board = boardContents(db, registry, scope.boardId);
         if (!registry.getType(board.board.type)?.capabilities?.container)
           throw Error("提交目标已不是可用的白板。请重新选择白板。");
@@ -59,11 +70,81 @@ export function createArtifactWriter(root: string) {
           board.objects.map((row) => [row.id, row.version]),
         );
         if (
-          targets.some(
+          request.targets.some(
             (target) => versions.get(target.objectId) !== target.version,
           )
         )
           throw Error("提交时有对象已变化或移出白板，请重新核对选区。");
+        const selection = request.selection;
+        if (!selection) return undefined;
+        if (board.revision !== request.contextVersion)
+          throw Error("白板内容或布局刚刚更新，请核对当前选区后重新提交。");
+        const byId = new Map(board.presentations.map((row) => [row.id, row]));
+        const selected = new Set(selection.presentationIds);
+        if (selection.scope === "board" && selected.size !== byId.size)
+          throw Error("白板上的展示已变化，请重新确认讨论范围。");
+        const presentations = selection.presentationIds.map((id) => {
+          const row = byId.get(id);
+          if (!row) throw Error("有展示已移动或删除，请重新选择。");
+          return position(row);
+        });
+        const objects = new Set(presentations.map(({ objectId }) => objectId));
+        if (
+          request.targets.length !== objects.size ||
+          new Set(request.targets.map(({ objectId }) => objectId)).size !==
+            objects.size ||
+          request.targets.some(({ objectId }) => !objects.has(objectId))
+        )
+          throw Error("选区展示与目标对象不一致，请重新选择。");
+        const ancestors = new Map<string, ReturnType<typeof position>>();
+        for (const item of presentations) {
+          let parent = item.parentId;
+          const path = new Set([item.id]);
+          while (parent) {
+            const row = byId.get(parent);
+            if (!row || path.has(parent))
+              throw Error("选区分组结构已变化，请重新打开白板后再试。");
+            path.add(parent);
+            if (!selected.has(parent)) ancestors.set(parent, position(row));
+            if (ancestors.size > 200)
+              throw Error("选区涉及的分组超过 200 个，请缩小选区。");
+            parent = row.parentId;
+          }
+        }
+        const relations = board.relations.filter(
+          ({ sourceId, targetId }) =>
+            objects.has(sourceId) && objects.has(targetId),
+        );
+        return {
+          boardId: scope.boardId,
+          boardVersion: board.board.version,
+          viewId: selection.viewId,
+          revision: board.revision,
+          presentations,
+          ancestors: [...ancestors.values()],
+          relations: relations
+            .slice(0, 200)
+            .map(({ id, kind, sourceId, targetId, version, status }) => ({
+              id,
+              kind,
+              sourceId,
+              targetId,
+              version,
+              status,
+            })),
+          omittedRelations: Math.max(0, relations.length - 200),
+          resources: board.objects.flatMap(({ id: objectId, source }) =>
+            objects.has(objectId) && source?.resource
+              ? [
+                  {
+                    objectId,
+                    ref: source.resource,
+                    status: "not_read" as const,
+                  },
+                ]
+              : [],
+          ),
+        };
       });
     },
     receipt(scope: Scope, operationId: string) {

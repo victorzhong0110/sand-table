@@ -13,6 +13,7 @@ import { createArtifactWriter } from "../../server/host/artifacts.ts";
 import { boardNamespace } from "../../resources/board-provider.ts";
 import {
   openWorkspace,
+  applyCommands,
   getMeta,
   boardContents,
   createRegistry,
@@ -36,11 +37,12 @@ export async function apply(ctx, config) {
   };
   const checkpoint = join(config.workspace, "workbench-recovery-check.json");
   const writer = createArtifactWriter(config.workspace);
-  let prompts = 0;
+  let prompts = 0, submittedContent;
   // Deterministic execution fixture. Session log, projection and persisted read are real DSH services.
   const controller = {
-    async prompt() {
+    async prompt(input) {
       prompts++;
+      submittedContent = input.content;
       return { accepted: true };
     },
   };
@@ -67,13 +69,22 @@ export async function apply(ctx, config) {
         meta: { cwd: config.workspace },
       });
       stored = await ctx.sessionPersistence.create(session.header);
+      const selected = applyCommands(db, registry, {
+        actor: { id: "probe", kind: "human" },
+        commands: [
+          { op: "object.create", ref: "note", type: "base.note", title: "探测对象" },
+          { op: "presentation.create", ref: "left", objectId: "@note", boardId: scope.boardId, x: 20 },
+          { op: "presentation.create", ref: "right", objectId: "@note", boardId: scope.boardId, x: 360 },
+        ],
+      });
       const request = {
         ...scope,
         requestId: randomUUID(),
         displayText: "生成报告",
         instruction: "生成报告",
-        contextVersion: 0,
-        targets: [],
+        contextVersion: selected.revision,
+        selection: { scope: "selection", viewId: "actual-probe", presentationIds: [selected.created.left, selected.created.right] },
+        targets: [{ objectId: selected.created.note, version: 1 }],
       };
       const result = await channel.submit(request, { id: session.id });
       assert.equal(result.state, "queued");
@@ -82,7 +93,7 @@ export async function apply(ctx, config) {
       session.append(
         "user/message",
         createUserMessage({
-          content: [{ type: "text", text: request.instruction }],
+          content: submittedContent,
           source: { kind: "user", rpcId: request.requestId },
         }),
         { surfaceOp: "append" },
@@ -156,7 +167,14 @@ export async function apply(ctx, config) {
         JSON.stringify(task.deliveries),
       );
       const rows = boardContents(db, registry, scope.boardId).objects;
-      assert.equal(rows.length, 1);
+      assert.equal(rows.length, 2);
+      const positions = task.spatialContext?.presentations;
+      assert.deepEqual(positions.map(({ x }) => x), [20, 360]);
+      assert.ok(session.deriveMessages().some(({ content }) => content.some(
+        ({ type, text }) => type === "text" && text.includes('"viewId":"actual-probe"'),
+      )));
+      checks.modelInputContainsFrozenPositions = true;
+      const createdArtifact = rows.find(({ id }) => id !== selected.created.note);
       const revision = getMeta(db, "revision");
       await stored.flush();
       await writeFile(
@@ -164,7 +182,8 @@ export async function apply(ctx, config) {
         JSON.stringify({
           session: task.session,
           requestId: request.requestId,
-          objectId: rows[0].id,
+          objectId: createdArtifact.id,
+          spatialContext: task.spatialContext,
           revision,
         }),
       );
@@ -178,13 +197,15 @@ export async function apply(ctx, config) {
       assert.deepEqual(recovered.session, marker.session);
       assert.equal(recovered.tasks.length, 1);
       assert.equal(recovered.tasks[0].taskId, marker.requestId);
+      assert.deepEqual(recovered.tasks[0].spatialContext, marker.spatialContext);
+      checks.coldReplayKeepsFrozenPositions = true;
       assert.equal(recovered.tasks[0].state, "done");
       assert.deepEqual(recovered.tasks[0].messages, ["已生成报告"]);
       assert.equal(recovered.tasks[0].deliveries[0].objectId, marker.objectId);
       assert.equal(getMeta(db, "revision"), marker.revision);
       assert.equal(
         boardContents(db, registry, scope.boardId).objects.length,
-        1,
+        2,
       );
       assert.equal(prompts, 0);
       checks.coldSessionIdentity = true;

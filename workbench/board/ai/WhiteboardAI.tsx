@@ -368,6 +368,24 @@ export function WhiteboardAI({
                     ? `提交时包含 ${turn.targets.length} 个对象`
                     : "从空白画布开始"}
                 </small>
+                {turn.targets.length > 0 && (
+                  <details>
+                    <summary>提交时的对象版本</summary>
+                    {turn.snapshot?.spatialContext && (
+                      <p>
+                        {turn.snapshot.spatialContext.presentations.length}{" "}
+                        个展示
+                      </p>
+                    )}
+                    <ul>
+                      {turn.targets.map(({ objectId, title, version }) => (
+                        <li key={objectId}>
+                          {title || objectId} · 版本 {version}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
                 <div aria-label="AI 任务状态">
                   <strong>{AI_STATE_LABELS[turn.state]}</strong>
                   {turn.messages.map((message, index) => (

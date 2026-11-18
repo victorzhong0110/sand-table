@@ -8,11 +8,80 @@ export const boardScope = z.object({
   boardId: id,
 });
 export const sessionIdentity = z.object({ id, createdAt: revision });
+const positiveVersion = revision.min(1);
+const selection = z
+  .object({
+    scope: z.enum(["board", "selection"]),
+    viewId: id,
+    presentationIds: z.array(id).max(200),
+  })
+  .refine(
+    ({ scope, presentationIds }) =>
+      (scope === "board" || presentationIds.length > 0) &&
+      new Set(presentationIds).size === presentationIds.length,
+    "请重新选择白板中要讨论的展示。",
+  );
+const resourceRef = z.custom<ResourceRef>((value) => isResourceRef(value));
+const position = z.object({
+  id,
+  objectId: id,
+  version: positiveVersion,
+  parentId: id.nullable(),
+  x: z.number().finite(),
+  y: z.number().finite(),
+  width: z.number().positive().finite(),
+  height: z.number().positive().finite(),
+  z: z.number().finite(),
+});
+export const spatialContext = z.object({
+  boardId: id,
+  boardVersion: positiveVersion,
+  viewId: id,
+  revision,
+  presentations: z.array(position).max(200),
+  ancestors: z.array(position).max(200),
+  relations: z
+    .array(
+      z.object({
+        id,
+        sourceId: id,
+        targetId: id,
+        kind: id,
+        version: positiveVersion,
+        status: z.enum(["inferred", "confirmed"]),
+      }),
+    )
+    .max(200),
+  omittedRelations: revision,
+  resources: z
+    .array(
+      z.object({
+        objectId: id,
+        ref: resourceRef,
+        status: z.enum([
+          "available",
+          "provider_missing",
+          "not_found",
+          "version_unavailable",
+          "unsupported",
+          "disconnected",
+          "forbidden",
+          "not_read",
+        ]),
+        summary: z.string().max(1000).optional(),
+        reason: z.string().max(500).optional(),
+      }),
+    )
+    .max(200),
+});
+export type SpatialContext = z.infer<typeof spatialContext>;
+
 export const taskRequest = boardScope.extend({
   requestId: z.uuid(),
   instruction: z.string().trim().min(1).max(9000),
   displayText: z.string().trim().min(1).max(8000),
   contextVersion: revision,
+  selection: selection.optional(),
   targets: z
     .array(z.object({ objectId: id, version: revision.min(1) }))
     .max(200),
@@ -62,6 +131,7 @@ export const binding = taskRequest
   .omit({ sessionId: true, sessionCreatedAt: true })
   .extend({
     workspaceNamespace: id,
+    spatialContext: spatialContext.optional(),
     session: sessionIdentity,
   });
 export const operationId = z.string().regex(/^[a-f0-9]{64}$/);

@@ -4,11 +4,7 @@ import type { HostTaskRequest } from "../data-client/objects.ts";
 export type AIScope = "board" | "selection";
 export type AITarget = { objectId: string; version: number; title: string };
 
-export function aiTargets(
-  board: Board,
-  viewId: string,
-  scope: AIScope,
-): AITarget[] {
+function selection(board: Board, viewId: string, scope: AIScope) {
   const view = board.views[viewId];
   if (!view) throw Error("白板视角尚未就绪，请稍后再试。");
   const selected = new Set(view.selection);
@@ -22,6 +18,12 @@ export function aiTargets(
     (!selected.size || instances.length !== selected.size)
   )
     throw Error("选区为空或已变化，请重新选中要讨论的组件。");
+  if (instances.length > 200)
+    throw Error("一次最多讨论 200 个展示，请缩小选区。");
+  return instances;
+}
+
+function targetsFor(board: Board, instances: Board["instances"]): AITarget[] {
   const objects = new Map(
     board.contentObjects.map((object) => [object.id, object]),
   );
@@ -37,8 +39,12 @@ export function aiTargets(
       title: object.title,
     });
   }
-  if (targets.size > 200) throw Error("一次最多讨论 200 个对象，请缩小选区。");
+
   return [...targets.values()];
+}
+
+export function aiTargets(board: Board, viewId: string, scope: AIScope) {
+  return targetsFor(board, selection(board, viewId, scope));
 }
 
 export function aiRequest(
@@ -50,7 +56,8 @@ export function aiRequest(
   const instruction = text.trim();
   if (!instruction || instruction.length > 8000)
     throw Error("请填写 1–8000 字的请求。");
-  const targets = aiTargets(board, viewId, scope);
+  const instances = selection(board, viewId, scope);
+  const targets = targetsFor(board, instances);
   return {
     boardId: board.views[viewId].spaceId,
     ...(board.workspaceId ? { workspaceId: board.workspaceId } : {}),
@@ -60,6 +67,11 @@ export function aiRequest(
       JSON.stringify({ scope, viewId }) +
       "。请先读取当前白板及目标对象，核对请求中的版本，再通过已有白板工具完成请求。修改现有对象时保留版本检查；把推测明确标出。白板编排不授权修改外部源码或运行外部任务。",
     targets: targets.map(({ objectId, version }) => ({ objectId, version })),
+    selection: {
+      scope,
+      viewId,
+      presentationIds: instances.map(({ id }) => id),
+    },
     contextVersion: board.contentRevision,
   };
 }

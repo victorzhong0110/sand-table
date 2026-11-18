@@ -425,3 +425,7 @@ DSH 插件（`workbench/dsh-plugin/`）的 4 个工具改为转调 `sand_status`
 DSH 插件的 `sand_table_publish_artifact` 让 Agent 在已关联的白板轮次明确交付 note、table 或固定 revision 的 resource。工具结果需要匹配本轮的 tool/call 和协议结构。普通回复和其他工具的 JSON 留在 DSH 对话。候选修改必须引用提交时的目标及版本，宿主写为独立候选以保留原件。
 
 会话命令 `submit`、`follow`、`status`、`cancel`、`reconcile` 包装 sandTableTasks 服务。follow 按选定会话和当前白板返回最新 30 个任务快照。cancel / reconcile 校验原会话的编号与创建时间。重连读取现有事实，待交付可在原会话显式核对。
+
+### DSH 白板任务的空间选区
+
+宿主提交可携带 `selection {scope, viewId, presentationIds}`。宿主按 `contextVersion` 核对当时的板面，通过已绑定工作空间读取展示和对象版本。关系仅包含目标内的端点，显示未纳入的数量。资源摘要只通过已绑定的对象读，最多 12 条，每条 1000 字，实际读到的版本随 DSH 任务记录保存。恢复读取原任务记录。
