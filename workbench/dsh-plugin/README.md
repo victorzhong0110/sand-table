@@ -14,7 +14,7 @@
 
    `/` 仍禁止嵌入；只有显式启用的 `/embed` 允许配置的宿主 origin。默认不会向任意网站开放画布。
 
-2. 用 DSH `plugin_manager.install_bundle` 安装本目录。保留本目录与 `workbench/local/bridge.ts` 的相对位置，或者配置绝对 `serverEntry`。
+2. 在固定版本 DSH 中链接仓库内的插件目录。保留完整的 workbench 工作树，Host 会同时加载其中的桥接、内核和资源模块。需要独立安装的发布包由 T82 交付。
 3. 在同一个 DSH 会话中打开侧栏 Sand Table。插件通过本地 MCP bridge 连接**浏览器正在使用的同一个服务**，不再独立启动一个拥有过期快照的内核。
 
 插件配置（写在 DSH 插件行的 `config`）：
@@ -22,7 +22,7 @@
 | 键            | 默认值                            | 用途                                                |
 | ------------- | --------------------------------- | --------------------------------------------------- |
 | `boardUrl`    | `http://127.0.0.1:4173/embed`     | 可嵌入的本地工作台                                  |
-| `serverEntry` | 相对插件目录 `../local/bridge.ts` | 共享工作台 MCP bridge；复制插件目录后应改为绝对路径 |
+| `serverEntry` | 相对插件目录 `../local/bridge.ts` | 共享工作台 MCP bridge；可指向完整工作台中的绝对路径 |
 | `sessionFile` | bridge 自己的默认连接描述文件     | 自定义启动 `--session-file` 时必须在此指定相同路径  |
 | `nodePath`    | `process.execPath`                | Node 可执行文件                                     |
 | `timeoutMs`   | `20000`                           | MCP 请求超时                                        |
@@ -47,9 +47,9 @@
 
 ## 插件组合迁移
 
-正式方向见 [DSH 插件组合契约](../../docs/kernel-v3/06-plugin-composition.md) 和 [复用清单](../../docs/kernel-v3/07-plugin-reuse.md)。当前包仍是桥接实现，清单中的版本范围只是声明；目标版本、真实安装及插件组合由 T77/T66 验证。任务映射仍在内存中，结果写入仍依赖打开的页面，刷新恢复与服务端产物接收尚未实现。T79 负责接宿主日志与状态投影；不得用浏览器缓存或第二份聊天日志填补。
+正式方向见 [DSH 插件组合契约](../../docs/kernel-v3/06-plugin-composition.md) 和 [复用清单](../../docs/kernel-v3/07-plugin-reuse.md)。T77 验证了固定版本的本地链接。T79 已把会话关联与任务状态交给 DSH 持久记录，作品由 Host 写入白板并核对回执。
 
-**尚未宣称通过**：在真实 DSH 中安装插件、官方侧栏／主面板槽位装载、真实模型与第三方插件执行、真人任务验收。测试夹具不代替这些验证。若目标 DSH 的 API 变化，应重新检查 `sessionController.prompt/cancel`、`session/event`、`sidebar.panellist` 和 `main`。
+组合界面的官方槽位、真实模型和第三方插件执行由 T66 在实机验收。若目标 DSH 的 API 变化，应重新检查 `sessionController.prompt/cancel`、`session/event`、`sidebar.panellist` 和 `main`。
 
 ### 原生资源提供者
 
