@@ -426,9 +426,18 @@ function applyRelation(
   if (!alive) {
     db.prepare(
       `UPDATE relations
-       SET deleted_rev = ?, rev = ?, version = version + 1, updated_at = ?, updated_by = ?
+       SET deleted_rev = ?, rev = ?, version = version + 1, updated_at = ?, updated_by = ?, cascade_object_id = ?
        WHERE id = ?`,
-    ).run(rev, rev, now, actor.id, id);
+    ).run(
+      rev,
+      rev,
+      now,
+      actor.id,
+      typeof snapshot?.cascadeObjectId === "string"
+        ? snapshot.cascadeObjectId
+        : null,
+      id,
+    );
     return;
   }
   const fields = relationFields(snapshot);
@@ -438,7 +447,7 @@ function applyRelation(
          kind = ?, source_id = ?, target_id = ?, status = ?, basis = ?,
          attributes = ?, evidence = ?, created_at = ?, created_by = ?,
          version = version + 1, updated_at = ?, updated_by = ?,
-         rev = ?, deleted_rev = NULL
+         rev = ?, deleted_rev = NULL, cascade_object_id = NULL
        WHERE id = ?`,
     )
     .run(
@@ -666,6 +675,9 @@ function snapshotRelation(db: Db, id: string): Snapshot {
     updatedAt: row.updatedAt,
     updatedBy: row.updatedBy,
     alive: !row.deleted,
+    ...(typeof raw.cascade_object_id === "string"
+      ? { cascadeObjectId: raw.cascade_object_id }
+      : {}),
   };
 }
 

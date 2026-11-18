@@ -46,7 +46,7 @@ T26 读迁移不写库，写迁移与字段修改在同一事务；只改标题�
 
 T34 的 ViewProps.dispatch 只允许更新自身对象；创建评论、引用、图表、关系等由外壳明确的用户动作服务执行，不能放宽沙箱 dispatch。T34 提供 actions（宿主注入）：focusObject、openObjectPicker、createLinkedComponent；实现复用 app_edit，校验类型、范围和 expectedVersion。沙箱不获得这些跨对象动作。
 
-T40 的 readBindings/readVersion 必须带读取者 objectId 与槽 slot，服务端按实际绑定校验，不能仅让 UI 检查。readVersion 参数 `{objectId,slot,targetId,version}`，禁止裸 id 任意读；当前对象自读可显式用 self。历史搜索 before 和 after，限定对象 id/version；多个快照不一致时报歧义，找不到报不可用，绝不回退当前值假装旧版本。返回版本、来源、unavailable 和 revision。删除目标仍级联软删除关系；仅当来源存活且目标已删除时，可读取该槽的关系墓碑用于“来源已删除”；用户单独删绑定关系不能因此恢复授权，不授予其他对象访问权；物理裁剪后明确不可用。
+T40 的 readBindings/readVersion 必须带读取者 objectId 与槽 slot，服务端按实际绑定校验，不能仅让 UI 检查。readVersion 参数 `{objectId,slot,targetId,version}`，禁止裸 id 任意读；当前对象自读可显式用 self。历史搜索 before 和 after，限定对象 id/version；多个快照不一致时报歧义，找不到报不可用，绝不回退当前值假装旧版本。返回版本、来源、unavailable 和 revision。历史快照没有行级 rev，以 null 表示；最外层 revision 仍为本次读取的库修订号。删除目标仍级联软删除关系；仅当来源存活且目标已删除时，可读取该槽的关系墓碑用于“来源已删除”；用户单独删绑定关系不能因此恢复授权，不授予其他对象访问权；物理裁剪后明确不可用。
 
 readBindings 字段必须属于被绑定目标的声明或当前可读数据，不回传宿主会话/凭据。取消订阅、卸载、包停用和工作空间切换均释放状态；并发响应按 workspaceId+请求代号+revision 拒绝过期结果。
 

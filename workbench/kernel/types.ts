@@ -168,6 +168,8 @@ export type Command =
       kind: string;
       sourceId: string;
       targetId: string;
+      expectedSourceVersion?: number;
+      expectedTargetVersion?: number;
       status?: "confirmed" | "inferred";
       basis?: string;
       attributes?: Record<string, unknown>;

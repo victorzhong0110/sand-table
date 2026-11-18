@@ -18,6 +18,8 @@ import {
   listActivities,
   parsePublicCommands,
   readView,
+  readBindings,
+  readObjectVersion,
   redo,
   setView,
   undo,
@@ -57,6 +59,61 @@ export function registerAppTools(
   registrar: ToolRegistrar,
   host: AppToolsHost,
 ): void {
+  registrar.tool(
+    "app_bindings",
+    "Read only objects bound to a declared relation slot, or a bound object's recorded version.",
+    {
+      action: z.enum(["read", "version"]),
+      workspaceId: z.string().min(1),
+      objectId: z.string().min(1),
+      slot: z.string().min(1),
+      ids: z.array(z.string().min(1)).max(200).optional(),
+      fields: z.array(z.string().min(1)).max(200).optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+      cursor: z.string().optional(),
+      targetId: z.string().min(1).optional(),
+      version: z.number().int().min(1).optional(),
+    },
+    (args, ctx) => {
+      const session = host.session();
+      assertSameWorkspace(session.workspaceId, args.workspaceId);
+      if (args.action === "version") {
+        if (!args.targetId || args.version === undefined)
+          throw new CommandError(
+            "INVALID_DATA",
+            "读取历史版本需要目标编号和版本号。",
+            null,
+          );
+        const result = readObjectVersion(ctx.db, ctx.registry, {
+          objectId: args.objectId,
+          slot: args.slot,
+          targetId: args.targetId,
+          version: args.version,
+        });
+        return toolValue(
+          { workspaceId: session.workspaceId, ...result },
+          { workspaceId: session.workspaceId, ...result },
+        );
+      }
+      const result = readBindings(ctx.db, ctx.registry, {
+        objectId: args.objectId,
+        slot: args.slot,
+        ids: args.ids,
+        fields: args.fields,
+        limit: args.limit,
+        cursor: args.cursor,
+      });
+      return toolValue(
+        {
+          workspaceId: session.workspaceId,
+          revision: result.revision,
+          count: result.items.length,
+        },
+        { workspaceId: session.workspaceId, ...result },
+      );
+    },
+    { appOnly: true, readOnly: true },
+  );
   registrar.tool(
     "app_board",
     "Read the full contents of one board for the canvas to render: the board, its presentations, objects, relations, settings and packs.",

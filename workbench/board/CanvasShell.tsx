@@ -1,4 +1,5 @@
 import type { HostBridge } from "../core/host-bridge.ts";
+import { ViewRuntimeContext, useViewRuntime } from "./views/registry.tsx";
 import { initialData } from "./domain-ui.ts";
 import {
   useEffect,
@@ -357,6 +358,7 @@ export function CanvasShell({
     await operate({ kind: "select", ids: [id] });
     setFocusRevision((n) => n + 1);
   };
+  const viewRuntime = useViewRuntime();
   async function focusObject(objectId: string) {
     const data = await call("sand_read", {
       ids: [objectId],
@@ -674,34 +676,38 @@ export function CanvasShell({
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          <FlowCanvas
-            board={b}
-            viewId={viewId}
-            mode={mode}
-            focusRevision={focusRevision}
-            edgePan={edgePan}
-            edgeSpeed={edgeSpeed}
-            motionPaused={nav === "settings"}
-            centerPositionRef={centerPositionRef}
-            requestCreate={requestCreate}
-            insets={shellOcclusion({
-              panelWidth: nav ? shownWidth : null,
-              inspectorRight: Boolean(panel),
-              contextLeft: false,
-            })}
-            query={query}
-            kind="all"
-            scope="all"
-            arrows={arrows}
-            busy={busy}
-            operate={operate}
-            call={call}
-            clearFilters={() => setQuery("")}
-            onOpenLink={(url) => {
-              const safe = safeUrl(url);
-              if (safe) openLink(safe);
-            }}
-          />
+          <ViewRuntimeContext.Provider
+            value={viewRuntime ? { ...viewRuntime, focusObject } : null}
+          >
+            <FlowCanvas
+              board={b}
+              viewId={viewId}
+              mode={mode}
+              focusRevision={focusRevision}
+              edgePan={edgePan}
+              edgeSpeed={edgeSpeed}
+              motionPaused={nav === "settings"}
+              centerPositionRef={centerPositionRef}
+              requestCreate={requestCreate}
+              insets={shellOcclusion({
+                panelWidth: nav ? shownWidth : null,
+                inspectorRight: Boolean(panel),
+                contextLeft: false,
+              })}
+              query={query}
+              kind="all"
+              scope="all"
+              arrows={arrows}
+              busy={busy}
+              operate={operate}
+              call={call}
+              clearFilters={() => setQuery("")}
+              onOpenLink={(url) => {
+                const safe = safeUrl(url);
+                if (safe) openLink(safe);
+              }}
+            />
+          </ViewRuntimeContext.Provider>
           {view &&
             !b.instances.some((c) => c.spaceId === view.spaceId) &&
             !query && (

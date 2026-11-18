@@ -1467,7 +1467,7 @@ function parseJson(value: unknown, table: string, id: unknown, column: string) {
   }
 }
 
-function readOnly<T>(db: Db, fn: () => T): T {
+export function readOnly<T>(db: Db, fn: () => T): T {
   db.exec("BEGIN DEFERRED");
   try {
     const value = fn();

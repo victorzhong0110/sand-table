@@ -63,7 +63,7 @@ test("新建库写入全部 meta，并有首页白板", () => {
       ).map((row) => [row.key, row.value]),
     );
     for (const key of REQUIRED_META) assert.ok(key in meta, key);
-    assert.equal(meta.schema_version, "3");
+    assert.equal(meta.schema_version, "4");
     for (const table of ["settings", "packs"])
       assert.ok(
         db
@@ -372,7 +372,7 @@ test("版本1升级保留设置和包，删除可通过墓碑同步", () => {
   old.close();
   const db = openWorkspaceDb(file, { create: false });
   try {
-    assert.equal(getMeta(db, "schema_version"), "3");
+    assert.equal(getMeta(db, "schema_version"), "4");
     assert.equal(
       db.prepare("SELECT value FROM settings").get()?.value,
       '"paper"',

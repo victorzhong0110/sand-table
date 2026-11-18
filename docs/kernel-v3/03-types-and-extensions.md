@@ -168,6 +168,12 @@ export type ViewProps = {
   detail: "full" | "label" | "icon";
   readOnly: boolean;
   dispatch: (commands: Command[], options?: { intentId?: string }) => Promise<CommandResult>;
+  actions: BuiltinViewActions; // 仅供内置视图，以 05 §4 的外壳服务绑定
+  bindings: {
+    read(slot: string, opts?: { ids?: string[]; fields?: string[]; limit?: number; cursor?: string }): Promise<BindingsResult>;
+    readVersion(slot: string, id: string, version: number): Promise<VersionResult>;
+    subscribe(slot: string, onChange: () => void): () => void;
+  };
 };
 ```
 

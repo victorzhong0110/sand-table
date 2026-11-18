@@ -15,7 +15,7 @@
 - `AGENTS.md`
 - `docs/kernel-v3/05-delivery-contracts.md`（本阶段公共契约与交接规则）
 - `docs/kernel-v3/03-types-and-extensions.md` §4、§5.2、§9
-- `docs/kernel-v3/01-data-model.md` §7.1（历史快照里有每次修改前后的完整行）
+- `docs/kernel-v3/01-data-model.md` §7.1（历史快照保存可恢复内容，库修订号不在快照里）
 - `workbench/kernel/read.ts`、`workbench/board/views/registry.ts`（`ViewProps`）
 
 ## 开工前核对
@@ -24,11 +24,13 @@
 
 ## 可改文件
 
-- 新建 `workbench/kernel/bindings.ts`；`workbench/kernel/index.ts`
+- 新建 `workbench/kernel/bindings.ts`；`workbench/kernel/index.ts`。关系删除与恢复适配限 `kernel/commands.ts`、`kernel/history.ts`、`kernel/schema.ts` 与相应测试。
 - `workbench/server/app-tools.ts`（加 `app_bindings`）
 - 新建 `workbench/board/views/bindings.ts`（界面侧订阅）；`workbench/board/views/registry.ts`（`ViewProps` 加 `bindings`）
 - `docs/kernel-v3/02-commands-and-tools.md`（§3.4 加一行 `app_bindings`）、`docs/kernel-v3/03-types-and-extensions.md`（§5.2 的 `ViewProps` 加 `bindings`）
 - 新建 `workbench/tests/kernel-bindings.test.ts`，修改 `workbench/tests/blank.ts`
+
+- 接通 05 §4 的内置视图宿主动作，修改 `board/views/{CustomView,actions,registry}`、画布挂载点与关系创建的端点版本校验。
 
 ## 不要做
 
@@ -50,7 +52,7 @@
    }): { revision: number; items: { id: string; type: string; title: string; version: number; data: Record<string, unknown>; unavailable?: string }[]; nextCursor: string | null };
 
    export function readObjectVersion(db: Db, registry: Registry, input: { objectId: string; slot: string; targetId: string; version: number }):
-     { ok: true; row: ObjectRow } | { ok: false; reason: string };
+     { ok: true; row: ObjectRow | (Omit<ObjectRow, "rev"> & { rev: null }) } | { ok: false; reason: string };
    ```
 
    - 槽必须在发起对象的类型里声明；否则 `FORBIDDEN`。
@@ -90,4 +92,4 @@
 
 ## 交接与边界验收
 
-删除目标导致的关系墓碑仅用于失效展示；手动删除槽关系后再次读该目标必须拒绝。目标与关系物理裁剪后返回不可用，不恢复访问。
+内核在关系墓碑保存级联删除的端点，撤销与重做同步恢复该标记。旧库未经记录的墓碑不推测成绑定。删除目标导致的关系墓碑仅用于失效展示；手动删除槽关系后再次读该目标必须拒绝。目标与关系物理裁剪后返回不可用，不恢复访问。

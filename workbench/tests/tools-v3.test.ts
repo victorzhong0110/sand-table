@@ -41,6 +41,7 @@ const CORE_TOOLS = [
 const APP_TOOLS = [
   "app_activity",
   "app_asset",
+  "app_bindings",
   "app_board",
   "app_changes",
   "app_edit",
@@ -193,6 +194,91 @@ test("带工作空间编号的界面写入不会落到切换后的工作空间",
       ).actor_kind,
       "human",
     );
+  } finally {
+    await session.close();
+  }
+});
+
+test("app_bindings 逐次验证工作空间、关系槽和目标", async () => {
+  const session = await open();
+  try {
+    const made = await call(session.client, "app_edit", {
+      commands: [
+        {
+          op: "object.create",
+          ref: "person",
+          type: "novel.character",
+          title: "人物",
+        },
+        {
+          op: "object.create",
+          ref: "event",
+          type: "novel.event",
+          title: "事件",
+        },
+        {
+          op: "object.create",
+          ref: "other",
+          type: "novel.event",
+          title: "未绑定事件",
+        },
+        {
+          op: "relation.create",
+          kind: "novel.participates",
+          sourceId: "@event",
+          targetId: "@person",
+        },
+      ],
+    });
+    assert.equal(made.isError, false, made.text);
+    const ids = made.data.created as Record<string, string>;
+    const request = {
+      action: "read",
+      workspaceId: "test",
+      objectId: ids.person,
+      slot: "events",
+    };
+    const result = await session.client.callTool({
+      name: "app_bindings",
+      arguments: request,
+    });
+    assert.equal(result.isError, undefined);
+    const data = (result._meta as { data: { items: { id: string }[] } }).data;
+    assert.deepEqual(
+      data.items.map((item) => item.id),
+      [ids.event],
+    );
+    const unbound = await call(session.client, "app_bindings", {
+      ...request,
+      ids: [ids.other],
+    });
+    assert.equal(unbound.isError, true);
+    assert.equal(unbound.data.code, "FORBIDDEN");
+    const oldWorkspace = await call(session.client, "app_bindings", {
+      ...request,
+      workspaceId: "another",
+    });
+    assert.equal(oldWorkspace.isError, true);
+    const staleWrite = await call(session.client, "app_edit", {
+      workspaceId: "another",
+      commands: [{ op: "object.update", id: ids.person, title: "不应写入" }],
+    });
+    assert.equal(staleWrite.isError, true);
+    const original = await call(session.client, "sand_read", {
+      ids: [ids.person],
+    });
+    assert.equal(
+      (original.data.objects as { title: string }[])[0]?.title,
+      "人物",
+    );
+    const version = await call(session.client, "app_bindings", {
+      ...request,
+      action: "version",
+      targetId: ids.other,
+      version: 1,
+    });
+    assert.equal(version.isError, true);
+    assert.equal(version.data.code, "FORBIDDEN");
   } finally {
     await session.close();
   }

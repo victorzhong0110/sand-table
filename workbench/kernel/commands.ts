@@ -578,7 +578,12 @@ function deleteObject(
     .run(ctx.rev, ctx.rev, ctx.now, ctx.actor.id, row.id);
   for (const item of presentations)
     softDeleteVersioned(ctx, "presentations", item.id);
-  for (const item of relations) softDeleteVersioned(ctx, "relations", item.id);
+  for (const item of relations) {
+    softDeleteVersioned(ctx, "relations", item.id);
+    ctx.db
+      .prepare("UPDATE relations SET cascade_object_id = ? WHERE id = ?")
+      .run(row.id, item.id);
+  }
   pushChange(ctx, "objects", row.id, beforeObject);
   for (const item of beforePresentations)
     pushChange(ctx, "presentations", item.id, item.before);
@@ -778,6 +783,18 @@ function createRelation(
 ) {
   const source = objectById(ctx, command.sourceId, index);
   const target = objectById(ctx, command.targetId, index);
+  assertVersion(
+    source.version,
+    command.expectedSourceVersion,
+    source.title,
+    index,
+  );
+  assertVersion(
+    target.version,
+    command.expectedTargetVersion,
+    target.title,
+    index,
+  );
   const status = command.status ?? "confirmed";
   assertStatus(status, index);
   const basis = command.basis ?? null;
@@ -1746,6 +1763,9 @@ function snapshotRelation(db: Db, id: string): Snapshot {
     updatedAt: row.updatedAt,
     updatedBy: row.updatedBy,
     alive: !row.deleted,
+    ...(typeof raw.cascade_object_id === "string"
+      ? { cascadeObjectId: raw.cascade_object_id }
+      : {}),
   };
 }
 

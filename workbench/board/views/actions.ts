@@ -54,34 +54,14 @@ export function planLinkedComponent(input: {
         sourceId,
         targetId,
         status: "confirmed",
+        ...(input.expectedVersion === undefined
+          ? {}
+          : input.direction === "out"
+            ? { expectedSourceVersion: input.expectedVersion }
+            : { expectedTargetVersion: input.expectedVersion }),
       },
     ],
   };
-}
-
-export async function createLinkedComponent(
-  call: (name: string, args?: Record<string, unknown>) => Promise<any>,
-  input: {
-    sourceId: string;
-    expectedVersion?: number;
-    type: string;
-    title: string;
-    relationKind: string;
-    direction: "out" | "in";
-    specs: ReadonlyMap<string, TypeSpecView>;
-  },
-): Promise<unknown> {
-  let sourceVersion: number | undefined;
-  if (input.expectedVersion !== undefined) {
-    const fresh = await call("sand_read", { ids: [input.sourceId] });
-    const row = (fresh?.objects ?? []).find(
-      (item: { id?: string; version?: number }) => item?.id === input.sourceId,
-    );
-    sourceVersion = typeof row?.version === "number" ? row.version : undefined;
-  }
-  const plan = planLinkedComponent({ ...input, sourceVersion });
-  if (!plan.ok) throw Error(plan.error);
-  return call("sand_edit", { commands: plan.commands });
 }
 
 export async function openObjectPicker(

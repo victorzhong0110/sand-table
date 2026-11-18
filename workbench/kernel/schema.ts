@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const MIGRATIONS: string[] = [
   `
@@ -150,4 +150,7 @@ ALTER TABLE packs ADD COLUMN deleted_rev INTEGER;`,
     fingerprint TEXT NOT NULL,
     result TEXT NOT NULL CHECK (json_valid(result))
   );`,
+  `ALTER TABLE relations ADD COLUMN cascade_object_id TEXT
+    CHECK (cascade_object_id IS NULL OR
+      (deleted_rev IS NOT NULL AND cascade_object_id IN (source_id, target_id)));`,
 ];

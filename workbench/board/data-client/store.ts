@@ -33,6 +33,7 @@ export type V3ObjectRow = {
   updatedBy: string;
   rev: number;
   deleted: boolean;
+  migrationError?: string;
 };
 
 /** v3 的一行展示。字段与 01-data-model.md §5 的 PresentationRow 对应。 */
@@ -118,6 +119,15 @@ export type V3Stats = {
   board: number;
   /** app_changes：增量，每秒一次。 */
   changes: number;
+};
+
+export type V3ChangeEvent = {
+  workspaceId?: string;
+  revision: number;
+  reset?: boolean;
+  objects: V3ObjectRow[];
+  relations: V3RelationRow[];
+  packs: V3PackRow[];
 };
 
 const emptyCache = (boardId: string): V3Cache => ({
@@ -251,6 +261,16 @@ export class V3Store {
   private generation = 0;
   private readonly tool: V3Tool;
   private loading: Promise<void> | undefined;
+  private readonly listeners = new Set<(event: V3ChangeEvent) => void>();
+
+  subscribeChanges(listener: (event: V3ChangeEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private notify(event: V3ChangeEvent): void {
+    for (const listener of [...this.listeners]) listener(event);
+  }
 
   constructor(tool: V3Tool) {
     this.tool = tool;
@@ -269,7 +289,17 @@ export class V3Store {
     options: { workspaceId?: string } = {},
   ): Promise<void> {
     const next = options.workspaceId ?? this.workspaceId;
-    if (next !== this.workspaceId) this.clear();
+    if (next !== this.workspaceId) {
+      this.notify({
+        workspaceId: next,
+        revision: 0,
+        reset: true,
+        objects: [],
+        relations: [],
+        packs: [],
+      });
+      this.clear();
+    }
     this.workspaceId = next;
     this.loading = this.loadNow(boardId);
     try {
@@ -331,6 +361,14 @@ export class V3Store {
     for (const row of data.packs ?? []) this.cache.packs.set(row.id, row);
     this.cache.boardId = boardId;
     this.cache.revision = data.revision;
+    this.notify({
+      workspaceId: this.workspaceId,
+      revision: data.revision,
+      reset: true,
+      objects: [],
+      relations: [],
+      packs: [],
+    });
   }
 
   /**
@@ -400,6 +438,13 @@ export class V3Store {
     changed =
       mergeRows(this.cache.packs, data.packs ?? [], (r) => r.id) || changed;
     this.cache.revision = data.revision;
+    this.notify({
+      workspaceId: this.workspaceId,
+      revision: data.revision,
+      objects: data.objects ?? [],
+      relations: data.relations ?? [],
+      packs: data.packs ?? [],
+    });
     return changed;
   }
 

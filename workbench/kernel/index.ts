@@ -27,6 +27,14 @@ export type {
 } from "./types.ts";
 export { isResourceRef } from "./resource.ts";
 export { CommandError } from "./errors.ts";
+export { readBindings, readObjectVersion } from "./bindings.ts";
+export type {
+  BindingInput,
+  BindingItem,
+  BindingsResult,
+  HistoricalObjectRow,
+  VersionResult,
+} from "./bindings.ts";
 export {
   WorkspaceOpenError,
   getMeta,
