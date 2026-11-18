@@ -117,6 +117,7 @@ window.__ModuleLoader__.load({
           }
         };
 
+        const boardOrigin = () => new URL(state.boardUrl).origin;
         const send = (data) =>
           currentFrame?.contentWindow?.postMessage(data, boardOrigin());
         const injectHostBridge = (frame) => {

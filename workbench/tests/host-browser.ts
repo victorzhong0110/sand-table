@@ -152,7 +152,10 @@ try {
   page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   page.setDefaultTimeout(12000);
   const errors: string[] = [];
-  page.on("pageerror", (e: Error) => errors.push(e.message));
+  page.on("pageerror", (e: Error) => {
+    errors.push(e.message);
+    console.error("BROWSER_PAGE_ERROR", e.message);
+  });
   page.on("console", (m: any) => {
     if (m.type() === "error") console.log("BROWSER_ERROR", m.text());
   });
