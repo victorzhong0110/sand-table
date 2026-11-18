@@ -3506,7 +3506,10 @@ try {
           description: "保留三处校验问题",
           icon: "text",
           version: 0,
-          display: { material: "paper" },
+          display: {
+            material: "paper",
+            defaultSize: { width: 180, height: 100 },
+          },
         },
       ],
     }),
