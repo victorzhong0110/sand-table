@@ -139,7 +139,8 @@ export function resolveBridge(
  * 复制提示词、打开接入说明都**不算**发送任务。
  */
 export function canShowTaskEntry(bridge: HostBridge): boolean {
-  return bridge.capabilities().taskSubmit === true;
+  const capabilities = bridge.capabilities();
+  return capabilities.taskSubmit === true && capabilities.eventStream === true;
 }
 
 /**
