@@ -38,6 +38,8 @@ export type { Db } from "./db.ts";
 export { newId } from "./ids.ts";
 export {
   applyCommands,
+  applyDelivery,
+  deliveryReceipt,
   applySystemCommands,
   parsePublicCommands,
 } from "./commands.ts";

@@ -62,3 +62,10 @@ ctx.effect(() => ctx.sandTableResources.register(provider));
 `provider` 遵循 `workbench/resources/types.ts`，按 `providerId + namespace` 隔离。read/open 必须自行验证权限并返回实际版本；固定版本不可读须返回 version_unavailable，不能回退当前版。注册表不加载插件、不保存资源正文。白板保存的 ObjectSource.resource 是唯一绑定；UI 预览与 sand_table_read_object 在读取前后核对本地引用版本。
 
 默认白板提供者复用 MCP/内核；外部提供者停用后显示缺失并保留本地说明。原生编辑适配的幂等范围目前为 process，未知结果不自动重试。完整组合分发与跨重启操作确认分别由 T82/T79 验收。
+
+
+### 白板会话恢复
+
+恢复接口已按 `@deepseek-ai/dsh-session@0.2.2-rc.1` 验证。CLI 安装从当前 DSH 解析会话模块，其他宿主须提供清单中声明的 peer。请将 `workspaceDir` 指向本地工作台的实际存储目录。白板使用 DSH 选中的会话接收请求并查询历史。停机后回到原 DSH 会话可读已保存记录。若作品处于「待核对」，选择「核对交付」查询原事务回执。
+
+真实 DSH 的隔离重启验证可从 `workbench/spikes/dsh-providers` 运行 `node verify.mjs --workbench-recovery`。脚本驱动事件及产物，使用真实 DSH 日志、投影和白板数据库。

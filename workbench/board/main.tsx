@@ -16,11 +16,7 @@ import { resultData } from "./data-client/results.ts";
 import { GuidePanel } from "./GuidePanel.tsx";
 import { HistoryPanel } from "./HistoryPanel.tsx";
 import type { HistorySnapshot } from "./data-client/history.ts";
-import {
-  canShowTaskEntry,
-  resolveBridge,
-  mapHostResult,
-} from "../core/host-bridge.ts";
+import { canShowTaskEntry, resolveBridge } from "../core/host-bridge.ts";
 import { installHostBridgeClient } from "./host-bridge-client.ts";
 import { translateLegacyTool } from "./data-client/legacy-calls.ts";
 import { V3Store } from "./data-client/store.ts";
@@ -186,39 +182,11 @@ function Workbench() {
     typeof window === "undefined" ? undefined : window,
     app ? "mcp" : "local",
   );
-  const resultQueue = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(
     () =>
-      bridge.subscribe((event) => {
-        setHostEvents((current) => [...current, event].slice(-200));
-        for (const result of event.results ?? []) {
-          resultQueue.current = resultQueue.current
-            .then(async () => {
-              const mapped = mapHostResult(result);
-              const current = boardRef.current;
-              if (!current) return;
-              const r = await call("sand_edit_space", {
-                boardId: event.boardId ?? current.id,
-                revision: current.revision,
-                viewId,
-                author: "DSH",
-                operation: {
-                  kind: "create",
-                  type: mapped.type,
-                  title: mapped.title,
-                  data: {
-                    ...mapped.data,
-                    hostSource: mapped.source ?? bridge.host,
-                    hostTaskId: event.taskId,
-                  },
-                },
-              });
-              /* 写入回的是一次写入的结果：板面由增量同步拉回来。 */
-              void r;
-            })
-            .catch((e) => setError(`AI 结果未能写入白板：${String(e)}`));
-        }
-      }),
+      bridge.subscribe((event) =>
+        setHostEvents((current) => [...current, event].slice(-200)),
+      ),
     [bridge.host, bridge.capabilities().eventStream, app],
   );
   const hostReady = canShowTaskEntry(bridge);
@@ -1218,9 +1186,9 @@ function Workbench() {
           },
         }}
         hostEvents={hostEvents}
-        onCancelHostTask={
-          bridge.cancelTask ? (taskId) => bridge.cancelTask!(taskId) : undefined
-        }
+        onCancelHostTask={bridge.cancelTask}
+        followHostTasks={bridge.followTasks}
+        reconcileHostTask={bridge.reconcileTask}
         sendToHost={
           canShowTaskEntry(bridge)
             ? async (request) => {

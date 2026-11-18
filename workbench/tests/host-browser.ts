@@ -1,3 +1,4 @@
+import { dshWorkbenchFixture, emitArtifact } from "./fixtures/dsh-workbench.ts";
 // Real cross-origin browser + actual local service/plugin. DSH session execution is a scripted contract fixture, not a model.
 import { createServer } from "node:http";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
@@ -11,13 +12,11 @@ import { startLocal } from "../local/service.ts";
 const root = mkdtempSync(join(tmpdir(), "sand-host-browser-"));
 const disposers: (() => any)[] = [];
 let command: any, local: any, browser: any, page: any;
-const events = new Set<(s: any, e: any) => void>();
+const fixture = dshWorkbenchFixture();
+const emit = fixture.emit;
 let turn = 0;
 const prompts: any[] = [];
-const emit = (type: string, data: any) => {
-  for (const listener of events)
-    listener({ id: "session" }, { type, data, seq: 1 });
-};
+let finishDetached: (() => void) | undefined;
 const controller = {
   prompt: async (request: any) => {
     prompts.push(request);
@@ -26,7 +25,9 @@ const controller = {
     const current = ++turn;
     setTimeout(() => {
       emit("turn/start", { turn: current });
-      emit("user/message", { source: { rpcId: request.requestId } });
+      emit("user/message", {
+        source: { kind: "user", rpcId: request.requestId },
+      });
       if (request.content[0].text.startsWith("wait")) return;
       emit("assistant/message", {
         turn: current,
@@ -34,23 +35,22 @@ const controller = {
           content: [{ type: "text", text: `Host response ${current}` }],
         },
       });
-      emit("tool/result", {
-        turn: current,
-        message: {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                kind: "dataset",
-                title: "Plugin table",
-                rows: [
-                  ["Round", "Score"],
-                  [current, 0.9],
-                ],
-              }),
-            },
-          ],
-        },
+      if (request.content[0].text.startsWith("detach")) {
+        finishDetached = () => {
+          emitArtifact(fixture, current, {
+            kind: "note",
+            title: "Closed page artifact",
+            body: "Saved by the host",
+          });
+          emit("turn/end", { turn: current, reason: { kind: "completed" } });
+        };
+        return;
+      }
+      emitArtifact(fixture, current, {
+        kind: "table",
+        title: "Plugin table",
+        columns: ["Round", "Score"],
+        rows: [[current, 0.9]],
       });
       emit("turn/end", { turn: current, reason: { kind: "completed" } });
     }, 150);
@@ -112,11 +112,7 @@ try {
   const tools = new Map<string, any>();
   apply(
     {
-      get: () => controller,
-      on: (_: string, fn: any) => {
-        events.add(fn);
-        return () => events.delete(fn);
-      },
+      ...fixture.ctx(controller),
       effect: (fn: any) => {
         const dispose = fn();
         if (dispose) disposers.push(dispose);
@@ -139,8 +135,10 @@ try {
         new URL("../local/bridge.ts", import.meta.url),
       ),
       sessionFile,
+      workspaceDir: join(root, "workspaces"),
       boardUrl: new URL("/embed", local.url).href,
     },
+    fixture.records,
   );
   // Agent tools and the browser must see exactly the same board.
   const listed = JSON.parse(
@@ -165,6 +163,7 @@ try {
   await board.getByRole("button", { name: "和 AI 协作", exact: true }).click();
   const input = board.getByRole("textbox", { name: "给 AI 的编排请求" });
   await input.waitFor();
+  await board.getByText("DSH 会话 session", { exact: true }).waitFor();
   await input.fill("hello");
   await board.getByRole("button", { name: "发送", exact: true }).click();
   await board.getByText("Host response 1", { exact: true }).first().waitFor();
@@ -261,8 +260,7 @@ try {
   assert.match(await input.inputValue(), /遗漏、矛盾/);
   await input.fill("reject this request");
   await ai.getByRole("button", { name: "发送", exact: true }).click();
-  await conversation.getByText("发送失败", { exact: true }).waitFor();
-  assert.equal(await input.inputValue(), "reject this request");
+  await conversation.getByText("等待中", { exact: true }).waitFor();
   assert.equal(
     await conversation.getByText("follow up", { exact: true }).count(),
     1,
@@ -282,6 +280,30 @@ try {
     .last()
     .getByText("已取消", { exact: true })
     .waitFor();
+  await input.fill("detach browser");
+  await ai.getByRole("button", { name: "发送", exact: true }).click();
+  await board.getByRole("button", { name: "停止 AI", exact: true }).waitFor();
+  const beforeClosing = prompts.length;
+  await page.goto("about:blank");
+  assert.ok(finishDetached);
+  finishDetached();
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const boardText = await tools
+      .get("sand_table_read_board")
+      .execute({ boardId: listed.boards[0].boardId });
+    if (boardText.includes("Closed page artifact")) break;
+    assert.notEqual(attempt, 79, "宿主应在浏览器关闭时写入产物");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  await page.goto(origin);
+  await board.getByRole("button", { name: "和 AI 协作", exact: true }).click();
+  await conversation.getByText("detach browser", { exact: true }).waitFor();
+  await conversation.getByText("Host response 4", { exact: true }).waitFor();
+  await board
+    .getByText("Closed page artifact", { exact: true })
+    .first()
+    .waitFor();
+  assert.equal(prompts.length, beforeClosing, "重开不能重新执行原任务");
   // Responses must be visible to the independent Agent tool through the same running service.
   const readBack = JSON.parse(
     await tools

@@ -83,7 +83,10 @@ window.__ModuleLoader__.load({
           const value = outcome.value;
           if (!value) throw new Error("宿主没有识别这条命令。");
           if (value.result?.kind === "error")
-            throw new Error(value.result.text || "宿主拒绝了这次操作。");
+            throw Object.assign(
+              Error(value.result.text || "宿主拒绝了这次操作。"),
+              { declined: true },
+            );
           return String(value.result?.text ?? "");
         };
 
@@ -114,28 +117,8 @@ window.__ModuleLoader__.load({
           }
         };
 
-        const pendingTasks = new Map();
-        let polling = false;
-        const boardOrigin = () => new URL(state.boardUrl).origin;
         const send = (data) =>
           currentFrame?.contentWindow?.postMessage(data, boardOrigin());
-        const submitThroughHost = async (request) => {
-          const sessionId = resolveSessionId();
-          if (!sessionId) throw Error("找不到当前会话，无法提交任务。");
-          const result = JSON.parse(
-            await callHost(
-              sessionId,
-              `/${COMMAND_NAME} submit ${JSON.stringify(request ?? {})}`,
-            ),
-          );
-          if (!result.taskId) throw Error("宿主没有返回任务标识。");
-          pendingTasks.set(result.taskId, {
-            sessionId,
-            after: 0,
-            boardId: request.boardId,
-          });
-          return result.taskId;
-        };
         const injectHostBridge = (frame) => {
           if (!frame?.contentWindow || !state.capabilities) return;
           frame.contentWindow.postMessage(
@@ -150,48 +133,6 @@ window.__ModuleLoader__.load({
             boardOrigin(),
           );
         };
-        ctx.effect(() => {
-          const timer = setInterval(async () => {
-            if (polling || !pendingTasks.size) return;
-            polling = true;
-            try {
-              for (const [taskId, task] of pendingTasks) {
-                try {
-                  const status = JSON.parse(
-                    await callHost(
-                      task.sessionId,
-                      `/${COMMAND_NAME} status ${JSON.stringify({ taskId, after: task.after })}`,
-                    ),
-                  );
-                  for (const event of status.events ?? [])
-                    send({ type: "sand-table:task-event", event });
-                  task.after = status.cursor;
-                  if (["done", "failed", "cancelled"].includes(status.state))
-                    pendingTasks.delete(taskId);
-                } catch (error) {
-                  send({
-                    type: "sand-table:task-event",
-                    event: {
-                      taskId,
-                      boardId: task.boardId,
-                      state: "failed",
-                      message: `宿主连接中断：${String(error)}`,
-                      at: Date.now(),
-                    },
-                  });
-                  pendingTasks.delete(taskId);
-                }
-              }
-            } finally {
-              polling = false;
-            }
-          }, 800);
-          return () => {
-            clearInterval(timer);
-            pendingTasks.clear();
-          };
-        }, "sand-table: task updates");
-
         /** 探测本机工作台在不在。 */
         const probeWorkbench = async (url) => {
           try {
@@ -479,26 +420,60 @@ window.__ModuleLoader__.load({
                 });
               return;
             }
-            if (![TASK_MESSAGE, "sand-table:cancel-task"].includes(data.type))
-              return;
+            const actions = {
+              [TASK_MESSAGE]: "submit",
+              "sand-table:cancel-task": "cancel",
+              "sand-table:follow-tasks": "follow",
+              "sand-table:reconcile-task": "reconcile",
+            };
+            if (!Object.hasOwn(actions, data.type)) return;
+            const action = actions[data.type];
             const id = String(data.id ?? "");
-            const operation =
-              data.type === TASK_MESSAGE
-                ? submitThroughHost(data.request)
-                : (async () => {
-                    const task = pendingTasks.get(data.taskId);
-                    if (!task) throw Error("找不到活动任务。");
-                    await callHost(
-                      task.sessionId,
-                      `/${COMMAND_NAME} cancel ${data.taskId}`,
-                    );
-                    return data.taskId;
-                  })();
-            void operation
-              .then((taskId) => send({ type: TASK_RESULT_MESSAGE, id, taskId }))
-              .catch((error) =>
-                send({ type: TASK_ERROR_MESSAGE, id, message: String(error) }),
+            const session = resolveSessionId();
+            const body =
+              action === "cancel"
+                ? { taskId: data.taskId, session: data.session }
+                : data.request;
+            const invoke = async () => {
+              if (!session)
+                throw Object.assign(Error("请先在 DSH 选择一个会话。"), {
+                  declined: true,
+                });
+              if (
+                action === "submit" &&
+                body?.sessionId &&
+                body.sessionId !== session
+              )
+                throw Object.assign(Error("会话已切换，请重新确认提交目标。"), {
+                  declined: true,
+                });
+              const payload =
+                action === "submit" ? { ...body, sessionId: session } : body;
+              return JSON.parse(
+                await callHost(
+                  session,
+                  `/${COMMAND_NAME} ${action} ${JSON.stringify(payload)}`,
+                ),
               );
+            };
+            void invoke()
+              .then((result) => {
+                if (currentFrame !== frame) return;
+                if (action === "follow" && resolveSessionId() !== session)
+                  throw Error("DSH 会话已切换，正在读取新会话。");
+                if (action === "follow" || action === "reconcile")
+                  send({ type: "sand-table:task-snapshot", id, result });
+                else send({ type: TASK_RESULT_MESSAGE, id, ...result });
+              })
+              .catch((error) => {
+                if (currentFrame === frame)
+                  send({
+                    type: TASK_ERROR_MESSAGE,
+                    id,
+                    message: String(error.message ?? error),
+                    declined: error.declined === true,
+                  });
+              });
           };
           window.addEventListener("message", onMessage);
           return () => window.removeEventListener("message", onMessage);

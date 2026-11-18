@@ -81,6 +81,12 @@ export function apply(ctx, config) {
         .execute({ boardId: board.boardId });
       assert.ok(readBack.includes("DSH provider probe"));
       checks.whiteboardReadWrite = true;
+      const tasks = ctx.get("sandTableTasks");
+      await tasks.ready;
+      assert.equal(tasks.enabled(), true);
+      assert.equal(typeof tasks.follow, "function");
+      checks.workbenchTaskService = true;
+
       const resources = ctx.get("sandTableResources");
       assert.equal(typeof resources?.register, "function");
       const external = {

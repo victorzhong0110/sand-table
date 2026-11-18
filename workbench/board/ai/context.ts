@@ -53,6 +53,7 @@ export function aiRequest(
   const targets = aiTargets(board, viewId, scope);
   return {
     boardId: board.views[viewId].spaceId,
+    ...(board.workspaceId ? { workspaceId: board.workspaceId } : {}),
     instruction:
       instruction +
       "\n\n白板协作范围：" +

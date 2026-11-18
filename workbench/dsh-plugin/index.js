@@ -15,6 +15,9 @@
  */
 
 import { createTaskChannel } from "./tasks.js";
+import { ARTIFACT_TOOL } from "./projection.js";
+import { createArtifactWriter } from "../server/host/artifacts.ts";
+import { artifact } from "../server/host/contracts.ts";
 import { applyResources } from "./resources.js";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -158,10 +161,14 @@ function createMcpClient(config) {
     });
     child.on("error", (error) => {
       child = undefined;
+      ready = undefined;
+      buffer = "";
       rejectAll(new Error(`Sand Table MCP server 启动失败：${error.message}`));
     });
     child.on("exit", (code, signal) => {
       child = undefined;
+      ready = undefined;
+      buffer = "";
       rejectAll(
         new Error(
           `Sand Table MCP server 已退出（code ${code ?? "?"}${
@@ -752,9 +759,10 @@ function hostCapabilities(tasks) {
     version: PLUGIN_VERSION,
     capabilities: {
       taskSubmit: available,
-      eventStream: available,
+      eventStream: false,
+      taskRecovery: available,
       contentRead: true,
-      resultKinds: ["text", "paper", "dataset", "file"],
+      resultKinds: ["note", "table", "resource"],
     },
   };
 }
@@ -875,7 +883,7 @@ function defineTool(definition) {
  * @param ctx - 宿主上下文
  * @param config - 插件行上的 config（见 cordis.patch.yml）
  */
-export function apply(ctx, config) {
+export function apply(ctx, config, fixtureRecords) {
   const settings = resolveConfig(config);
   const mcp = createMcpClient(settings);
   const operations = createOperations(mcp);
@@ -893,13 +901,65 @@ export function apply(ctx, config) {
       }),
     };
   };
-  const tasks = createTaskChannel(ctx);
-  ctx.effect(() => () => tasks.dispose(), "sand-table: task events");
+  const writer = createArtifactWriter(settings.workspaceDir);
+  const tasks = createTaskChannel(ctx, {
+    records: fixtureRecords,
+    writer,
+    async resolveScope(request) {
+      const contents = await loadBoard(mcp, request.boardId);
+      if (contents.workspaceId !== request.workspaceId)
+        throw Error("白板服务已切换工作空间，请重新打开目标白板。");
+      const provenance = dataOf(
+        await mcp.callTool("app_resource", {
+          action: "binding",
+          objectId: request.boardId,
+          expectedVersion: contents.board.version,
+          workspaceId: request.workspaceId,
+        }),
+      );
+      return {
+        workspaceId: request.workspaceId,
+        boardId: request.boardId,
+        workspaceNamespace: writer.namespace(provenance.ref),
+      };
+    },
+  });
+  if (typeof ctx.provide === "function") ctx.provide("sandTableTasks", tasks);
+  void tasks.ready;
+  ctx.effect(
+    () => () => {
+      void tasks.dispose();
+    },
+    "sand-table: task events",
+  );
 
   // Agent 工具：白板的读操作。
   ctx.effect(() => {
     const disposers = toolDefinitions(operations).map((definition) =>
       ctx.tools.register(defineTool(definition)),
+    );
+    disposers.push(
+      ctx.tools.register(
+        defineTool({
+          name: ARTIFACT_TOOL,
+          description:
+            "给发起当前白板任务的人交付一件作品。artifact 是 JSON 字符串。可用 note {kind,title,body,candidateFor?:{objectId,version}}、table {kind,title,columns,rows}、resource {kind,title,note?,resource:{providerId,namespace,resourceId,revision,anchor?}}。宿主在回到关联轮次后写入并核对回执；工具本身不代表已经保存。普通回复不用此工具。",
+          parameters: { artifact: { type: "string", required: true } },
+          output: {
+            schema: { type: "string" },
+            render: (_, value) => [{ type: "text", text: value }],
+          },
+          execute(args) {
+            if (!tasks.enabled()) throw Error("当前宿主没有持久交付能力。");
+            if (args.artifact.length > 140000)
+              throw Error("作品太大，请缩小本次交付。");
+            return JSON.stringify({
+              protocol: "sand-table/artifact-v1",
+              artifact: artifact.parse(JSON.parse(args.artifact)),
+            });
+          },
+        }),
+      ),
     );
     return () => {
       for (const dispose of disposers) dispose();
@@ -913,7 +973,7 @@ export function apply(ctx, config) {
       description:
         "Sand Table 白板：探测宿主能力、读白板（列白板 / 读白板 / 读对象）、把白板里的任务提交给当前会话。",
       input: {
-        hint: "<capabilities|list_boards|read_board <id>|read_object <boardId> <objectId>|submit {json}>",
+        hint: "<capabilities|list_boards|read_board|read_object|submit|follow|status|cancel|reconcile>",
       },
       handler: async (invocation) => {
         const raw = String(invocation?.rawInput ?? "").trim();
@@ -921,7 +981,8 @@ export function apply(ctx, config) {
         const action = (space < 0 ? raw : raw.slice(0, space)).trim();
         const rest = space < 0 ? "" : raw.slice(space + 1).trim();
         try {
-          if (action === "capabilities")
+          if (action === "capabilities") {
+            await tasks.ready;
             return {
               kind: "success",
               text: JSON.stringify({
@@ -932,8 +993,10 @@ export function apply(ctx, config) {
                 },
                 boardUrl: settings.boardUrl,
                 workspaceId: settings.workspaceId,
+                session: tasks.selectedSession(invocation.agent),
               }),
             };
+          }
           if (action === "list_boards")
             return {
               kind: "success",
@@ -976,20 +1039,36 @@ export function apply(ctx, config) {
               ),
             };
           }
-          if (action === "status") {
-            const { taskId, after } = JSON.parse(rest);
+          if (action === "follow")
             return {
               kind: "success",
               text: JSON.stringify(
-                tasks.status(taskId, invocation.agent, after),
+                await tasks.follow(JSON.parse(rest), invocation.agent),
+              ),
+            };
+          if (action === "status")
+            return {
+              kind: "success",
+              text: JSON.stringify(
+                await tasks.get(JSON.parse(rest).taskId, invocation.agent),
+              ),
+            };
+          if (action === "cancel" || action === "reconcile") {
+            const { taskId, session } = JSON.parse(rest);
+            const current = tasks.selectedSession(invocation.agent);
+            if (
+              !current ||
+              current.id !== session?.id ||
+              current.createdAt !== session?.createdAt
+            )
+              throw Error("会话已切换，请回到原会话再操作。");
+            return {
+              kind: "success",
+              text: JSON.stringify(
+                await tasks[action](taskId, invocation.agent),
               ),
             };
           }
-          if (action === "cancel")
-            return {
-              kind: "success",
-              text: JSON.stringify(await tasks.cancel(rest, invocation.agent)),
-            };
           return {
             kind: "error",
             text: `未知子命令「${action || "(空)"}」。可用：capabilities、list_boards、read_board、read_object、submit。`,

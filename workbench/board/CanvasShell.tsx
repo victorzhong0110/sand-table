@@ -1,3 +1,4 @@
+import type { HostBridge } from "../core/host-bridge.ts";
 import { initialData } from "./domain-ui.ts";
 import {
   useEffect,
@@ -7,7 +8,7 @@ import {
 } from "react";
 import { WhiteboardAI } from "./ai/WhiteboardAI.tsx";
 import type { AIScope } from "./ai/context.ts";
-import type { HostTaskEvent, HostTaskRequest } from "./data-client/objects.ts";
+import type { HostTaskEvent } from "./data-client/objects.ts";
 import type {
   Activity,
   Board,
@@ -75,6 +76,8 @@ export function CanvasShell({
   onJump,
   aiMode = "mcp",
   sendToHost,
+  followHostTasks,
+  reconcileHostTask,
   workspacePanel,
   hostEvents,
   onCancelHostTask,
@@ -92,10 +95,12 @@ export function CanvasShell({
   onRedo?: () => void;
   onJump?: (recordId: string) => void;
   aiMode?: "host" | "mcp";
-  sendToHost?: (request: HostTaskRequest) => Promise<{ taskId: string }>;
+  sendToHost?: HostBridge["submitTask"];
+  followHostTasks?: HostBridge["followTasks"];
+  reconcileHostTask?: HostBridge["reconcileTask"];
   workspacePanel?: WorkspacePanelProps;
   hostEvents?: HostTaskEvent[];
-  onCancelHostTask?: (taskId: string) => Promise<void>;
+  onCancelHostTask?: HostBridge["cancelTask"];
 }) {
   const [mode, setMode] = useState("browse"),
     [focusRevision, setFocusRevision] = useState(0),
@@ -788,6 +793,8 @@ export function CanvasShell({
         ready={aiMode === "host" && Boolean(sendToHost)}
         hostEvents={hostEvents}
         send={sendToHost}
+        follow={followHostTasks}
+        reconcile={reconcileHostTask}
         cancel={onCancelHostTask}
         onClose={() => setPanel("")}
         onConnect={() => {
