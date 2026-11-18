@@ -38,7 +38,7 @@
 | 白板包安装 | 通过（本地链接） | `dsh plugin ... add <仓库插件目录>`；不是自足发布包验收 |
 | 网络与 token 计量 | Host 接口通过 | ctx.web search/fetch、tokenMeter 存在；未执行公网搜索/读取或实际 token 准确性评估 |
 | 压缩 | 组合确认，实际摘要未测 | Web 的压缩器在 Agent preset 内隔离；sdk-minimal 的默认组合包含基础压缩器；未调用模型压缩 |
-| 绘图 0.6.1 安装 | 明确拒绝 | 返回 incompatible with dsh 0.2.2-rc.1，profile 未添加该依赖 |
+| 绘图 0.6.1 安装 | 明确拒绝 | 保留安装器完整拒绝信息和各包约束，profile 未添加该依赖 |
 | Web 基础 UI | Mac 通过 | 基础导航、预览说明可见，无 pageerror；未含插件组合验收 |
 | 白板客户端 API | 2026-11-17 更正：接口匹配 | ctx.slots 是 renderer 的 SlotRegistry，实际提供 inject 与 register；已加载固定发布包的客户端工厂核对原型 |
 | 上下文/白板组合 UI | 未测 | 后续 Mac 设备请求超时；Cloud Chromium 的 Unix socket 权限不支持此浏览器检查 |
