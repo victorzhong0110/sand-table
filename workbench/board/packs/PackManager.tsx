@@ -41,6 +41,9 @@ export function PackManager({
   }>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [importErrors, setImportErrors] = useState<
+    { path: string; message: string }[]
+  >([]);
   const [notice, setNotice] = useState("");
   useEffect(() => {
     let cancelled = false;
@@ -79,6 +82,7 @@ export function PackManager({
     setBusy(true);
     setError("");
     setNotice("");
+    setImportErrors([]);
     try {
       const manifest: unknown = JSON.parse(await file.text());
       if (!manifest || typeof manifest !== "object" || Array.isArray(manifest))
@@ -86,7 +90,13 @@ export function PackManager({
       await command([{ op: "pack.import", manifest }]);
       setNotice("组件包已导入。可以在工具箱中使用。");
     } catch (e) {
-      setError(messageOf(e));
+      if (
+        e instanceof Error &&
+        "packProblems" in e &&
+        Array.isArray(e.packProblems)
+      )
+        setImportErrors(e.packProblems);
+      else setError(messageOf(e));
     } finally {
       setBusy(false);
     }
@@ -144,6 +154,15 @@ export function PackManager({
       <p className="settings-hint">组件包只包含类型和模板，不安装代码。</p>
       {catalog.loading && <p role="status">正在读取组件包…</p>}
       {(error || catalog.error) && <p role="alert">{error || catalog.error}</p>}
+      {importErrors.length > 0 && (
+        <ul role="alert" aria-label="组件包清单错误">
+          {importErrors.map(({ path, message }, index) => (
+            <li key={index}>
+              <code>{path || "/"}</code> {message}
+            </li>
+          ))}
+        </ul>
+      )}
       {notice && <p role="status">{notice}</p>}
       {catalog.packs.map((pack) => (
         <div className="pack-group" key={pack.id}>

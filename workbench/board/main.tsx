@@ -52,7 +52,13 @@ const V3_CORE_TOOLS = new Set([
   "sand_activity",
 ]);
 function unpack(r: any) {
-  if (r.isError) throw Error(r.content?.[0]?.text || "Request failed");
+  if (r.isError) {
+    const message = r.content?.[0]?.text || "Request failed";
+    const packProblems = r._meta?.packProblems;
+    throw Array.isArray(packProblems)
+      ? Object.assign(Error(message), { packProblems })
+      : Error(message);
+  }
   return resultData(r) ?? JSON.parse(r.content[0].text);
 }
 function readableError(error: unknown): string {

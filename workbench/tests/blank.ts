@@ -3499,14 +3499,24 @@ try {
       id: "bad",
       title: "错误包",
       version: 1,
-      types: [{ type: "bad.item" }],
+      types: [
+        {
+          type: "bad.item",
+          title: 1,
+          description: "保留三处校验问题",
+          icon: "text",
+          version: 0,
+          display: { material: "paper" },
+        },
+      ],
     }),
   );
   await packManager.locator('input[type="file"]').setInputFiles(badPackFile);
-  await packManager.getByRole("alert").waitFor();
-  assert.notEqual(
-    (await packManager.getByRole("alert").innerText()).trim(),
-    "",
+  const packErrors = packManager.getByRole("alert", { name: "组件包清单错误" });
+  await packErrors.waitFor();
+  assert.deepEqual(
+    (await packErrors.locator("code").allTextContents()).sort(),
+    ["/types/0/schema", "/types/0/title", "/types/0/version"],
   );
   assert.deepEqual(errors, []);
   console.log(

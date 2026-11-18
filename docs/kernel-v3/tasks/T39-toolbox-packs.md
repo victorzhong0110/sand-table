@@ -31,6 +31,8 @@
 - `workbench/board/style.css`
 - `workbench/tests/blank.ts`
 
+- `workbench/kernel/commands.ts`、`workbench/server/output.ts`、`workbench/board/main.tsx` 的组件包错误传递。
+
 ## 不要做
 
 - 不写死任何类型名；工具箱里出现什么完全看注册表。
