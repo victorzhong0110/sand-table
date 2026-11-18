@@ -107,7 +107,8 @@ export function readInjectedBridge(scope: unknown): HostBridge | undefined {
     version: host.version,
     taskSubmit:
       raw.taskSubmit === true && typeof host.submitTask === "function",
-    eventStream: raw.eventStream === true,
+    eventStream:
+      raw.eventStream === true && typeof host.subscribe === "function",
     taskRecovery:
       raw.taskRecovery === true && typeof host.followTasks === "function",
     contentRead: raw.contentRead === true,
@@ -165,7 +166,10 @@ export function resolveBridge(
  */
 export function canShowTaskEntry(bridge: HostBridge): boolean {
   const capabilities = bridge.capabilities();
-  return capabilities.taskSubmit === true && capabilities.eventStream === true;
+  return (
+    capabilities.taskSubmit === true &&
+    (capabilities.eventStream === true || capabilities.taskRecovery === true)
+  );
 }
 
 /**
