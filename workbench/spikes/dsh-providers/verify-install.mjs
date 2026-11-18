@@ -99,8 +99,7 @@ try {
         },
         diagramDiagnostic: rejected.output
           .split("\n")
-          .find((line) => line.includes("incompatible with dsh"))
-          ?.split(": requirements")[0],
+          .find((line) => line.includes("incompatible with dsh")),
         limits: [
           "Profile lifecycle only; browser rendering and model execution are separate checks.",
         ],

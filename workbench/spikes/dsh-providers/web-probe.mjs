@@ -52,7 +52,9 @@ export function apply(ctx, config) {
       const contextKeys = Object.keys(
         ctx.sessionProjections.snapshot(session).values,
       ).filter((key) => key.startsWith("context"));
-      assert.ok(contextKeys.length > 0);
+      for (const key of ["contextTimeline", "contextHeaders", "contextActivity"]) {
+        assert.ok(contextKeys.includes(key), `dsh-context projection missing: ${key}`);
+      }
       checks.contextHostProjections = true;
       checks.whiteboardTools = [
         "sand_table_list_boards",
