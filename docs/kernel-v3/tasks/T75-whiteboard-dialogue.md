@@ -19,6 +19,7 @@
 - 本卡、`docs/kernel-v3/tasks/README.md`、`docs/kernel-v3/04-canvas.md`、`README.md`。
 - `workbench/board/CanvasShell.tsx`、`workbench/board/main.tsx`、`workbench/board/style.css`。
 - 新建 `workbench/board/ai/{context.ts,conversation.ts,WhiteboardAI.tsx}`。
+- `workbench/core/host-bridge.ts`、`workbench/tests/host-bridge.test.ts`。
 - `workbench/tests/whiteboard-ai.test.ts`、`workbench/tests/host-browser.ts`、`workbench/tests/blank.ts`。
 
 不增加依赖、内核表、模型服务或 Agent 循环，不修改其他进行中的 T39/T40 分支。
@@ -26,7 +27,7 @@
 ## 做法与边界
 
 1. 顶部固定“和 AI 协作”；选区另有“询问选区”。右侧协作面板与画布并存，支持当前白板／当前选区切换、目标标题预览及整理、查漏、总结的可编辑草稿。
-2. 发送只使用真实 `HostBridge.submitTask`。没有任务能力时展示连接说明与帮助入口，不显示可发送的输入框，不用复制提示词或本地 `app.sendMessage` 回显假装执行。
+2. 发送只使用真实 `HostBridge.submitTask`。没有任务提交或事件流能力时展示连接说明与帮助入口，不显示可发送的输入框，不用复制提示词或本地 `app.sendMessage` 回显假装执行。
 3. 目标从 `views[viewId].selection` 的展示编号解析成对象与版本；同对象多个展示去重。请求固定提交时的白板、对象版本、上下文修订号。缺对象、缺版本、空选区、超过 200 个目标时明确拒绝，禁止静默降级为整板。
 4. 每块白板的草稿和对话在本次打开期间独立保留；收起面板不丢失。明确提示刷新不保存对话。每块白板最多保留 50 次交互，达到上限需清空已结束记录后继续。
 5. 一次发送期间防重复，宿主拒绝保留草稿。任务记录绑定 taskId，其他任务事件不改本次状态，终态不因迟到事件回退；提交应答与事件乱序仍能关联。取消按宿主确认显示；现有 DSH 只支持取消运行中的任务，按钮按这一真实边界显示。
