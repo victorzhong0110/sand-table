@@ -25,6 +25,15 @@ const samples: {
     bad: [{ title: "框" }],
   },
   {
+    type: "base.resource_reference",
+    ok: [{}, { note: "本地说明" }],
+    bad: [
+      { note: 1 },
+      { resource: { providerId: "drawing" } },
+      { body: "外部正文" },
+    ],
+  },
+  {
     type: "base.note",
     ok: [{ body: "一段说明" }, { body: "" }],
     bad: [{ body: 42 }, { text: "旧字段名" }],

@@ -15,11 +15,18 @@ export type ExternalLocator = {
 
 /** 对象来源：人工创建、外部导入、AI 生成或推断。 */
 export type ObjectSource = {
-  origin: "human" | "imported" | "ai-generated" | "ai-inferred" | "code-index";
+  origin:
+    | "human"
+    | "imported"
+    | "ai-generated"
+    | "ai-inferred"
+    | "code-index"
+    | "derived";
   author?: string;
   /** 依据说明。推断性来源必须给依据，不得伪装成已确认事实。 */
   basis?: string;
   external?: ExternalLocator;
+  resource?: import("../../resources/types.ts").ResourceRef;
   importedAt?: number;
   /** 外部内容指纹，用于识别内容变化与引用失效。 */
   fingerprint?: string;
@@ -386,6 +393,7 @@ export type HostCapabilities = {
   eventStream: boolean;
   /** 能否读取工作空间内容。 */
   contentRead: boolean;
+  resourceRead?: boolean;
   /** 能呈现哪些插件结果种类。 */
   resultKinds?: string[];
 };

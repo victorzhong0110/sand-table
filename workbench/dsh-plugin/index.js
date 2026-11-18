@@ -15,6 +15,7 @@
  */
 
 import { createTaskChannel } from "./tasks.js";
+import { applyResources } from "./resources.js";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -353,7 +354,11 @@ function mapContentData(type, data) {
 
 /** v2 的 appearance.detail 写在展示上，不写进对象数据。 */
 function presentationAppearance(appearance) {
-  if (!appearance || typeof appearance !== "object" || Array.isArray(appearance))
+  if (
+    !appearance ||
+    typeof appearance !== "object" ||
+    Array.isArray(appearance)
+  )
     return undefined;
   const next = {};
   if (typeof appearance.detail === "string" && appearance.detail)
@@ -699,9 +704,7 @@ function createV3Operations(mcp) {
   const readObject = async (boardId, objectId) => {
     if (!boardId) throw new Error("缺少 boardId");
     if (!objectId) throw new Error("缺少 objectId");
-    const read = dataOf(
-      await mcp.callTool("sand_read", { ids: [objectId] }),
-    );
+    const read = dataOf(await mcp.callTool("sand_read", { ids: [objectId] }));
     const objects = Array.isArray(read?.objects) ? read.objects : [];
     const object = objects.find((item) => item.id === objectId);
     if (!object)
@@ -876,6 +879,20 @@ export function apply(ctx, config) {
   const settings = resolveConfig(config);
   const mcp = createMcpClient(settings);
   const operations = createOperations(mcp);
+  const resources = applyResources(ctx, mcp, dataOf);
+  const readObject = operations.readObject;
+  operations.readObject = async (...args) => {
+    const object = await readObject(...args);
+    if (!object.source?.resource) return object;
+    return {
+      ...object,
+      resource: await resources.request({
+        objectId: object.id,
+        expectedVersion: object.version,
+        action: "read",
+      }),
+    };
+  };
   const tasks = createTaskChannel(ctx);
   ctx.effect(() => () => tasks.dispose(), "sand-table: task events");
 
@@ -909,6 +926,10 @@ export function apply(ctx, config) {
               kind: "success",
               text: JSON.stringify({
                 ...hostCapabilities(tasks),
+                capabilities: {
+                  ...hostCapabilities(tasks).capabilities,
+                  resourceRead: resources.available,
+                },
                 boardUrl: settings.boardUrl,
                 workspaceId: settings.workspaceId,
               }),
@@ -917,6 +938,11 @@ export function apply(ctx, config) {
             return {
               kind: "success",
               text: JSON.stringify(await operations.listBoards()),
+            };
+          if (action === "resource")
+            return {
+              kind: "success",
+              text: JSON.stringify(await resources.request(JSON.parse(rest))),
             };
           if (action === "read_board")
             return {

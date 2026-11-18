@@ -14,6 +14,9 @@ import type {
 
 /** 宿主桥：把「向宿主提交任务、接收事件」抽象成接口。 */
 export type HostBridge = {
+  resourceRequest?: (
+    request: import("../resources/types.ts").ResourceRequest,
+  ) => Promise<unknown>;
   /** 宿主标识，例如 "dsh" / "mcp" / "local"。 */
   readonly host: string;
   /** 宿主自报的能力。 */
@@ -60,6 +63,7 @@ export const mcpBridge: HostBridge = {
 
 /** 宿主注入到页面里的对象形状（由宿主保证，Sand Table 只读）。 */
 export type InjectedHost = {
+  resourceRequest?: HostBridge["resourceRequest"];
   host: string;
   version?: string;
   capabilities?: Partial<HostCapabilities>;
@@ -93,11 +97,16 @@ export function readInjectedBridge(scope: unknown): HostBridge | undefined {
       raw.taskSubmit === true && typeof host.submitTask === "function",
     eventStream: raw.eventStream === true,
     contentRead: raw.contentRead === true,
+    resourceRead:
+      raw.resourceRead === true && typeof host.resourceRequest === "function",
     resultKinds: Array.isArray(raw.resultKinds) ? raw.resultKinds : undefined,
   };
   return {
     host: host.host,
     capabilities: () => capabilities,
+    resourceRequest: capabilities.resourceRead
+      ? host.resourceRequest
+      : undefined,
     submitTask: async (request: HostTaskRequest) => {
       if (raw.taskSubmit === true && typeof host.submitTask !== "function")
         throw new Error("宿主声明了任务提交能力，但没有提供提交入口。");

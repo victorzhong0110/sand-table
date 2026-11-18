@@ -18,7 +18,8 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
-    "tasks.js"
+    "tasks.js",
+    "resources.js"
   ],
   "engines": {
     "dsh": ">=0.2.1-rc.2 <0.3.0"

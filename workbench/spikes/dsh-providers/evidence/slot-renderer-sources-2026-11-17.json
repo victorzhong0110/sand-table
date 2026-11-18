@@ -1,0 +1,15 @@
+{
+  "dsh": "0.2.2-rc.1",
+  "files": [
+    {
+      "path": "@deepseek-ai/dsh-client-ui-renderer/lib/types/client/registry.d.ts",
+      "sha256": "8a3219d347eda4aca463d6baca99768b4f07da1b546479cd0bfcbb9a306e563a",
+      "bytes": 12111
+    },
+    {
+      "path": "@deepseek-ai/dsh-client-ui-renderer/lib/client.js",
+      "sha256": "dbdb3f26bfbc1d143bc8a0eed5982a2507c4f0cf8027e7c170f3bed3604be356",
+      "bytes": 78299
+    }
+  ]
+}

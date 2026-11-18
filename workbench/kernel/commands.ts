@@ -1,3 +1,4 @@
+import { sourceResourceProblem } from "./resource.ts";
 import { getMeta, setMeta, transaction, type Db } from "./db.ts";
 import { CommandError } from "./errors.ts";
 import { historyKind, recordHistory } from "./history-record.ts";
@@ -372,6 +373,12 @@ function updateObject(
     throw new CommandError(
       "FORBIDDEN",
       "这是从外部重新算出来的内容，不能直接修改。",
+      index,
+    );
+  if (command.source !== undefined && command.expectedVersion === undefined)
+    throw new CommandError(
+      "INVALID_DATA",
+      "修改来源必须提供读取时的对象版本，请重新读取后再提交。",
       index,
     );
   assertVersion(row.version, command.expectedVersion, row.title, index);
@@ -1895,6 +1902,8 @@ function assertDataSize(data: unknown, index: number) {
 }
 
 function assertSource(source: ObjectSource, index: number) {
+  const problem = sourceResourceProblem(source);
+  if (problem) throw new CommandError("INVALID_DATA", problem, index);
   if (!ORIGINS.has(source.origin))
     throw new CommandError("INVALID_DATA", "对象来源无法识别。", index, {
       path: "/source/origin",

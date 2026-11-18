@@ -183,3 +183,93 @@ test("DSH keeps replies in the conversation and publishes only structured tool a
   );
   channel.dispose();
 });
+
+test("资源桥保留能力门控、父页校验与请求关联", async () => {
+  let listener: (event: any) => void = () => {};
+  const sent: any[] = [];
+  const scope = {
+    addEventListener: (_: string, fn: any) => {
+      listener = fn;
+    },
+    removeEventListener: () => {},
+  };
+  const parent = { postMessage: (data: any) => sent.push(data) };
+  const transport = installHostBridgeClient({ scope, parent, timeoutMs: 100 });
+  const origin = "https://host.example";
+  listener({
+    source: parent,
+    origin,
+    data: {
+      type: "sand-table:host-bridge",
+      host: { host: "dsh", capabilities: { resourceRead: true } },
+    },
+  });
+  const bridge = readInjectedBridge(scope)!;
+  assert.equal(bridge.capabilities().resourceRead, true);
+  const args = {
+    objectId: "reference",
+    expectedVersion: 2,
+    workspaceId: "a",
+    action: "read" as const,
+  };
+  const reading = bridge.resourceRequest!(args);
+  const request = sent.at(-1);
+  assert.deepEqual(request.request, args);
+  listener({
+    source: {},
+    origin,
+    data: {
+      type: "sand-table:resource-result",
+      id: request.id,
+      result: "wrong",
+    },
+  });
+  const value = {
+    objectId: "reference",
+    objectVersion: 2,
+    value: { status: "provider_missing" },
+  };
+  listener({
+    source: parent,
+    origin,
+    data: { type: "sand-table:resource-result", id: request.id, result: value },
+  });
+  assert.deepEqual(await reading, value);
+  transport.dispose();
+  const reconnected = installHostBridgeClient({
+    scope,
+    parent,
+    timeoutMs: 100,
+  });
+  listener({
+    source: parent,
+    origin,
+    data: {
+      type: "sand-table:host-bridge",
+      host: { host: "dsh", capabilities: { resourceRead: true } },
+    },
+  });
+  const next = readInjectedBridge(scope)!.resourceRequest!(args);
+  const nextRequest = sent.at(-1);
+  assert.notEqual(nextRequest.id, request.id);
+  listener({
+    source: parent,
+    origin,
+    data: {
+      type: "sand-table:resource-result",
+      id: request.id,
+      result: "old page reply",
+    },
+  });
+  listener({
+    source: parent,
+    origin,
+    data: {
+      type: "sand-table:resource-result",
+      id: nextRequest.id,
+      result: value,
+    },
+  });
+  assert.deepEqual(await next, value);
+  reconnected.dispose();
+});

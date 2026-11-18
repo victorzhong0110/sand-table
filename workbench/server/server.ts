@@ -33,6 +33,7 @@ import { registerCoreTools } from "./core-tools.ts";
 import { registerFolderTools } from "./folder-tools.ts";
 import { toolError, toolResult } from "./output.ts";
 import type { WorkspaceSession } from "./workspaces.ts";
+import { createResourceTools } from "./resource-tools.ts";
 
 /** 白板界面的地址。宿主支持 MCP Apps 时，调用 sand_status 会打开它。 */
 const UI_URI = "ui://sand-table/overview.html";
@@ -205,7 +206,15 @@ export function createServerV3(options: ServerOptions) {
     for (const packId of packTools.keys()) syncPackTools(packId);
   }
 
+  const resourceTools = createResourceTools(() => {
+    if (!session) throw new Error("这个服务还没有打开工作空间。");
+    return session;
+  });
+  if (session) resourceTools.sync();
+  resourceTools.registerTools(registrar);
   registerCoreTools(registrar, {
+    resourceRead: (objectId, expectedVersion) =>
+      resourceTools.request({ objectId, expectedVersion, action: "read" }),
     host: hostInfo,
     afterWrite,
     afterHistory: syncAllPackTools,
@@ -218,6 +227,7 @@ export function createServerV3(options: ServerOptions) {
     },
     replaceSession: (next) => {
       session = next;
+      resourceTools.sync();
     },
     afterWrite,
     afterSwitch: syncAllPackTools,
@@ -277,6 +287,7 @@ export function createServerV3(options: ServerOptions) {
   return {
     server,
     registry,
+    resources: resourceTools.resources,
     /** 当前打开的工作空间。 */
     workspace: () => session,
     /**
@@ -287,6 +298,7 @@ export function createServerV3(options: ServerOptions) {
     packWatcher: () => packWatcher,
     dispose: () => {
       clearInterval(packWatcher);
+      resourceTools.dispose();
       session?.db.close();
     },
   };
