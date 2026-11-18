@@ -136,6 +136,27 @@ test("X5：可提交但没有事件流时不启用对话，不伪造进度", () 
   assert.equal(seen.length, 0);
 });
 
+test("DSH 持久投影提供终态时，无事件流也可打开对话", () => {
+  const bridge = readInjectedBridge({
+    [HOST_BRIDGE_KEY]: {
+      host: "dsh",
+      capabilities: {
+        taskSubmit: true,
+        eventStream: false,
+        taskRecovery: true,
+      },
+      submitTask: async () => ({ taskId: "durable" }),
+      followTasks: async () => ({
+        session: { id: "session", createdAt: 1 },
+        seq: 0,
+        tasks: [],
+      }),
+    },
+  });
+  assert.ok(bridge);
+  assert.equal(canShowTaskEntry(bridge), true);
+});
+
 test("有事件流时能收到事件，退订后不再收到", () => {
   const listeners: ((e: HostTaskEvent) => void)[] = [];
   const scope = {

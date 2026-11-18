@@ -110,3 +110,11 @@ T61 验证下面已定模型与有界查询，不再把实现卡留待未来编�
 ## 9. 已合并卡的补齐规则
 
 本修订不把已合并的 T17/T20 等重新标为未完成。T74 对当前 main 做差距审计并实施 05 对早期接口新增的要求，T24 等 T74。T17 的相对坐标、T20 的元数据/活动读接口及已有实现以测试证据核对，已满足的直接记录通过，缺的在 T74 补齐。
+
+
+## 10. T79 宿主绑定服务
+
+- DSH 暴露 `sandTableTasks.submit(request, agent, signal)`、`get(taskId, agent)`、`follow({workspaceId, boardId}, agent)`、`cancel(taskId, agent)`、`reconcile(taskId, agent)`。follow 返回当前序号和有界快照，是浏览器轮询和后续领域运行适配的入口。
+- requestId 在提交端生成，提交前将会话编号/创建时间、工作空间命名空间、白板、指令及对象版本写入 DSH 持久记录。关联落盘后提交给 DSH，原请求仍可由 rpcId 对账。回执未知保留待核对。终态只接受对应 turn/end。取消只作用于当前仍在执行且能唯一归属的轮次。
+- 投影重建不触发执行或作品写入。宿主收到指定工具的结构化产物后先记交付，再在白板事务内提交作品及 operationId 回执。重启后 `reconcile` 先查回执，再处理未提交的交付。候选与原对象关联，保留提交时版本。作品送达和 DSH 执行状态独立。
+- 绑定采用 DSH 0.2.2-rc.1 的实验 plugin record，格式为 `plugin:sand-table/workbench-v1`。跨 DSH 版本迁移依赖上游对该记录的保留规则。浏览器重开后可在原 DSH 会话中看到关联记录。独立本地/MCP 模式沿用白板编辑能力。

@@ -67,7 +67,7 @@ PRAGMA synchronous = NORMAL;
 
 `workbench/package.json` 里调用 `node` 的脚本加 `--disable-warning=ExperimentalWarning`，避免 `node:sqlite` 的实验性警告混进测试输出。其他启动点出现的这条警告只写到 stderr，不影响功能，不需要改。
 
-## 4. 表结构（当前 schema 版本 2）
+## 4. 表结构（当前 schema 版本 3）
 
 `meta` 表的 `schema_version` 记录当前版本。以后改表结构，在 `kernel/schema.ts` 里追加一段迁移，版本号加 1，不修改已发布的建表语句。
 
@@ -77,7 +77,7 @@ CREATE TABLE meta (
   value TEXT NOT NULL
 );
 -- 必有的键：
---   schema_version   '2'
+--   schema_version   '3'
 --   workspace_id     工作空间 id
 --   title            工作空间标题
 --   created_at       毫秒时间戳（文本形式）
@@ -454,3 +454,8 @@ type Change = {
 ResourceRef 的三个身份字段非空；上限分别 128/512/512 字符，revision 256、anchor 2048 字符。可选字段缺省表示未指定，若给出则不能为空。不透明标识不拼接路径或 URL。source.resource 与 source.external 互斥，修改 source 必须携带 expectedVersion；仍由 object.update 进入事务与撤销历史。
 
 base.resource_reference 的 data 仅含可选 note（本地说明，最多 20000 字符），不复制 ResourceRef 或外部正文。T25 导出导入原样保留 source.resource，不携带外部文档或安装插件；旧来源缺省 resource 不变。默认白板 providerId=sand-table.board，namespace 由存储根目录的稳定哈希与 workspaceId 组合，避免两个实例的 default 工作空间相撞。
+
+
+### 宿主交付回执（T79）
+
+`delivery_receipts(operation_id TEXT PRIMARY KEY, fingerprint TEXT, result TEXT)` 随 SQLite schema 3 增加。编号与请求指纹是 64 位十六进制 SHA-256，结果是经过内核提交的 CommandResult。迁移现有库时表为空。一次交付的命令、历史及回执在同一事务中提交或回滚。相同编号和指纹返回已有结果，异参报错。撤销可撤回作品，回执继续证明原操作已执行。T25 导出、导入和分叉不携带回执。

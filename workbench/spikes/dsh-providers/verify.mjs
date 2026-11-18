@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const runtime = await mkdtemp(join(tmpdir(), "sand-dsh-providers-"));
+const probe = process.argv.includes("--workbench-recovery")
+  ? "recovery-probe.mjs"
+  : "probe.mjs";
 const cli = join(root, "node_modules/@deepseek-ai/dsh/lib/bin.js");
 const results = [];
 
@@ -20,7 +23,7 @@ async function phase(name) {
         insert: [
           {
             id: "sand-table-provider-probe",
-            name: join(root, "probe.mjs"),
+            name: join(root, probe),
             config: { phase: name, reportPath, workspace: runtime },
           },
         ],

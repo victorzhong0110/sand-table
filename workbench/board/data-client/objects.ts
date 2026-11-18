@@ -394,12 +394,44 @@ export type HostCapabilities = {
   /** 能否读取工作空间内容。 */
   contentRead: boolean;
   resourceRead?: boolean;
+  taskRecovery?: boolean;
   /** 能呈现哪些插件结果种类。 */
   resultKinds?: string[];
 };
 
 /** 发给宿主的任务请求。上下文用**引用 + 版本**，不用整份快照。 */
+export type HostSessionIdentity = { id: string; createdAt: number };
+export type HostTaskScope = { workspaceId: string; boardId: string };
+export type HostTaskLocator = { taskId: string; session: HostSessionIdentity };
+export type HostTaskSnapshot = HostTaskScope &
+  HostTaskLocator & {
+    instruction: string;
+    targets: HostTaskRequest["targets"];
+    state: HostTaskEvent["state"];
+    messages: string[];
+    reason?: string;
+    deliveries: {
+      operationId: string;
+      state: "pending" | "written";
+      objectId?: string;
+      reason?: string;
+    }[];
+    at: number;
+  };
+export type HostTaskTimeline = {
+  session: HostSessionIdentity;
+  seq: number;
+  tasks: HostTaskSnapshot[];
+};
+export type HostTaskReceipt = {
+  taskId: string;
+  state?: HostTaskEvent["state"];
+};
 export type HostTaskRequest = {
+  requestId?: string;
+  workspaceId?: string;
+  displayText?: string;
+  sessionCreatedAt?: number;
   boardId: string;
   instruction: string;
   /** 目标对象引用与开始时的版本。 */

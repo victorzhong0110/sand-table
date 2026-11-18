@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { sourceResourceProblem } from "./resource.ts";
 import { getMeta, setMeta, transaction, type Db } from "./db.ts";
 import { CommandError } from "./errors.ts";
@@ -109,6 +110,68 @@ export function applyCommands(
   });
 }
 
+/** Receipts outlive undo and distinguish a lost acknowledgement from a new write. */
+export function deliveryReceipt(
+  db: Db,
+  operationId: string,
+): CommandResult | undefined {
+  return deliveryRow(db, operationId)?.result;
+}
+
+function deliveryRow(db: Db, operationId: string) {
+  const row = db
+    .prepare(
+      "SELECT fingerprint, result FROM delivery_receipts WHERE operation_id = ?",
+    )
+    .get(operationId) as { fingerprint: string; result: string } | undefined;
+  if (row)
+    return {
+      fingerprint: row.fingerprint,
+      result: JSON.parse(row.result) as CommandResult,
+    };
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value))
+    return "[" + value.map(canonicalJson).join(",") + "]";
+  if (value !== null && typeof value === "object") {
+    return (
+      "{" +
+      Object.entries(value)
+        .filter(([, item]) => item !== undefined)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([key, item]) => JSON.stringify(key) + ":" + canonicalJson(item))
+        .join(",") +
+      "}"
+    );
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+export function applyDelivery(
+  db: Db,
+  registry: Registry,
+  operationId: string,
+  batch: CommandBatch,
+): CommandResult {
+  if (!/^[a-f0-9]{64}$/.test(operationId))
+    throw new CommandError(
+      "INVALID_DATA",
+      "交付编号格式不对，请重新核对宿主记录。",
+      null,
+    );
+  assertActor(batch.actor);
+  assertBatch(batch.commands);
+  const fingerprint = createHash("sha256")
+    .update(canonicalJson(batch))
+    .digest("hex");
+  return run(db, registry, batch.actor, batch.commands, "public", {
+    record: true,
+    label: batch.label,
+    delivery: { operationId, fingerprint },
+  });
+}
+
 export function applySystemCommands(
   db: Db,
   registry: Registry,
@@ -145,13 +208,31 @@ function run(
   actor: Actor,
   commands: AnyCommand[],
   mode: "public" | "system",
-  options: { record: boolean; label?: string; intentId?: string },
+  options: {
+    record: boolean;
+    label?: string;
+    intentId?: string;
+    delivery?: { operationId: string; fingerprint: string };
+  },
 ): CommandResult {
   const staged = stageRegistry(registry);
   const afterCommit: Array<() => void> = [];
   try {
-    const result = transaction(db, () =>
-      executeAll(
+    const result = transaction(db, () => {
+      const delivery = options.delivery;
+      if (delivery) {
+        const previous = deliveryRow(db, delivery.operationId);
+        if (previous) {
+          if (previous.fingerprint !== delivery.fingerprint)
+            throw new CommandError(
+              "INVALID_DATA",
+              "同一交付编号不能用于不同作品。请核对原交付记录。",
+              null,
+            );
+          return previous.result;
+        }
+      }
+      const result = executeAll(
         db,
         registry,
         staged,
@@ -160,8 +241,17 @@ function run(
         mode,
         options,
         afterCommit,
-      ),
-    );
+      );
+      if (delivery)
+        db.prepare(
+          "INSERT INTO delivery_receipts (operation_id, fingerprint, result) VALUES (?, ?, ?)",
+        ).run(
+          delivery.operationId,
+          delivery.fingerprint,
+          JSON.stringify(result),
+        );
+      return result;
+    });
     for (const job of afterCommit) job();
     return result;
   } catch (error) {

@@ -77,11 +77,18 @@ export function installHostBridgeClient(options: HostBridgeClientOptions) {
               request("sand-table:resource-request", { request: resource })
           : undefined,
         submitTask: host.capabilities?.taskSubmit ? submit : undefined,
-        cancelTask: host.capabilities?.eventStream
-          ? async (taskId) => {
-              await request("sand-table:cancel-task", { taskId });
-            }
+        followTasks: host.capabilities?.taskRecovery
+          ? (scope) => request("sand-table:follow-tasks", { request: scope })
           : undefined,
+        reconcileTask: host.capabilities?.taskRecovery
+          ? (task) => request("sand-table:reconcile-task", { request: task })
+          : undefined,
+        cancelTask:
+          host.capabilities?.eventStream || host.capabilities?.taskRecovery
+            ? async (taskId, session) => {
+                await request("sand-table:cancel-task", { taskId, session });
+              }
+            : undefined,
         subscribe: (listener) => {
           listeners.add(listener);
           return () => listeners.delete(listener);
@@ -94,6 +101,7 @@ export function installHostBridgeClient(options: HostBridgeClientOptions) {
     } else if (
       data.type === SUBMIT_RESULT_MESSAGE ||
       data.type === "sand-table:resource-result" ||
+      data.type === "sand-table:task-snapshot" ||
       data.type === SUBMIT_ERROR_MESSAGE
     ) {
       const entry = pending.get(String(data.id));
@@ -101,10 +109,21 @@ export function installHostBridgeClient(options: HostBridgeClientOptions) {
       pending.delete(String(data.id));
       clearTimeout(entry.timer);
       if (data.type === SUBMIT_ERROR_MESSAGE)
-        entry.reject(Error(String(data.message ?? "宿主操作失败。")));
-      else if (data.type === "sand-table:resource-result")
+        entry.reject(
+          Object.assign(Error(String(data.message ?? "宿主操作失败。")), {
+            declined: data.declined === true,
+          }),
+        );
+      else if (
+        data.type === "sand-table:resource-result" ||
+        data.type === "sand-table:task-snapshot"
+      )
         entry.resolve(data.result);
-      else entry.resolve({ taskId: String(data.taskId ?? "") });
+      else
+        entry.resolve({
+          taskId: String(data.taskId ?? ""),
+          ...(data.state ? { state: data.state } : {}),
+        });
     }
   };
   options.scope.addEventListener("message", onMessage);

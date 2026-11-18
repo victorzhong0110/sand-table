@@ -411,3 +411,12 @@ DSH 插件（`workbench/dsh-plugin/`）的 4 个工具改为转调 `sand_status`
 - sand_read 增加可选 resolveResources:boolean。开启后返回 resources，逐项包含 objectId、objectVersion 和资源解析结果；默认仍只读白板对象。提供者不可用明确返回分类，不回退固定版本，不把预览写回 data。核心工具仍为 8 个。
 - 新增界面专用 app_resource，参数 objectId、expectedVersion、可选 workspaceId、action=read|open|binding。只从当前工作空间的已保存对象解析绑定；客户端不能传任意 ResourceRef。返回 workspaceId、objectId、objectVersion、ref，以及 read/open 的 value。binding 不读取外部正文。异步完成后再次核对工作空间、引用和版本。
 - DSH 的 sand_table_read_object 和白板预览走同一资源注册表；第三方 native provider 在自身 read/open 中验证权限。保存了引用不代表获得文件、网络或其他资源的读取授权。打开只允许宿主生成的 board-object 路由或经校验的 http/https URL。
+
+
+## 宿主产物提交（T79）
+
+内核新增 `applyDelivery(db, registry, operationId, batch)` 和 `deliveryReceipt(db, operationId)`，由宿主服务调用。公开 MCP 命令仍沿用原接口，无权提交宿主回执。此前的 intentId 用于历史组，与交付操作编号独立。
+
+DSH 插件的 `sand_table_publish_artifact` 让 Agent 在已关联的白板轮次明确交付 note、table 或固定 revision 的 resource。工具结果需要匹配本轮的 tool/call 和协议结构。普通回复和其他工具的 JSON 留在 DSH 对话。候选修改必须引用提交时的目标及版本，宿主写为独立候选以保留原件。
+
+会话命令 `submit`、`follow`、`status`、`cancel`、`reconcile` 包装 sandTableTasks 服务。follow 按选定会话和当前白板返回最新 30 个任务快照。cancel / reconcile 校验原会话的编号与创建时间。重连读取现有事实，待交付可在原会话显式核对。

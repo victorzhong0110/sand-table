@@ -1,0 +1,25 @@
+{
+  "dsh": "0.2.2-rc.1",
+  "node": "v24.22.1",
+  "platform": "linux",
+  "results": [
+    {
+      "phase": "write",
+      "ok": true,
+      "checks": {
+        "durableBeforePrompt": true,
+        "deliveryWithoutBrowser": true,
+        "durableReceipt": true
+      }
+    },
+    {
+      "phase": "read",
+      "ok": true,
+      "checks": {
+        "coldSessionIdentity": true,
+        "coldTaskAndArtifact": true,
+        "replayDoesNotExecuteOrWrite": true
+      }
+    }
+  ]
+}

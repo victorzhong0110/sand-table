@@ -208,6 +208,8 @@ window.addEventListener("message", (event) => {
         "sand-table:submit-task-result",
         "sand-table:submit-task-error",
         "sand-table:task-event",
+        "sand-table:task-snapshot",
+        "sand-table:resource-result",
       ].includes(event.data?.type)
     )
       toBoard(event.data);
@@ -223,9 +225,13 @@ window.addEventListener("message", (event) => {
   } else if (
     event.source === document.querySelector("iframe")?.contentWindow &&
     hostOrigin &&
-    ["sand-table:submit-task", "sand-table:cancel-task"].includes(
-      event.data?.type,
-    )
+    [
+      "sand-table:submit-task",
+      "sand-table:cancel-task",
+      "sand-table:follow-tasks",
+      "sand-table:reconcile-task",
+      "sand-table:resource-request",
+    ].includes(event.data?.type)
   ) {
     window.parent.postMessage(event.data, hostOrigin);
   }

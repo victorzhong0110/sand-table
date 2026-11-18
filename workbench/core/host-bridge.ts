@@ -10,6 +10,11 @@ import type {
   HostCapabilities,
   HostTaskEvent,
   HostTaskRequest,
+  HostTaskScope,
+  HostTaskTimeline,
+  HostTaskLocator,
+  HostTaskSnapshot,
+  HostTaskReceipt,
 } from "../board/data-client/objects.ts";
 
 /** 宿主桥：把「向宿主提交任务、接收事件」抽象成接口。 */
@@ -25,9 +30,14 @@ export type HostBridge = {
    * 提交任务。宿主不支持时抛错，错误文案要说明原因
    * （不要假装提交成功）。
    */
-  submitTask(request: HostTaskRequest): Promise<{ taskId: string }>;
+  submitTask(request: HostTaskRequest): Promise<HostTaskReceipt>;
   /** 订阅任务事件。返回取消订阅函数。 */
-  cancelTask?(taskId: string): Promise<void>;
+  cancelTask?(
+    taskId: string,
+    session?: HostTaskLocator["session"],
+  ): Promise<void>;
+  followTasks?(scope: HostTaskScope): Promise<HostTaskTimeline>;
+  reconcileTask?(task: HostTaskLocator): Promise<HostTaskSnapshot>;
   subscribe(listener: (event: HostTaskEvent) => void): () => void;
 };
 
@@ -67,8 +77,10 @@ export type InjectedHost = {
   host: string;
   version?: string;
   capabilities?: Partial<HostCapabilities>;
-  submitTask?: (request: HostTaskRequest) => Promise<{ taskId: string }>;
-  cancelTask?: (taskId: string) => Promise<void>;
+  submitTask?: (request: HostTaskRequest) => Promise<HostTaskReceipt>;
+  cancelTask?: HostBridge["cancelTask"];
+  followTasks?: HostBridge["followTasks"];
+  reconcileTask?: HostBridge["reconcileTask"];
   subscribe?: (listener: (event: HostTaskEvent) => void) => (() => void) | void;
 };
 
@@ -95,7 +107,10 @@ export function readInjectedBridge(scope: unknown): HostBridge | undefined {
     version: host.version,
     taskSubmit:
       raw.taskSubmit === true && typeof host.submitTask === "function",
-    eventStream: raw.eventStream === true,
+    eventStream:
+      raw.eventStream === true && typeof host.subscribe === "function",
+    taskRecovery:
+      raw.taskRecovery === true && typeof host.followTasks === "function",
     contentRead: raw.contentRead === true,
     resourceRead:
       raw.resourceRead === true && typeof host.resourceRequest === "function",
@@ -117,6 +132,8 @@ export function readInjectedBridge(scope: unknown): HostBridge | undefined {
       return host.submitTask(request);
     },
     cancelTask: host.cancelTask,
+    followTasks: capabilities.taskRecovery ? host.followTasks : undefined,
+    reconcileTask: capabilities.taskRecovery ? host.reconcileTask : undefined,
     subscribe: (listener: (event: HostTaskEvent) => void) => {
       if (!capabilities.eventStream || typeof host.subscribe !== "function")
         return () => {};
@@ -149,7 +166,10 @@ export function resolveBridge(
  */
 export function canShowTaskEntry(bridge: HostBridge): boolean {
   const capabilities = bridge.capabilities();
-  return capabilities.taskSubmit === true && capabilities.eventStream === true;
+  return (
+    capabilities.taskSubmit === true &&
+    (capabilities.eventStream === true || capabilities.taskRecovery === true)
+  );
 }
 
 /**

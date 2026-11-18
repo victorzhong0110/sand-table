@@ -1,4 +1,8 @@
-import type { HostTaskEvent } from "../data-client/objects.ts";
+import type {
+  HostSessionIdentity,
+  HostTaskEvent,
+  HostTaskSnapshot,
+} from "../data-client/objects.ts";
 import type { AITarget } from "./context.ts";
 
 export type AITurn = {
@@ -7,9 +11,11 @@ export type AITurn = {
   text: string;
   targets: AITarget[];
   taskId?: string;
+  session?: HostSessionIdentity;
   state: HostTaskEvent["state"] | "submitting" | "rejected";
   messages: string[];
   eventAt?: number;
+  snapshot?: HostTaskSnapshot;
 };
 
 export const AI_STATE_LABELS: Record<AITurn["state"], string> = {

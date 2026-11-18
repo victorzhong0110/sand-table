@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { Board } from "../data-client/model.ts";
-import type { HostTaskEvent, HostTaskRequest } from "../data-client/objects.ts";
+import type { HostBridge } from "../../core/host-bridge.ts";
+import type {
+  HostTaskEvent,
+  HostTaskRequest,
+  HostTaskTimeline,
+} from "../data-client/objects.ts";
 import { aiRequest, aiTargets, type AIScope } from "./context.ts";
 import {
   activeTurn,
@@ -29,6 +34,8 @@ export function WhiteboardAI({
   hostEvents,
   send,
   cancel,
+  follow,
+  reconcile,
   onClose,
   onConnect,
 }: {
@@ -38,8 +45,10 @@ export function WhiteboardAI({
   focusScope: { scope: AIScope; seq: number };
   ready: boolean;
   hostEvents?: HostTaskEvent[];
-  send?: (request: HostTaskRequest) => Promise<{ taskId: string }>;
-  cancel?: (taskId: string) => Promise<void>;
+  send?: HostBridge["submitTask"];
+  follow?: HostBridge["followTasks"];
+  reconcile?: HostBridge["reconcileTask"];
+  cancel?: HostBridge["cancelTask"];
   onClose: () => void;
   onConnect: () => void;
 }) {
@@ -47,6 +56,85 @@ export function WhiteboardAI({
   const [threads, setThreads] = useState<Record<string, Thread>>({});
   const thread = threads[key] ?? emptyThread();
   const [notice, setNotice] = useState("");
+  const [projection, setProjection] = useState<{
+    key: string;
+    value: HostTaskTimeline;
+  }>();
+  const [projectionError, setProjectionError] = useState("");
+  const snapshot = projection?.key === key ? projection.value : undefined;
+  const followRef = useRef(follow);
+  followRef.current = follow;
+  const recoverable = !!follow;
+  const [refresh, refreshTasks] = useState(0);
+  useEffect(() => {
+    const workspaceId = board.workspaceId;
+    const boardId = board.views[viewId]?.spaceId;
+    if (!open || !recoverable || !workspaceId || !boardId) return;
+    setProjectionError("");
+    let stopped = false,
+      busy = false;
+    const poll = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        const value = await followRef.current!({ workspaceId, boardId });
+        if (stopped) return;
+        setProjection({ key, value });
+        const ids = new Set(value.tasks.map((task) => task.taskId));
+        setThreads((current) => {
+          const entry = current[key];
+          if (!entry || !entry.turns.some((turn) => ids.has(turn.id)))
+            return current;
+          return {
+            ...current,
+            [key]: {
+              ...entry,
+              turns: entry.turns.filter((turn) => !ids.has(turn.id)),
+            },
+          };
+        });
+        setProjectionError("");
+      } catch {
+        if (!stopped)
+          setProjectionError("与宿主的连接正在恢复，进行中的任务状态待核对。");
+      } finally {
+        busy = false;
+      }
+    };
+    void poll();
+    const timer = setInterval(() => {
+      if (!document.hidden) void poll();
+    }, 1200);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [key, open, recoverable, refresh]);
+  const restored: AITurn[] = (snapshot?.tasks ?? []).map((task) => ({
+    id: task.taskId,
+    taskId: task.taskId,
+    boardId: task.boardId,
+    text: task.instruction,
+    targets: task.targets.map((target) => ({ ...target, title: "" })),
+    state:
+      projectionError && ["queued", "running", "waiting"].includes(task.state)
+        ? "waiting"
+        : task.state,
+    messages: task.messages,
+    snapshot: task,
+  }));
+  const restoredIds = new Set(restored.map((turn) => turn.id));
+  const turns = [
+    ...restored,
+    ...thread.turns.filter(
+      (turn) =>
+        !restoredIds.has(turn.id) &&
+        (!recoverable ||
+          (turn.session?.id === snapshot?.session.id &&
+            turn.session?.createdAt === snapshot?.session.createdAt)),
+    ),
+  ];
+
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
   const submitting = useRef(false);
@@ -96,7 +184,7 @@ export function WhiteboardAI({
   }, [hostEvents]);
   useEffect(() => {
     if (open && log.current) log.current.scrollTop = log.current.scrollHeight;
-  }, [open, thread.turns]);
+  }, [open, thread.turns, snapshot]);
 
   let targets: ReturnType<typeof aiTargets> = [],
     contextError = "";
@@ -105,10 +193,19 @@ export function WhiteboardAI({
   } catch (error) {
     contextError = (error as Error).message;
   }
-  const active = thread.turns.find(activeTurn);
+  const active = turns.find(
+    (turn) => activeTurn(turn) && !(recoverable && turn.state === "waiting"),
+  );
   async function submit() {
-    if (submitting.current || active || !ready || !send) return;
-    if (thread.turns.length >= 50) {
+    if (
+      submitting.current ||
+      active ||
+      !ready ||
+      !send ||
+      (recoverable && (!snapshot || projectionError))
+    )
+      return;
+    if (!recoverable && thread.turns.length >= 50) {
       setNotice("本次对话已满 50 条，请清空已结束的对话后继续。");
       return;
     }
@@ -126,6 +223,7 @@ export function WhiteboardAI({
       boardId: request.boardId,
       text,
       targets,
+      session: snapshot?.session,
       state: "submitting",
       messages: [],
     };
@@ -133,28 +231,47 @@ export function WhiteboardAI({
     setNotice("");
     update(key, (current) => ({ ...current, turns: [...current.turns, turn] }));
     try {
-      const { taskId } = await send(request);
+      const { taskId, state } = await send({
+        ...request,
+        requestId: id,
+        displayText: text.trim(),
+        ...(snapshot
+          ? {
+              sessionId: snapshot.session.id,
+              sessionCreatedAt: snapshot.session.createdAt,
+            }
+          : {}),
+      });
+      refreshTasks((n) => n + 1);
       update(key, (current) => ({
         ...current,
         draft: current.draft === text ? "" : current.draft,
         turns: current.turns.map((item) => {
           if (item.id !== id) return item;
-          const accepted: AITurn = { ...item, taskId, state: "queued" };
+          const accepted: AITurn = {
+            ...item,
+            taskId,
+            state: state ?? "queued",
+          };
           const early = events.current.get(taskId);
           return early ? early.reduce(applyAIEvent, accepted) : accepted;
         }),
       }));
     } catch (error) {
+      const unknown =
+        recoverable && !(error as { declined?: boolean }).declined;
       update(key, (current) => ({
         ...current,
         turns: current.turns.map((item) =>
           item.id === id
             ? {
                 ...item,
-                state: "rejected",
+                state: unknown ? "waiting" : "rejected",
                 messages: [
-                  (error as Error).message ||
-                    "宿主没有接受请求，请检查连接后重试。",
+                  unknown
+                    ? "提交状态待核对。恢复连接后会查询原请求。"
+                    : (error as Error).message ||
+                      "宿主没有接受请求，请检查连接。",
                 ],
               }
             : item,
@@ -237,13 +354,13 @@ export function WhiteboardAI({
             aria-label="白板协作对话"
             aria-live="polite"
           >
-            {!thread.turns.length && (
+            {!turns.length && (
               <div className="ai-welcome">
                 <h2>从一个想法开始</h2>
                 <p>说说你想梳理什么，或框选画布上的内容继续讨论。</p>
               </div>
             )}
-            {thread.turns.map((turn) => (
+            {turns.map((turn) => (
               <article className="ai-turn" key={turn.id}>
                 <p className="ai-user-message">{turn.text}</p>
                 <small className="ai-turn-context">
@@ -258,21 +375,57 @@ export function WhiteboardAI({
                       {message}
                     </p>
                   ))}
-                  {turn.state === "running" && turn.taskId && cancel && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await cancel(turn.taskId!);
-                          setNotice("已请求停止，等待宿主确认。");
-                        } catch (error) {
-                          setNotice((error as Error).message);
-                        }
-                      }}
-                    >
-                      停止 AI
-                    </button>
-                  )}
+                  {turn.snapshot?.reason && <p>{turn.snapshot.reason}</p>}
+                  {turn.snapshot?.deliveries.map((item) => (
+                    <p key={item.operationId}>
+                      {item.state === "written"
+                        ? "作品已写入原白板"
+                        : "作品待核对"}
+                      {item.reason && item.state !== "written"
+                        ? ` · ${item.reason}`
+                        : ""}
+                    </p>
+                  ))}
+                  {reconcile &&
+                    turn.snapshot?.deliveries.some(
+                      (item) => item.state === "pending",
+                    ) && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await reconcile({
+                              taskId: turn.snapshot!.taskId,
+                              session: turn.snapshot!.session,
+                            });
+                            refreshTasks((n) => n + 1);
+                          } catch (error) {
+                            setNotice((error as Error).message);
+                          }
+                        }}
+                      >
+                        核对交付
+                      </button>
+                    )}
+                  {turn.state === "running" &&
+                    turn.taskId &&
+                    cancel &&
+                    (!recoverable || turn.snapshot) && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await cancel(turn.taskId!, turn.snapshot?.session);
+                            refreshTasks((n) => n + 1);
+                            setNotice("已请求停止，等待宿主确认。");
+                          } catch (error) {
+                            setNotice((error as Error).message);
+                          }
+                        }}
+                      >
+                        停止 AI
+                      </button>
+                    )}
                 </div>
               </article>
             ))}
@@ -324,17 +477,26 @@ export function WhiteboardAI({
                   disabled={
                     !thread.draft.trim() ||
                     Boolean(active) ||
-                    Boolean(contextError)
+                    Boolean(contextError) ||
+                    (recoverable && (!snapshot || Boolean(projectionError)))
                   }
                 >
                   发送
                 </button>
               </div>
             </div>
-            {notice && <p role="status">{notice}</p>}
+            {(notice || projectionError) && (
+              <p role="status">{notice || projectionError}</p>
+            )}
             <div className="ai-session-note">
-              <small>对话保留到本次页面关闭；白板内容自动保存。</small>
-              {thread.turns.length > 0 && (
+              <small>
+                {recoverable
+                  ? snapshot
+                    ? `DSH 会话 ${snapshot.session.id}`
+                    : "正在核对 DSH 会话"
+                  : "当前宿主仅在此页面保留对话。"}
+              </small>
+              {!recoverable && thread.turns.length > 0 && (
                 <button
                   type="button"
                   disabled={Boolean(active)}
