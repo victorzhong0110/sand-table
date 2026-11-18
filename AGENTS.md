@@ -5,7 +5,7 @@
 ## 接到任务后
 
 1. 读完本页。
-2. 读你的任务卡 `docs/kernel-v3/tasks/Txx-*.md`。**只做卡片上写的事。**
+2. 读你的任务卡 `docs/kernel-v3/tasks/Txx-*.md`。**只做卡片上写的事。** 新能力同时读 `docs/kernel-v3/06-plugin-composition.md` 和 `07-plugin-reuse.md`，先核对已有提供者，再实现适配或缺失能力。
 3. 读卡片“先读”及 `docs/kernel-v3/05-delivery-contracts.md`。允许沿 import、测试和调用点追踪直接依赖；不得从历史文档补猜新设计。
 4. 不要从下列文档推断设计，它们是历史记录，很多决定已被推翻：`docs/DEVELOPMENT_PLAN.zh-CN.md`、`docs/architecture/`、`docs/reviews/`、`workbench/docs/ARCHITECTURE-HANDOVER.md`、`workbench/docs/ISSUES-CLEARANCE-PLAN.md`、`workbench/docs/ISSUE-RESOLUTIONS.md`。
 5. 任务卡与正式契约存在实质语义冲突时，暂停受影响部分并写明证据；路径移动、同义 API 更名和卡片授权范围内的实现细节按 `05` §1 处理，继续完成不受影响部分。

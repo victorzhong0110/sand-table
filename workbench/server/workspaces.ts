@@ -29,7 +29,7 @@ const ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
  * 先看编号拼出来的路径还在不在根目录下面，再看编号本身合不合规：
  * 越界是最危险的一种，先挡掉。两道关都过才放行。
  */
-function assertWorkspaceId(root: string, id: string): void {
+export function assertWorkspaceId(root: string, id: string): void {
   const base = resolve(root);
   const inside = relative(base, resolve(base, id));
   if (

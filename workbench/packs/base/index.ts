@@ -57,6 +57,30 @@ export const basePack: PackSpec = {
       },
     },
     {
+      type: "base.resource_reference",
+      title: "资源引用",
+      description: "引用插件管理的资源；本地只保存说明，正文由原插件管理。",
+      icon: "link",
+      version: 1,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          note: {
+            type: "string",
+            maxLength: 20000,
+            "x-sand-label": "本地说明",
+            "x-sand-widget": "longtext",
+          },
+        },
+      },
+      display: {
+        material: "paper",
+        defaultSize: { width: 320, height: 280 },
+        summary: ["note"],
+      },
+    },
+    {
       type: "base.note",
       title: "便签",
       description: "一段文字：可以关于某个对象。",

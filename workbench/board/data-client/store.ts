@@ -25,7 +25,7 @@ export type V3ObjectRow = {
   typeVersion: number;
   title: string;
   data: Record<string, unknown>;
-  source: unknown;
+  source: import("../../kernel/types.ts").ObjectSource | null;
   version: number;
   createdAt: number;
   createdBy: string;

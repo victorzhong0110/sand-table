@@ -1,0 +1,10 @@
+{
+  "dsh": "0.2.2-rc.1",
+  "checks": {
+    "publishedSlotAPIInspected": true,
+    "legacyInjectMissing": true,
+    "registerAvailable": true
+  },
+  "whiteboardClient": "needs-adaptation",
+  "detail": "Current client calls slots.inject(); 0.2.2-rc.1 declares the business-face factory in slots.register({inject: ...}, Component). This is API inspection, not a browser integration pass."
+}

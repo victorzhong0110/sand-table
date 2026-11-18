@@ -1,5 +1,7 @@
 # 内核 v3：类型契约与扩展
 
+本文件的 PackSpec 是白板数据类型协议，不是 DSH 可执行插件清单。数据包、自定义作品视图、DSH 原生代码插件分别管理；“仅内置包可注册工具”等规则限定 PackSpec，不能据此禁止 DSH 已授权插件注册宿主服务或工具。组合接口见 [06](06-plugin-composition.md)；数据导入仍不执行代码。
+
 依据：`00-decisions.md` 的 K1、K5、K9。对应 issue #33。
 
 一句话：**每个类型用一份声明说清楚它的数据长什么样、怎么显示、怎么编辑、能和谁建立什么关系。** 内核、界面、AI 都只看这份声明，不在别处猜字段形状。
@@ -316,3 +318,11 @@ PackSpec.derivedIdPrefix 只允许内置包声明，非空、以冒号结尾、�
 ## 后续阶段契约补充
 
 新增评论/引用、运行、时间/分支/观察者及组件接口的正式约束见 [05-delivery-contracts.md](05-delivery-contracts.md)。各责任卡实现时同步本文件的具体类型/表/工具签名；不能仅根据旧的基础清单拒绝已经授权的扩展。
+
+## 资源提供者（T78）
+
+资源服务类型见 workbench/resources/types.ts，注册表见 registry.ts。默认白板适配复用 kernel 的读取、版本、命令和历史；不维护正文副本。只读 preview 不声明导出能力，原生单资源的完整导出仍通过现有 T25 白板导出完成。
+
+默认白板提供者在 MCP 服务中注册；DSH 的资源适配将白板读写交给该服务。外部 DSH native 插件注入 sandTableResources，再用 ctx.effect(() => ctx.sandTableResources.register(provider)) 注册自己的 providerId + namespace；卸载只注销能力。也可使用 registerResourceEffect 适配器。注册表不加载插件、不保存预览或操作历史。声明式数据包只有类型/模板元 Schema，不能注册宿主资源提供者。
+
+默认白板提供者支持 read/open/edit；edit 的 operation 只含 title/set/unset，必须给 operationId 与 expectedRevision。同一实例内同参操作去重、异参重用拒绝；idempotency=process，不自动重试结果未知的请求。跨进程持久确认由 T79 实现，intentId 仍只负责历史分组。注册表 watch 在注销/重装时重建订阅，释放时中止请求并丢弃旧响应。界面当前通过有界预览轮询观察资源变化，组件卸载和工作空间切换释放定时器。

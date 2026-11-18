@@ -16,11 +16,7 @@ import { resultData } from "./data-client/results.ts";
 import { GuidePanel } from "./GuidePanel.tsx";
 import { HistoryPanel } from "./HistoryPanel.tsx";
 import type { HistorySnapshot } from "./data-client/history.ts";
-import {
-  canShowTaskEntry,
-  resolveBridge,
-  mapHostResult,
-} from "../core/host-bridge.ts";
+import { canShowTaskEntry, resolveBridge } from "../core/host-bridge.ts";
 import { installHostBridgeClient } from "./host-bridge-client.ts";
 import { translateLegacyTool } from "./data-client/legacy-calls.ts";
 import { V3Store } from "./data-client/store.ts";
@@ -95,7 +91,7 @@ function Workbench() {
   const [viewId] = useState(storedViewId);
   const [tab, setTab] = useState("inspect");
   const [, hostChanged] = useState(0);
-  const [hostTask, setHostTask] = useState<HostTaskEvent>();
+  const [hostEvents, setHostEvents] = useState<HostTaskEvent[]>([]);
   const operations = useRef<Promise<unknown>>(Promise.resolve());
   /* 数据缓存：整块装载一次，之后每秒拉一次增量。 */
   const storeRef = useRef<V3Store | undefined>(undefined);
@@ -192,41 +188,11 @@ function Workbench() {
     typeof window === "undefined" ? undefined : window,
     app ? "mcp" : "local",
   );
-  const resultQueue = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(
     () =>
-      bridge.subscribe((event) => {
-        if (event.boardId && event.boardId !== boardRef.current?.id) return;
-        setHostTask(event);
-        for (const result of event.results ?? []) {
-          resultQueue.current = resultQueue.current
-            .then(async () => {
-              if (event.boardId && event.boardId !== boardRef.current?.id)
-                return;
-              const mapped = mapHostResult(result);
-              const current = boardRef.current;
-              if (!current) return;
-              const r = await call("sand_edit_space", {
-                revision: current.revision,
-                viewId,
-                author: "DSH",
-                operation: {
-                  kind: "create",
-                  type: mapped.type,
-                  title: mapped.title,
-                  data: {
-                    ...mapped.data,
-                    hostSource: mapped.source ?? bridge.host,
-                    hostTaskId: event.taskId,
-                  },
-                },
-              });
-              /* 写入回的是一次写入的结果：板面由增量同步拉回来。 */
-              void r;
-            })
-            .catch((e) => setError(`AI 结果未能写入白板：${String(e)}`));
-        }
-      }),
+      bridge.subscribe((event) =>
+        setHostEvents((current) => [...current, event].slice(-200)),
+      ),
     [bridge.host, bridge.capabilities().eventStream, app],
   );
   const hostReady = canShowTaskEntry(bridge);
@@ -415,6 +381,7 @@ function Workbench() {
       case "app_asset":
       case "app_board":
       case "app_pack":
+      case "app_resource":
         return callTool(name, args);
       case "app_edit": {
         const result = await callTool("app_edit", args);
@@ -428,7 +395,10 @@ function Workbench() {
         const store = storeRef.current;
         if (!store) throw Error("白板还没装载，请稍候再试。");
         const commands = toCommands((args.operation ?? {}) as any, {
-          boardId: store.cache.boardId,
+          boardId:
+            typeof args.boardId === "string"
+              ? args.boardId
+              : store.cache.boardId,
           objects: store.cache.objects,
           presentations: store.cache.presentations,
         });
@@ -1250,56 +1220,23 @@ function Workbench() {
             await refreshWorkspaces();
           },
         }}
-        hostTask={hostTask}
-        onCancelHostTask={
-          bridge.cancelTask && hostTask
-            ? () => bridge.cancelTask!(hostTask.taskId)
-            : undefined
-        }
+        hostEvents={hostEvents}
+        onCancelHostTask={bridge.cancelTask}
+        followHostTasks={bridge.followTasks}
+        reconcileHostTask={bridge.reconcileTask}
         sendToHost={
           canShowTaskEntry(bridge)
-            ? async (text) => {
+            ? async (request) => {
                 const current = boardRef.current;
-                const selected = new Set(current?.selection ?? []);
-                /* 目标用「引用 + 版本」，不带整份快照：任务开始后用户改选择，
-                   也不会把已提交任务的目标悄悄换掉。 */
-                const targets = (current?.instances ?? [])
-                  .filter((i) => selected.has(i.id))
-                  .map((i) => {
-                    const objectId = i.binding?.objectId ?? i.objectId;
-                    if (!objectId) return undefined;
-                    const object = current?.contentObjects?.find(
-                      (o) => o.id === objectId,
-                    );
-                    return { objectId, version: object?.version ?? 0 };
-                  })
-                  .filter((t): t is { objectId: string; version: number } =>
-                    Boolean(t),
-                  );
-                const submitted = await bridge.submitTask({
-                  boardId: current?.id ?? "",
-                  instruction: text,
-                  targets,
-                  contextVersion: current?.contentRevision ?? 0,
-                });
-                setHostTask({
-                  taskId: submitted.taskId,
-                  boardId: current?.id,
-                  state: "queued",
-                  message: "已提交",
-                  at: Date.now(),
-                });
+                if (
+                  !current ||
+                  request.boardId !== current.views[viewId]?.spaceId
+                )
+                  throw Error("白板已切换，请在当前白板重新发送。");
+                return bridge.submitTask(request);
               }
             : undefined
         }
-        sendMessage={async (text) => {
-          if (!app) throw Error("Not connected");
-          const result = await app.sendMessage({
-            role: "user",
-            content: [{ type: "text", text }],
-          });
-          if (result.isError) throw Error("Host rejected message.");
-        }}
       />
     );
   return (

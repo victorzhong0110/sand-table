@@ -79,11 +79,18 @@ try {
   assert.equal(await frame.getByText("代码入口", { exact: true }).count(), 0);
   mkdirSync("artifacts", { recursive: true });
   await page.screenshot({ path: "artifacts/blank-canvas.png", fullPage: true });
+  await frame.getByRole("button", { name: "和 AI 协作", exact: true }).click();
+  const ai = frame.getByRole("complementary", {
+    name: "和 AI 协作",
+    exact: true,
+  });
+  await ai.getByRole("heading", { name: "让 AI 和你一起编辑" }).waitFor();
+  assert.equal(await ai.getByRole("textbox").count(), 0);
+  await ai.getByRole("button", { name: "查看连接方式" }).click();
   const help = frame.locator(".app-rail").getByRole("button", {
     name: "帮助",
     exact: true,
   });
-  await help.click();
   const jsonField = frame.locator("#json");
   await jsonField.waitFor();
   let jsonText = "";
@@ -3173,6 +3180,147 @@ try {
   await frame
     .getByRole("button", { name: "撤销", exact: true })
     .waitFor({ state: "hidden" });
+  const resourceBoard = (await v3View()).spaceId;
+  const resourceWorkspace = (
+    await call("app_board", { boardId: resourceBoard })
+  ).workspaceId;
+  const resourceCamera = await cameraOf();
+  const resourceX = (80 - resourceCamera.x) / resourceCamera.zoom;
+  const resourceY = (80 - resourceCamera.y) / resourceCamera.zoom;
+  const origin = await call("app_edit", {
+    commands: [
+      {
+        op: "object.create",
+        ref: "origin",
+        type: "base.note",
+        title: "资源原文",
+        data: { body: "原插件正文预览" },
+      },
+      {
+        op: "presentation.create",
+        ref: "originPlace",
+        boardId: resourceBoard,
+        objectId: "@origin",
+        x: resourceX,
+        y: resourceY + 360,
+        z: 9999,
+      },
+    ],
+  });
+  const nativeBinding = await call("app_resource", {
+    objectId: origin.created.origin,
+    expectedVersion: 1,
+    workspaceId: resourceWorkspace,
+    action: "binding",
+  });
+  await call("app_edit", {
+    commands: [
+      {
+        op: "object.create",
+        ref: "native",
+        type: "base.resource_reference",
+        title: "资源跟随当前版",
+        data: { note: "自己的说明" },
+        source: { origin: "human", resource: nativeBinding.ref },
+      },
+      {
+        op: "presentation.create",
+        boardId: resourceBoard,
+        objectId: "@native",
+        x: resourceX,
+        y: resourceY,
+        width: 320,
+        height: 320,
+        z: 9999,
+      },
+      {
+        op: "object.create",
+        ref: "missing",
+        type: "base.resource_reference",
+        title: "停用的图形插件",
+        data: { note: "插件停用后仍保留" },
+        source: {
+          origin: "human",
+          resource: {
+            providerId: "drawing",
+            namespace: "isolated-test",
+            resourceId: "scene",
+          },
+        },
+      },
+      {
+        op: "presentation.create",
+        boardId: resourceBoard,
+        objectId: "@missing",
+        x: resourceX + 360,
+        y: resourceY,
+        width: 320,
+        height: 320,
+        z: 9999,
+      },
+      {
+        op: "object.create",
+        ref: "pinned",
+        type: "base.resource_reference",
+        title: "固定的旧版本",
+        source: {
+          origin: "human",
+          resource: { ...nativeBinding.ref, revision: "999" },
+        },
+      },
+      {
+        op: "presentation.create",
+        boardId: resourceBoard,
+        objectId: "@pinned",
+        x: resourceX + 720,
+        y: resourceY,
+        width: 320,
+        height: 320,
+        z: 9999,
+      },
+    ],
+  });
+  const nativeCard = frame
+    .locator(".component-card", { hasText: "资源跟随当前版" })
+    .first();
+  await nativeCard.getByText("原插件正文预览", { exact: true }).waitFor();
+  await nativeCard
+    .getByRole("button", { name: "打开原资源", exact: true })
+    .waitFor();
+  const missingCard = frame
+    .locator(".component-card", { hasText: "停用的图形插件" })
+    .first();
+  await missingCard.getByText("插件停用后仍保留", { exact: true }).waitFor();
+  await missingCard
+    .getByText("资源插件尚未加载。请启用原插件；引用和本地说明仍保留。", {
+      exact: true,
+    })
+    .waitFor();
+  const pinnedCard = frame
+    .locator(".component-card", { hasText: "固定的旧版本" })
+    .first();
+  await pinnedCard
+    .getByText(
+      "无法读取指定历史版本；请保留固定版本，或明确改为跟随当前版本。",
+      { exact: true },
+    )
+    .waitFor();
+  await page.screenshot({
+    path: "artifacts/resource-references.png",
+    fullPage: true,
+  });
+  await nativeCard
+    .getByRole("button", { name: "打开原资源", exact: true })
+    .click();
+  let openedOriginal = false;
+  for (let i = 0; i < 30; i++) {
+    if ((await v3View()).selection.includes(origin.created.originPlace)) {
+      openedOriginal = true;
+      break;
+    }
+    await page.waitForTimeout(100);
+  }
+  assert.equal(openedOriginal, true, "打开资源会定位原对象的展示");
   /* 注册表驱动的工具箱与组件包管理。 */
   await railButton("设置").click();
   const packManager = frame.getByRole("region", { name: "组件包管理" });
