@@ -1,0 +1,13 @@
+{
+  "dsh": "0.2.2-rc.1",
+  "node": "v25.8.1",
+  "platform": "darwin",
+  "runner": "Playwright 1.62.1",
+  "observedOn": "2026-11-16",
+  "coreUIRendered": true,
+  "previewDialogVisible": true,
+  "pageErrors": [],
+  "contextUI": "not-tested",
+  "whiteboardUI": "not-tested",
+  "limitation": "Device transport stopped responding before the subsequent plugin-profile inspection; do not count it as a combination pass."
+}

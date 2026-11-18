@@ -1,0 +1,37 @@
+{
+  "dsh": "0.2.2-rc.1",
+  "node": "v24.22.1",
+  "platform": "linux",
+  "results": [
+    {
+      "phase": "write",
+      "ok": true,
+      "checks": {
+        "singleWriter": true,
+        "liveProjection": true,
+        "projection": true,
+        "durableModelContext": true,
+        "projectionReinstall": true
+      },
+      "eventCount": 3
+    },
+    {
+      "phase": "read",
+      "ok": true,
+      "checks": {
+        "coldRead": true,
+        "replayHasNoWrites": true,
+        "readOnly": true,
+        "projection": true,
+        "durableModelContext": true,
+        "projectionReinstall": true
+      },
+      "persistedEventTypes": [
+        "user/message",
+        "plugin:sand-table/provider-probe",
+        "session/title"
+      ],
+      "eventCount": 4
+    }
+  ]
+}

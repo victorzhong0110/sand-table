@@ -13,6 +13,7 @@ DSH 插件的结构按官方源码核对过，但“装得上、入口出得来�
 
 ## 准备
 
+- 先读 [T77 固定版本记录](../../adr/0008-dsh-provider-matrix.md)：CLI 0.2.2-rc.1 需 Node >=24.9.0；当前白板 slots 接口需适配，绘图 0.6.1 被拒绝，不能把这些项先标通过。
 - 按 `workbench/dsh-plugin/README.md` 的安装说明操作。
 - 记录：DSH 版本、操作系统、Sand Table 的提交号。
 
