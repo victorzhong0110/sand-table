@@ -931,7 +931,7 @@ function importPack(
         "INVALID_DATA",
         problem ? problem.message : "组件包清单不合格。",
         index,
-        problem ? { path: problem.path, message: problem.message } : undefined,
+        problem ? { ...problem, packProblems: error.problems } : undefined,
       );
     }
     throw error;

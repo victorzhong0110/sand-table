@@ -83,10 +83,13 @@ export function toolResult(value: unknown): CallToolResult {
 /** 工具失败：文本里是 { code, message, hint }，宿主与模型读的是同一份。 */
 export function toolError(error: unknown): CallToolResult {
   const described = describeError(error);
+  const packProblems =
+    error instanceof CommandError ? error.details?.packProblems : undefined;
   return {
     isError: true,
     content: [{ type: "text", text: modelText(described) }],
     structuredContent: { data: described },
+    ...(Array.isArray(packProblems) ? { _meta: { packProblems } } : {}),
   };
 }
 

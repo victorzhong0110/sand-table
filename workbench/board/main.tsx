@@ -48,7 +48,13 @@ const V3_CORE_TOOLS = new Set([
   "sand_activity",
 ]);
 function unpack(r: any) {
-  if (r.isError) throw Error(r.content?.[0]?.text || "Request failed");
+  if (r.isError) {
+    const message = r.content?.[0]?.text || "Request failed";
+    const packProblems = r._meta?.packProblems;
+    throw Array.isArray(packProblems)
+      ? Object.assign(Error(message), { packProblems })
+      : Error(message);
+  }
   return resultData(r) ?? JSON.parse(r.content[0].text);
 }
 function readableError(error: unknown): string {
@@ -373,6 +379,8 @@ function Workbench() {
         };
       }
       case "app_asset":
+      case "app_board":
+      case "app_pack":
       case "app_resource":
         return callTool(name, args);
       case "app_edit": {
@@ -747,6 +755,14 @@ function Workbench() {
     }
     const store = storeRef.current;
     if (!store) throw Error("白板还没装载，请稍候再试。");
+    if (kind === "create" && !store.workspaceId)
+      throw Error("工作空间尚未准备好，请重新打开白板后再试。");
+    if (
+      kind === "create" &&
+      ((operation.workspaceId && operation.workspaceId !== store.workspaceId) ||
+        (operation.boardId && operation.boardId !== store.cache.boardId))
+    )
+      throw Error("白板已切换，请在当前白板重新添加组件。");
     const commands = toCommands(operation, {
       boardId: store.cache.boardId,
       objects: store.cache.objects,
@@ -758,6 +774,9 @@ function Workbench() {
     const send = (ops: any[]) =>
       callTool("app_edit", {
         ...(intentId ? { intentId: String(intentId) } : {}),
+        ...(kind === "create" && store.workspaceId
+          ? { workspaceId: store.workspaceId }
+          : {}),
         commands: ops,
       });
     let written: any;
@@ -1148,6 +1167,22 @@ function Workbench() {
         call={call}
         operate={operate}
         openLink={(url) => void app?.openLink({ url })}
+        downloadFile={async (filename, text) => {
+          if (!app) throw Error("尚未连接宿主。");
+          const result = await app.downloadFile({
+            contents: [
+              {
+                type: "resource",
+                resource: {
+                  uri: `file:///${encodeURIComponent(filename)}`,
+                  mimeType: "application/json",
+                  text,
+                },
+              },
+            ],
+          });
+          if (result.isError) throw Error("宿主未接受下载，请重试。");
+        }}
         history={history}
         onUndo={() => void flip("undo")}
         onRedo={() => void flip("redo")}
