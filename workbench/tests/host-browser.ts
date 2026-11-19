@@ -9,10 +9,20 @@ import { build } from "esbuild";
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
 import { startLocal } from "../local/service.ts";
+import {
+  applyCommands,
+  boardContents,
+  createRegistry,
+  openWorkspace,
+  type Command,
+} from "../kernel/index.ts";
+import { builtinPacks } from "../packs/index.ts";
+import type { ResourceRegistry } from "../resources/registry.ts";
 const root = mkdtempSync(join(tmpdir(), "sand-host-browser-"));
 const disposers: (() => any)[] = [];
 let command: any, local: any, browser: any, page: any;
 const fixture = dshWorkbenchFixture();
+let resourceRegistry: ResourceRegistry | undefined;
 const emit = fixture.emit;
 let turn = 0;
 const prompts: any[] = [];
@@ -113,6 +123,9 @@ try {
   apply(
     {
       ...fixture.ctx(controller),
+      provide: (name: string, value: ResourceRegistry) => {
+        if (name === "sandTableResources") resourceRegistry = value;
+      },
       effect: (fn: any) => {
         const dispose = fn();
         if (dispose) disposers.push(dispose);
@@ -346,6 +359,124 @@ try {
   await nameField.blur();
   await character.getByText("林澈", { exact: true }).waitFor();
   assert.equal(await board.getByText(/此版本不支持组件类型/).count(), 0);
+  assert.ok(resourceRegistry);
+  const removeProvider = resourceRegistry.register({
+    describe: () => ({
+      providerId: "diagram-probe",
+      namespace: "context",
+      title: "图形测试",
+      capabilities: { read: true },
+      idempotency: "none",
+    }),
+    read: (ref) => ({
+      status: "available",
+      ref,
+      revision: "diagram-r7",
+      title: "选区原图",
+      summary: "主持久化的图形摘要",
+      capabilities: { read: true },
+    }),
+  });
+  const registry = createRegistry();
+  for (const pack of builtinPacks) registry.registerPack(pack, "builtin");
+  const boardId = listed.boards[0].boardId as string;
+  const { db } = openWorkspace(join(root, "workspaces"), "default", registry);
+  let objectCount: number;
+  let omittedCount: number;
+  try {
+    const actor = { kind: "human" as const, id: "context-browser" };
+    const commands: Command[] = [];
+    for (let index = 0; index < 15; index++) {
+      commands.push(
+        {
+          op: "object.create",
+          ref: `context${index}`,
+          title: `选区资源 ${index}`,
+          type: "base.resource_reference",
+          source: {
+            origin: "human",
+            resource: {
+              providerId: index === 0 ? "diagram-probe" : "missing-probe",
+              namespace: "context",
+              resourceId: `scene-${index}`,
+            },
+          },
+        },
+        {
+          op: "presentation.create",
+          ref: `place${index}`,
+          boardId,
+          objectId: `@context${index}`,
+          x: 2100 + index * 260,
+          y: 100,
+        },
+        { op: "presentation.update", id: `@place${index}`, z: 400 + index },
+      );
+    }
+    const { created } = applyCommands(db, registry, { actor, commands });
+    const ids = Array.from(
+      { length: 15 },
+      (_, index) => created[`context${index}`],
+    );
+    const relations: Command[] = ids.flatMap((sourceId, index) =>
+      ids.flatMap((targetId, other) =>
+        index === other
+          ? []
+          : [
+              {
+                op: "relation.create",
+                kind: "base.related",
+                sourceId,
+                targetId,
+              },
+            ],
+      ),
+    );
+    applyCommands(db, registry, { actor, commands: relations.slice(0, 200) });
+    applyCommands(db, registry, { actor, commands: relations.slice(200, 201) });
+    const content = boardContents(db, registry, boardId);
+    objectCount = content.objects.length;
+    omittedCount = content.relations.length - 200;
+    assert.ok(omittedCount >= 1);
+  } finally {
+    db.close();
+  }
+  if (!(await ai.isVisible()))
+    await board
+      .getByRole("button", { name: "和 AI 协作", exact: true })
+      .click();
+  await ai.getByLabel("AI 讨论范围").selectOption("board");
+  await ai
+    .getByLabel("AI 目标预览")
+    .getByText(`${objectCount} 个对象`, { exact: true })
+    .waitFor();
+  await input.fill("check frozen resource context");
+  await board.getByRole("button", { name: "发送", exact: true }).click();
+  const submitted = conversation.locator(".ai-turn").filter({
+    hasText: "check frozen resource context",
+  });
+  await submitted
+    .getByLabel("AI 任务状态")
+    .getByText("已完成", { exact: true })
+    .waitFor();
+  await submitted.getByText("提交时的上下文", { exact: true }).click();
+  await submitted.getByText("资源版本 diagram-r7", { exact: true }).waitFor();
+  await submitted
+    .getByText(/^资源插件尚未加载/)
+    .first()
+    .waitFor();
+  await submitted
+    .getByText("达到资源摘要上限，未读取。", { exact: true })
+    .first()
+    .waitFor();
+  await submitted
+    .getByText(`达到关系上限，省略了 ${omittedCount} 条关系。`, { exact: true })
+    .waitFor();
+  removeProvider();
+  await page.goto(origin);
+  await board.getByRole("button", { name: "和 AI 协作", exact: true }).click();
+  await submitted.getByText("提交时的上下文", { exact: true }).click();
+  await submitted.getByText("资源版本 diagram-r7", { exact: true }).waitFor();
   assert.deepEqual(errors, []);
   console.log(
     "HOST BROWSER PASSED: actual local service and plugin, cross-origin nested canvas, real request ID, replies remain in conversation, structured table persisted, follow-up and cancellation (scripted DSH execution fixture).",
