@@ -55,6 +55,8 @@ test("整板范围限于子白板，重复展示只发一次对象", () => {
   );
   b.views.human.selection.push("display-copy");
   assert.equal(aiTargets(b, "human", "selection").length, 1);
+  const { selection } = aiRequest(b, "human", "selection", "比较");
+  assert.deepEqual(selection?.presentationIds, ["display-a", "display-copy"]);
 });
 test("空选区、失效展示、缺内容和无效版本均拒绝，不回退为整板", () => {
   for (const selection of [[], ["missing"], ["other"]]) {

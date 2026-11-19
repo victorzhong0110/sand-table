@@ -403,10 +403,18 @@ export type HostCapabilities = {
 export type HostSessionIdentity = { id: string; createdAt: number };
 export type HostTaskScope = { workspaceId: string; boardId: string };
 export type HostTaskLocator = { taskId: string; session: HostSessionIdentity };
+export type HostSelection = {
+  scope: "board" | "selection";
+  viewId: string;
+  presentationIds: string[];
+};
+export type HostSpatialContext =
+  import("../../server/host/contracts.ts").SpatialContext;
 export type HostTaskSnapshot = HostTaskScope &
   HostTaskLocator & {
     instruction: string;
     targets: HostTaskRequest["targets"];
+    spatialContext?: HostSpatialContext;
     state: HostTaskEvent["state"];
     messages: string[];
     reason?: string;
@@ -436,6 +444,7 @@ export type HostTaskRequest = {
   instruction: string;
   /** 目标对象引用与开始时的版本。 */
   targets: { objectId: string; version: number }[];
+  selection?: HostSelection;
   /** 开始时的上下文版本。 */
   contextVersion: number;
   /** 关联的会话 ID（宿主侧）。 */

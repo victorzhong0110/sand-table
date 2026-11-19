@@ -25,6 +25,49 @@ const suggestions = [
   ["总结要点", "请总结这些内容的关键结论和下一步，在白板上新增一张总结便签。"],
 ] as const;
 
+function TurnContext({ turn }: { turn: AITurn }) {
+  const context = turn.snapshot?.spatialContext;
+  const resources = new Map(
+    context?.resources.map((resource) => [resource.objectId, resource]),
+  );
+  return (
+    <details>
+      <summary>提交时的上下文</summary>
+      {context && <p>{context.presentations.length} 个展示</p>}
+      {context && context.omittedRelations > 0 && (
+        <p>达到关系上限，省略了 {context.omittedRelations} 条关系。</p>
+      )}
+      <ul>
+        {turn.targets.map(({ objectId, title, version }) => {
+          const resource = resources.get(objectId);
+          return (
+            <li key={objectId}>
+              {title || objectId} · 版本 {version}
+              {resource && (
+                <ul>
+                  <li>
+                    {resource.status === "available" ? (
+                      <>资源版本 {resource.ref.revision}</>
+                    ) : (
+                      <>
+                        {resource.ref.revision &&
+                          `引用版本 ${resource.ref.revision} · `}
+                        {resource.status === "not_read"
+                          ? "达到资源摘要上限，未读取。"
+                          : resource.reason || "资源摘要不可用。"}
+                      </>
+                    )}
+                  </li>
+                </ul>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </details>
+  );
+}
+
 export function WhiteboardAI({
   board,
   viewId,
@@ -368,6 +411,7 @@ export function WhiteboardAI({
                     ? `提交时包含 ${turn.targets.length} 个对象`
                     : "从空白画布开始"}
                 </small>
+                {turn.targets.length > 0 && <TurnContext turn={turn} />}
                 <div aria-label="AI 任务状态">
                   <strong>{AI_STATE_LABELS[turn.state]}</strong>
                   {turn.messages.map((message, index) => (

@@ -56,6 +56,144 @@ function setup(cleanup: { after(fn: () => void): void }) {
   };
 }
 
+test("空间选区固定重复展示、组内位置、关系和资源版本，重连后仍可读", async (t) => {
+  const s = setup(t);
+  const fixture = dshWorkbenchFixture();
+  const { createTaskChannel } = await import(plugin);
+  const ref = {
+    providerId: "example",
+    namespace: "workspace",
+    resourceId: "scene",
+    anchor: "layer=main",
+  };
+  const { created, revision } = applyCommands(s.db, s.registry, {
+    actor,
+    commands: [
+      { op: "object.create", ref: "group", type: "base.frame", title: "分组" },
+      { op: "object.create", ref: "a", type: "base.note", title: "方案" },
+      {
+        op: "object.create",
+        ref: "b",
+        type: "base.resource_reference",
+        title: "图",
+        source: { origin: "human", resource: ref },
+      },
+      {
+        op: "presentation.create",
+        ref: "frame",
+        objectId: "@group",
+        boardId: s.boardId,
+        x: 50,
+      },
+      {
+        op: "presentation.create",
+        ref: "a1",
+        objectId: "@a",
+        boardId: s.boardId,
+        parentId: "@frame",
+        x: 25,
+      },
+      {
+        op: "presentation.create",
+        ref: "a2",
+        objectId: "@a",
+        boardId: s.boardId,
+        x: 450,
+      },
+      {
+        op: "presentation.create",
+        ref: "b1",
+        objectId: "@b",
+        boardId: s.boardId,
+        x: 88,
+      },
+      {
+        op: "relation.create",
+        ref: "edge",
+        kind: "base.related",
+        sourceId: "@a",
+        targetId: "@b",
+      },
+    ],
+  });
+  const request = {
+    ...s.request,
+    contextVersion: revision,
+    selection: {
+      scope: "selection" as const,
+      viewId: "human",
+      presentationIds: [created.a1, created.a2, created.b1],
+    },
+    targets: [created.a, created.b].map((objectId) => ({
+      objectId,
+      version: 1,
+    })),
+  };
+  let read = 0,
+    prompt: string | undefined;
+  const ctx = fixture.ctx({
+    async prompt(input: unknown) {
+      prompt = (input as { content: { text: string }[] }).content[0].text;
+      return { accepted: true };
+    },
+  });
+  const options = {
+    writer: s.writer,
+    records: fixture.records,
+    resolveScope: async () => s.scope,
+    async readResource(args: unknown) {
+      assert.deepEqual(args, {
+        workspaceId: "main",
+        objectId: created.b,
+        expectedVersion: 1,
+        action: "read",
+      });
+      read++;
+      return {
+        value: { status: "available", revision: "r1", summary: "来源摘要" },
+      };
+    },
+  };
+  let channel = createTaskChannel(ctx, options);
+  await assert.rejects(
+    channel.submit({ ...request, targets: request.targets.slice(1) }, agent),
+    /展示与目标对象不一致/,
+  );
+  const { taskId } = await channel.submit(request, agent);
+  const stored = (await channel.get(taskId, agent)).spatialContext;
+  assert.ok(stored);
+  assert.deepEqual(
+    stored.presentations.map(({ x }: { x: number }) => x),
+    [25, 450, 88],
+  );
+  assert.equal(stored.ancestors[0].id, created.frame);
+  assert.equal(stored.relations[0].id, created.edge);
+  assert.deepEqual(stored.resources[0].ref, { ...ref, revision: "r1" });
+  const layout = prompt
+    ?.split("\n")
+    .find((line) => line.startsWith(`{"boardId":`));
+  assert.ok(layout);
+  assert.deepEqual(JSON.parse(layout), stored);
+  assert.equal(read, 1);
+  applyCommands(s.db, s.registry, {
+    actor,
+    commands: [{ op: "presentation.update", id: created.a1, x: 875, y: 0 }],
+  });
+  await assert.rejects(
+    channel.submit({ ...request, requestId: randomUUID() }, agent),
+    /布局刚刚更新/,
+  );
+  await channel.dispose();
+  fixture.detach(agent.id);
+  channel = createTaskChannel(ctx, options);
+  t.after(() => channel.dispose());
+  assert.deepEqual(
+    (await channel.follow(s.scope, agent)).tasks[0].spatialContext,
+    stored,
+  );
+  assert.equal(read, 1);
+});
+
 test("交付回执与作品同事务，跨连接去重，撤销及导出不复制宿主回执", (t) => {
   const s = setup(t);
   const key = "a".repeat(64);

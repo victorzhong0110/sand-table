@@ -905,6 +905,7 @@ export function apply(ctx, config, fixtureRecords) {
   const tasks = createTaskChannel(ctx, {
     records: fixtureRecords,
     writer,
+    readResource: resources.request,
     async resolveScope(request) {
       const contents = await loadBoard(mcp, request.boardId);
       if (contents.workspaceId !== request.workspaceId)
