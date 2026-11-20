@@ -19,6 +19,7 @@ import { ARTIFACT_TOOL } from "./projection.js";
 import { createArtifactWriter } from "../server/host/artifacts.ts";
 import { artifact } from "../server/host/contracts.ts";
 import { applyResources } from "./resources.js";
+import { registerDrawing } from "./drawing/host.js";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -888,6 +889,7 @@ export function apply(ctx, config, fixtureRecords) {
   const mcp = createMcpClient(settings);
   const operations = createOperations(mcp);
   const resources = applyResources(ctx, mcp, dataOf);
+  registerDrawing(ctx, resources.registry, defineTool);
   const readObject = operations.readObject;
   operations.readObject = async (...args) => {
     const object = await readObject(...args);

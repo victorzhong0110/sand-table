@@ -69,3 +69,22 @@ ctx.effect(() => ctx.sandTableResources.register(provider));
 恢复接口已按 `@deepseek-ai/dsh-session@0.2.2-rc.1` 验证。CLI 安装从当前 DSH 解析会话模块，其他宿主须提供清单中声明的 peer。请将 `workspaceDir` 指向本地工作台的实际存储目录。白板使用 DSH 选中的会话接收请求并查询历史。停机后回到原 DSH 会话可读已保存记录。若作品处于「待核对」，选择「核对交付」查询原事务回执。
 
 真实 DSH 的隔离重启验证可从 `workbench/spikes/dsh-providers` 运行 `node verify.mjs --workbench-recovery`。脚本驱动事件及产物，使用真实 DSH 日志、投影和白板数据库。
+
+### 绘图提供者
+
+绘图的固定组合为 DSH `0.2.2-rc.1` 和 `dsh-diagram@0.6.1-sand-table.1`。兼容包沿用上游 MIT 许可及 Excalidraw 第三方许可，生成时校验上游 npm 制品 SHA-256。补丁保留上游的会话校验、储存和画布，补充精确图稿深链接及一次写入的可编辑导入。源码见 [dsh-diagram v0.6.1](https://github.com/hanzhangzzz/dsh-diagram/tree/v0.6.1)。
+
+从源码部署时，在 `workbench/` 运行下面的命令，并在同 profile 启用已连接本地工作台的 Sand Table 插件。
+
+```bash
+node dsh-plugin/drawing/prepare.mjs artifacts/drawing
+dsh plugin --profile web add "$PWD/artifacts/drawing/dsh-diagram-0.6.1-sand-table.1.tgz"
+```
+
+用 `diagram_create` 创建图稿，在 DSH 绘图编辑器手动修改后，用 `diagram_read` 读取保存内容和实际版本。`sand_table_drawing_replace_label` 可以按读到的版本修改一个唯一匹配的文本标签。发生冲突时工具返回当前版本与候选文字。
+
+将 `sand_table_drawing_reference` 返回的 `ref` 作为 `sand_table_publish_artifact` 的 `resource` 发布，可在发起任务的白板打开同一图稿。白板引用固定到交付时的版本。绘图插件只保留当前记录，若原图已编辑，请确认后交付新版本。复制引用卡的展示共享同一资源。执行 `sand_table_drawing_export` 和 `sand_table_drawing_import` 可以创建另一份可编辑图稿。导出的图稿只包含生成来源和当前场景。白板原有的工作区导出仍保留资源引用，组合导出见 T82。
+
+停用绘图插件后，白板仍显示引用，重装回同一个 DSH profile 后可重新打开。永久删除图稿需要在 DSH 确认，并检查提交时版本。白板引用仍保留为失效状态。
+
+隔离宿主检查使用 `npm run build`、`npm --prefix spikes/dsh-providers ci` 和 `CHROMIUM_PATH=/path/to/chromium node --experimental-strip-types dsh-plugin/drawing/verify.mjs`。验证自动化使用固定版本真实插件和 Chromium，Agent 调用由脚本驱动。
