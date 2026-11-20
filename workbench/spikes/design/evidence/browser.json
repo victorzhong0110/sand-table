@@ -1,0 +1,47 @@
+{
+  "browser": "153.0.8010.0",
+  "node": "v24.22.3",
+  "sandbox": {
+    "origin": "null",
+    "hostBlocked": true,
+    "networkDirectives": [
+      "connect-src",
+      "img-src"
+    ],
+    "subresourceRequests": 0,
+    "nestedNavigationRequests": 0,
+    "standaloneNavigationRequests": 1,
+    "localControls": true,
+    "receivedParameters": true,
+    "nestedExecutes": true,
+    "stopScheduledMs": 100,
+    "boundedSpinMs": 1100,
+    "observedStopMs": 1103,
+    "stoppedInfiniteLoopWithin500ms": false
+  },
+  "export": {
+    "domPngPrototypePixel": [
+      255,
+      255,
+      255,
+      255
+    ],
+    "compositorPrototypePixel": [
+      230,
+      0,
+      55,
+      255
+    ],
+    "pdfBytes": 23098,
+    "pdfContainsBoardText": true,
+    "pdfContainsPrototypeText": true,
+    "staticEscapesScripts": true
+  },
+  "dependency": {
+    "name": "html-to-image",
+    "version": "1.11.13",
+    "license": "MIT",
+    "probeBytes": 13308,
+    "probeGzipBytes": 5369
+  }
+}
