@@ -292,10 +292,14 @@ export function createDrawingProvider(options: {
         input.after.length > 1000
       )
         throw Error("请输入有效的原标签和新标签，最长为 1000 字符。");
-      const { diagram } = await reference(session, input.diagramId, signal);
-      const conflict = (current: Drawing) => ({
+      const { diagram, ref } = await reference(
+        session,
+        input.diagramId,
+        signal,
+      );
+      const conflict = (current?: Drawing) => ({
         status: "conflict" as const,
-        current: readDrawing(current),
+        current: current ? readDrawing(current) : null,
         candidate: { before: input.before, after: input.after },
       });
       if (diagram.revision !== input.expectedRevision) return conflict(diagram);
@@ -332,8 +336,13 @@ export function createDrawingProvider(options: {
         signal,
       );
       if (result.ok) return readDrawing(result.value.diagram);
-      if (result.error.code === "version-conflict" && result.error.current)
-        return conflict(result.error.current);
+      if (result.error.code === "version-conflict") {
+        if (result.error.current) return conflict(result.error.current);
+        const latest = await lookup({ ...ref, revision: undefined }, signal);
+        return conflict(
+          latest.status === "available" ? latest.diagram : undefined,
+        );
+      }
       throw Error(
         `绘图插件保存失败（${result.error.code}），请检查原图后继续。`,
       );
