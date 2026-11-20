@@ -148,7 +148,11 @@ export async function importComposition<T>(
   if (board.external.length || expected.size !== archive.resources.length)
     throw Error("组合包的资源清单与工作空间不一致。");
   const hashes = new Map<string, string>();
-  const entries = archive.resources.map((entry: any) => {
+  const serializedEntries: unknown[] = archive.resources;
+  const entries = serializedEntries.map((value) => {
+    if (typeof value !== "object" || value === null)
+      throw Error("组合包包含无效的资源条目。");
+    const entry = value as Record<string, unknown>;
     if (
       !isResourceRef(entry?.ref) ||
       !isResourceRef(entry.exact) ||
@@ -184,8 +188,8 @@ export async function importComposition<T>(
       exactKey,
       restore,
       file: {
-        text: entry.text as string,
-        mediaType: entry.mediaType as string,
+        text: entry.text,
+        mediaType: entry.mediaType,
       },
     };
   });
