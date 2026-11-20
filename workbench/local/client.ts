@@ -296,7 +296,13 @@ async function mount(cycle: number) {
   bridge = new AppBridge(
     null,
     { name: "Sand Table local workbench", version: "0.3.0" },
-    { serverTools: {}, openLinks: {}, message: { text: {} }, downloadFile: {} },
+    {
+      serverTools: {},
+      serverResources: {},
+      openLinks: {},
+      message: { text: {} },
+      downloadFile: {},
+    },
     {
       hostContext: {
         theme: "light",
@@ -337,6 +343,8 @@ async function mount(cycle: number) {
     window.open(safe, "_blank", "noopener,noreferrer");
     return {};
   };
+  bridge.onreadresource = (params) =>
+    request("/rpc", { method: "resources/read", params });
   bridge.oncalltool = (params) =>
     request("/rpc", { method: "tools/call", params });
   bridge.oninitialized = async () => {

@@ -4,6 +4,12 @@
 // 包工具随包启停：每个内置包注册时记住它注册出的工具，包停了就把工具停掉，
 // SDK 会自动通知客户端工具列表变了。
 
+import {
+  COMPONENT_RESOURCES,
+  COMPONENT_RESOURCE_MIME,
+  componentResourceUri,
+  type ComponentResource,
+} from "../core/component-resources.ts";
 import { readFileSync } from "node:fs";
 import {
   McpServer,
@@ -45,7 +51,7 @@ export type Forwarder = {
     name: string,
     args: Record<string, unknown>,
   ) => Promise<CallToolResult>;
-  resource: () => Promise<ReadResourceResult>;
+  resource: (uri: string) => Promise<ReadResourceResult>;
 };
 
 export type ServerOptions = {
@@ -266,7 +272,7 @@ export function createServerV3(options: ServerOptions) {
 
   registerAppResource(server, "Sand Table overview", UI_URI, {}, async () =>
     options.forward
-      ? options.forward.resource()
+      ? options.forward.resource(UI_URI)
       : {
           contents: [
             {
@@ -283,6 +289,31 @@ export function createServerV3(options: ServerOptions) {
           ],
         },
   );
+
+  for (const name of Object.keys(COMPONENT_RESOURCES) as ComponentResource[]) {
+    const file = COMPONENT_RESOURCES[name].file;
+    const uri = componentResourceUri(name);
+    server.registerResource(
+      name,
+      uri,
+      { mimeType: COMPONENT_RESOURCE_MIME },
+      async () =>
+        options.forward
+          ? options.forward.resource(uri)
+          : {
+              contents: [
+                {
+                  uri,
+                  mimeType: COMPONENT_RESOURCE_MIME,
+                  text: readFileSync(
+                    new URL(`../dist/chunks/${file}`, import.meta.url),
+                    "utf8",
+                  ),
+                },
+              ],
+            },
+    );
+  }
 
   return {
     server,
