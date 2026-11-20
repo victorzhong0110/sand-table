@@ -58,6 +58,42 @@ try {
   await page.goto("http://127.0.0.1:4317");
   const frame = page.frameLocator("iframe");
   await frame.getByRole("heading", { name: "从一块空白开始" }).waitFor();
+  const boardFrame = page
+    .frames()
+    .find((item) => item.url() === "about:srcdoc");
+  assert.ok(boardFrame);
+  const resource = await boardFrame.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const id = "probe-component-resource";
+        const uri = "ui://sand-table/chunks/pdf-api.js";
+        const timeout = setTimeout(() => {
+          removeEventListener("message", receive);
+          reject(Error("开发宿主未返回组件资源"));
+        }, 8000);
+        function receive(event: MessageEvent) {
+          if (event.source !== parent || event.data?.id !== id) return;
+          clearTimeout(timeout);
+          removeEventListener("message", receive);
+          const [item] = event.data.result?.contents ?? [];
+          resolve({
+            uri: item?.uri,
+            mimeType: item?.mimeType,
+            hasCode: !!item?.text,
+          });
+        }
+        addEventListener("message", receive);
+        parent.postMessage(
+          { jsonrpc: "2.0", method: "resources/read", id, params: { uri } },
+          "*",
+        );
+      }),
+  );
+  assert.deepEqual(resource, {
+    uri: "ui://sand-table/chunks/pdf-api.js",
+    mimeType: "text/javascript",
+    hasCode: true,
+  });
   async function rpc(name: string, args: Record<string, unknown> = {}) {
     const body = await page.evaluate(
       async ({ name, args }) => {

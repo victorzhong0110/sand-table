@@ -64,6 +64,7 @@ try {
   if (
     !existsSync(output) ||
     !existsSync(join(dir, "dist/board.html")) ||
+    !existsSync(join(dir, "dist/component-sizes.json")) ||
     Math.max(...inputs.map(newest)) > statSync(output).mtimeMs
   ) {
     console.log("正在构建工作台…");

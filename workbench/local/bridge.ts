@@ -20,11 +20,11 @@ const forward = {
       method: "tools/call",
       params: { name, arguments: arguments_ },
     }),
-  resource: () =>
+  resource: (uri: string) =>
     request(sessionFile, "/agent/rpc", {
       connectionId,
       method: "resources/read",
-      params: { uri: "ui://sand-table/overview.html" },
+      params: { uri },
     }),
 };
 const folder = process.env.SAND_FOLDER?.trim();

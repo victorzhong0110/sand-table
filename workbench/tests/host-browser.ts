@@ -153,6 +153,58 @@ try {
     },
     fixture.records,
   );
+  const runtimeProbe = (
+    await build({
+      stdin: {
+        contents: `
+        import { createComponentRuntime } from './board/runtime/resources.ts';
+        globalThis.sandPreparePdf = async (base64) => {
+          let requests = 0;
+          const runtime = createComponentRuntime(async (uri) => {
+            const id = 'sand-test-' + ++requests;
+            return await new Promise((resolve, reject) => {
+              const receive = ({source, data}) => {
+                if (source !== parent || data?.id !== id) return;
+                clearTimeout(timeout);
+                removeEventListener('message', receive);
+                if (data.error) reject(Error(data.error.message));
+                else resolve(data.result);
+              };
+              const timeout = setTimeout(() => {
+                removeEventListener('message', receive);
+                reject(Error('组件资源没有回执'));
+              }, 4000);
+              addEventListener('message', receive);
+              parent.postMessage({jsonrpc:'2.0', method:'resources/read', id, params:{uri}}, '*');
+            });
+          });
+          const read = async () => {
+            const reader = await runtime.createPdfWorker();
+            const document = reader.open(Uint8Array.from(atob(base64), x => x.charCodeAt(0)));
+            try {
+              const pdf = await document.document;
+              const page = await pdf.getPage(1);
+              const text = await page.getTextContent();
+              await document.destroy();
+              return { requests, pages: pdf.numPages, text: text.items.map(x => x.str || '').join('') };
+            } finally {
+              await reader.destroy();
+            }
+          };
+          globalThis.sandReadPdfOffline = async () => {
+            try { return await read(); }
+            finally { runtime.dispose(); }
+          };
+          return await read();
+        };
+      `,
+        resolveDir: process.cwd(),
+      },
+      bundle: true,
+      write: false,
+      format: "iife",
+    })
+  ).outputFiles[0].text;
   // Agent tools and the browser must see exactly the same board.
   const listed = JSON.parse(
     await tools.get("sand_table_list_boards").execute(),
@@ -176,6 +228,33 @@ try {
   const shell = page.frameLocator('iframe[title="Sand Table 白板"]');
   const board = shell.frameLocator("iframe");
   await board.getByRole("heading", { name: "从一块空白开始" }).waitFor();
+  const boardFrame = page
+    .frames()
+    .find((frame: { url(): string }) => frame.url() === "about:srcdoc");
+  assert.ok(boardFrame);
+  await boardFrame.addScriptTag({ content: runtimeProbe });
+  const pdfFixture = "./../spikes/bundle-loading/lib.mjs";
+  const { helloPdf } = await import(pdfFixture);
+  const pdfResult = await boardFrame.evaluate(
+    (fixture: string) =>
+      (
+        globalThis as unknown as { sandPreparePdf(fixture: string): unknown }
+      ).sandPreparePdf(fixture),
+    Buffer.from(helloPdf()).toString("base64"),
+  );
+  assert.deepEqual(pdfResult, { requests: 2, pages: 1, text: "Hello" });
+  await page.context().setOffline(true);
+  try {
+    const offline = await boardFrame.evaluate(() =>
+      (
+        globalThis as unknown as { sandReadPdfOffline(): unknown }
+      ).sandReadPdfOffline(),
+    );
+    assert.deepEqual(offline, pdfResult);
+  } finally {
+    await page.context().setOffline(false);
+  }
+
   await board.getByRole("button", { name: "和 AI 协作", exact: true }).click();
   const input = board.getByRole("textbox", { name: "给 AI 的编排请求" });
   await input.waitFor();

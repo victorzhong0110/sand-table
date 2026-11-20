@@ -1,8 +1,18 @@
+import {
+  ComponentRuntimeContext,
+  createComponentRuntime,
+} from "./runtime/resources.ts";
 import { blocksCanvasShortcut } from "./keyboard.ts";
 import "./domain-ui.ts";
 import { CanvasShell } from "./CanvasShell.tsx";
 import type { WorkspaceImportReport } from "./WorkspacePanel.tsx";
-import React, { useState, useEffect, useRef, type CSSProperties } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  type CSSProperties,
+} from "react";
 import { createRoot } from "react-dom/client";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
 import type { Board, Item, GuideFocus } from "./data-client/model.ts";
@@ -214,6 +224,16 @@ function Workbench() {
     return v3Call(name, args);
   }
   /** v3 模式下的界面视角：内核的 views 表没有读接口，视角由界面自己掌握。 */
+  const componentRuntime = useMemo(
+    () =>
+      app
+        ? createComponentRuntime((uri, signal) =>
+            app.readServerResource({ uri }, { signal }),
+          )
+        : null,
+    [app, board?.workspaceId],
+  );
+  useEffect(() => () => componentRuntime?.dispose(), [componentRuntime]);
   function v3View(): V3View {
     return { ...viewRef.current, updatedAt: Date.now() };
   }
@@ -1156,13 +1176,15 @@ function Workbench() {
       } as CSSProperties)
     : undefined;
   const withViewRuntime = (content: React.ReactNode) => (
-    <ViewRuntimeContext.Provider
-      value={
-        storeRef.current ? { store: storeRef.current, call: callTool } : null
-      }
-    >
-      {content}
-    </ViewRuntimeContext.Provider>
+    <ComponentRuntimeContext.Provider value={componentRuntime}>
+      <ViewRuntimeContext.Provider
+        value={
+          storeRef.current ? { store: storeRef.current, call: callTool } : null
+        }
+      >
+        {content}
+      </ViewRuntimeContext.Provider>
+    </ComponentRuntimeContext.Provider>
   );
   if (board.presentation !== "code")
     return withViewRuntime(
