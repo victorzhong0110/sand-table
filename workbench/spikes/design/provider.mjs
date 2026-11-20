@@ -60,16 +60,20 @@ async function stop(processRun) {
   }
 }
 
-async function command(cli, home, args) {
+async function command(cli, home, args, timeoutMs = 120000) {
   const processRun = run(cli, home, args);
-  const timeout = setTimeout(
-    () => processRun.child.kill("SIGTERM"),
-    120000,
-  ).unref();
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`DSH command timed out: ${args.join(" ")}`)),
+      timeoutMs,
+    ).unref();
+  });
   try {
-    return { code: await processRun.closed, output: processRun.output() };
+    const code = await Promise.race([processRun.closed, deadline]);
+    return { code, output: processRun.output() };
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timer);
     await stop(processRun);
   }
 }

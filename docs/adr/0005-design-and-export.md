@@ -57,46 +57,36 @@
 
 探针将子页面锁在忙循环 1100 ms，原定约 100 ms 的父页面停止动作约 1103 ms 执行。真正的无限循环开始后，父页面在 500 ms 观察窗口内无法移除子框。测试工具能关闭整个独立浏览器。生产执行选择可限制 CPU、内存与网络，且宿主可从进程外杀掉的运行环境；在落实前，产品交付静态预览。编辑/拖动画布时，静态预览接收画布指针事件；进入运行模式才将键盘和指针交给原型，并由宿主控制退出。
 
-`base.prototype` 数据 Schema 草案。附件读取复用白板资源授权，`sha256` 指向受控附件。
+`base.prototype` 数据 Schema 草案沿用 [正式交付契约 §6](../kernel-v3/05-delivery-contracts.md#6-沙箱构建与导出t41t54t55t56t67t72)。附件读取复用白板资源授权。白板保存 `html` 或 `htmlBlob` 之一，`htmlBlob` 是附件 SHA-256。对象数据沿用 1 MB 上限。
 
 ```json
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["sourceBlob", "params"],
+  "required": ["paramsSchema", "params"],
+  "oneOf": [{ "required": ["html"] }, { "required": ["htmlBlob"] }],
   "properties": {
-    "sourceBlob": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "staticPreviewBlob": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "paramSpec": {
-      "type": "array", "maxItems": 24,
-      "items": {
-        "type": "object", "additionalProperties": false,
-        "required": ["key", "label", "kind"],
-        "properties": {
-          "key": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" },
-          "label": { "type": "string", "maxLength": 80 },
-          "kind": { "enum": ["text", "number", "boolean", "color"] }
-        }
-      }
-    },
-    "params": {
-      "type": "object", "maxProperties": 24,
-      "additionalProperties": {
-        "anyOf": [{ "type": "string", "maxLength": 1000 }, { "type": "number" }, { "type": "boolean" }]
-      }
-    }
+    "html": { "type": "string", "minLength": 1 },
+    "htmlBlob": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "paramsSchema": { "type": "object" },
+    "params": { "type": "object" }
   }
 }
 ```
 
-Host 按每个原型的参数声明拣选 T35 控件。声明中的 key 唯一，更新用同一对象期望版本，参数必须匹配声明类型。运行域持有每次启动独立的标识，父端只接收自己打开的 iframe 来源或独立进程端口，校验消息形状与大小。消息草案：
+`paramsSchema` 必须是无代码 JSON Schema 子集。首版参数根节点为封闭对象，声明 `properties` 和可选的 `required`，字段支持字符串、数字、整数、布尔值、枚举及对应的范围和长度约束。未声明属性、外部引用与可执行扩展拒绝。宿主用该声明校验 `params` 并选择 T35 控件，编辑按对象期望版本提交。没有参数的原型也提交空的封闭 Schema 和空值对象。
+
+每次启动生成新的 `viewSessionId`。每条消息带 `protocolVersion: 1`、`viewSessionId`、`requestId` 与 `type`。宿主先校验消息来源或专用进程端口、协议版本、会话、消息白名单及大小，再匹配请求。重复回执和已关闭会话的迟到消息直接丢弃。
 
 | 发起方 | 消息 | 数据及用途 |
 | --- | --- | --- |
-| 原型 | `prototype.ready` | 本次运行标识，等待初始参数 |
-| 宿主 | `prototype.params` | 本次运行标识、对象版本、受限参数值；初始化和更新用同一入口 |
-| 原型 | `prototype.status` | 本次运行标识、少量可读的状态或错误 |
-| 宿主 | 停止 | 宿主关闭连接并终止进程；舍弃迟到消息 |
+| 宿主 | `prototype.init` | 传入初始参数及对象版本，进入等待就绪状态 |
+| 原型 | `prototype.ready` | 回显 init 的 requestId，宿主进入可交互状态 |
+| 宿主 | `prototype.params` | 就绪后发送已校验的新参数及版本，使用新的 requestId |
+| 原型 | `prototype.status` | 回显待处理请求的 requestId，返回有限的完成状态或错误 |
+| 宿主 | 停止 | 关闭连接并在可独立终止的宿主上终止进程，清空待处理请求 |
+
+初始化 5 秒内未收到匹配的 ready 时提示「原型未响应」，释放本次连接并回到静态预览。计时依赖宿主事件循环可运行，进程失去响应时由独立运行器强制终止。
 
 原型接口只接收已授权的参数。创建对象、执行任务和访问白板正文仍由现有宿主能力控制。
 
