@@ -55,3 +55,41 @@ test("工作空间切换取消合并的组件请求且忽略迟到脚本", async
     name: "AbortError",
   });
 });
+
+test("只在所有调用者都离开后取消底层读取，新请求独立重试", async () => {
+  const reads: { signal: AbortSignal; finish: () => void }[] = [];
+  const runtime = createComponentRuntime(
+    (uri, signal) =>
+      new Promise((resolve) => {
+        reads.push({
+          signal,
+          finish: () =>
+            resolve({
+              contents: [
+                { uri, mimeType: "text/javascript", text: "old script" },
+              ],
+            }),
+        });
+      }),
+  );
+  const a = new AbortController(),
+    b = new AbortController();
+  const first = runtime.loadComponentResource("pdf-api", a.signal);
+  const second = runtime.loadComponentResource("pdf-api", b.signal);
+  assert.equal(reads.length, 1);
+  a.abort();
+  await assert.rejects(first, { name: "AbortError" });
+  assert.equal(reads[0].signal.aborted, false);
+  b.abort();
+  await assert.rejects(second, { name: "AbortError" });
+  assert.equal(reads[0].signal.aborted, true);
+
+  const retry = runtime.loadComponentResource("pdf-api");
+  assert.equal(reads.length, 2);
+  reads[0].finish();
+  await new Promise(setImmediate);
+  assert.equal(runtime.loadComponentResource("pdf-api"), retry);
+  runtime.dispose();
+  reads[1].finish();
+  await assert.rejects(retry, { name: "AbortError" });
+});

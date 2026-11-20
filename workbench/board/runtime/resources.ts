@@ -16,22 +16,26 @@ type ChunkRead = (
 
 export function createComponentRuntime(read: ChunkRead) {
   const workspace = new AbortController();
-  const cache = new Map<ComponentResource, Promise<void>>();
+  const cache = new Map<
+    ComponentResource,
+    {
+      controller: AbortController;
+      consumers: number;
+      ready: Promise<void>;
+    }
+  >();
   const globals = globalThis as typeof globalThis & {
     pdfjsWorker?: { WorkerMessageHandler?: unknown };
     sandTablePdf?: { getDocument: typeof getDocument };
   };
 
-  function loadComponentResource(name: ComponentResource): Promise<void> {
-    workspace.signal.throwIfAborted();
-    const uri = componentResourceUri(name);
+  function startLoad(name: ComponentResource, uri: string) {
     const key = COMPONENT_RESOURCES[name].global;
-    if (globals[key]) return Promise.resolve();
-    const pending = cache.get(name);
-    if (pending) return pending;
-    const ready = read(uri, workspace.signal)
+    const controller = new AbortController();
+    const active = AbortSignal.any([workspace.signal, controller.signal]);
+    const ready = read(uri, active)
       .then(({ contents }) => {
-        workspace.signal.throwIfAborted();
+        active.throwIfAborted();
         const item = contents.find(
           (value) =>
             value.uri === uri && value.mimeType === COMPONENT_RESOURCE_MIME,
@@ -46,22 +50,66 @@ export function createComponentRuntime(read: ChunkRead) {
         if (!globals[key])
           throw Error("组件资源未能注册，请检查宿主的加载能力。");
       })
-      .catch((error) => {
-        cache.delete(name);
-        throw error;
+      .finally(() => {
+        if (cache.get(name) === entry) cache.delete(name);
       });
-    cache.set(name, ready);
-    return ready;
+    const entry = { controller, consumers: 0, ready };
+    cache.set(name, entry);
+    return entry;
+  }
+
+  function loadComponentResource(
+    name: ComponentResource,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    workspace.signal.throwIfAborted();
+    signal?.throwIfAborted();
+    const uri = componentResourceUri(name);
+    if (globals[COMPONENT_RESOURCES[name].global]) return Promise.resolve();
+    const entry = cache.get(name) ?? startLoad(name, uri);
+    entry.consumers++;
+    if (!signal) return entry.ready;
+    return new Promise((resolve, reject) => {
+      const finish = () => {
+        signal.removeEventListener("abort", abort);
+        entry.consumers--;
+      };
+      const abort = () => {
+        finish();
+        if (entry.consumers === 0 && cache.get(name) === entry) {
+          cache.delete(name);
+          entry.controller.abort(signal.reason);
+        }
+        reject(signal.reason);
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) abort();
+      void entry.ready.then(
+        () => {
+          if (!signal.aborted) {
+            finish();
+            resolve();
+          }
+        },
+        (error) => {
+          if (!signal.aborted) {
+            finish();
+            reject(error);
+          }
+        },
+      );
+    });
   }
 
   const tasks = new Set<PDFDocumentLoadingTask>();
   const release = async (task: PDFDocumentLoadingTask) => {
     if (tasks.delete(task)) await task.destroy();
   };
-  async function createPdfWorker() {
-    await loadComponentResource("pdf-worker");
-    await loadComponentResource("pdf-api");
+  async function createPdfWorker(signal?: AbortSignal) {
+    await loadComponentResource("pdf-worker", signal);
+    await loadComponentResource("pdf-api", signal);
     workspace.signal.throwIfAborted();
+    signal?.throwIfAborted();
     const api = globals.sandTablePdf!;
     const owned = new Set<PDFDocumentLoadingTask>();
     let closed = false;

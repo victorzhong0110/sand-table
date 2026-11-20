@@ -36,7 +36,7 @@ async function main() {
   const bridge = new AppBridge(
     null,
     { name: "Local protocol harness (no AI)", version: "0.1.0" },
-    { serverTools: {}, openLinks: {} },
+    { serverTools: {}, serverResources: {}, openLinks: {} },
     {
       hostContext: {
         theme: "light",
@@ -53,6 +53,7 @@ async function main() {
     return {};
   };
   bridge.oncalltool = (params) => rpc("tools/call", params);
+  bridge.onreadresource = (params) => rpc("resources/read", params);
   bridge.oninitialized = async () => {
     await bridge.sendToolInput({ arguments: {} });
     await bridge.sendToolResult(result);
