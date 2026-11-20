@@ -158,7 +158,7 @@ try {
       stdin: {
         contents: `
         import { createComponentRuntime } from './board/runtime/resources.ts';
-        globalThis.sandTestPdf = async (base64) => {
+        globalThis.sandPreparePdf = async (base64) => {
           let requests = 0;
           const runtime = createComponentRuntime(async (uri) => {
             const id = 'sand-test-' + ++requests;
@@ -178,20 +178,24 @@ try {
               parent.postMessage({jsonrpc:'2.0', method:'resources/read', id, params:{uri}}, '*');
             });
           });
-          const reader = await runtime.createPdfWorker();
-          try {
+          const read = async () => {
+            const reader = await runtime.createPdfWorker();
             const document = reader.open(Uint8Array.from(atob(base64), x => x.charCodeAt(0)));
-            const pdf = await document.document;
-            const page = await pdf.getPage(1);
-            const text = await page.getTextContent();
-            const second = await runtime.createPdfWorker();
-            await second.destroy();
-            await document.destroy();
-            return { requests, pages: pdf.numPages, text: text.items.map(x => x.str || '').join('') };
-          } finally {
-            await reader.destroy();
-            runtime.dispose();
-          }
+            try {
+              const pdf = await document.document;
+              const page = await pdf.getPage(1);
+              const text = await page.getTextContent();
+              await document.destroy();
+              return { requests, pages: pdf.numPages, text: text.items.map(x => x.str || '').join('') };
+            } finally {
+              await reader.destroy();
+            }
+          };
+          globalThis.sandReadPdfOffline = async () => {
+            try { return await read(); }
+            finally { runtime.dispose(); }
+          };
+          return await read();
         };
       `,
         resolveDir: process.cwd(),
@@ -234,11 +238,22 @@ try {
   const pdfResult = await boardFrame.evaluate(
     (fixture: string) =>
       (
-        globalThis as unknown as { sandTestPdf(fixture: string): unknown }
-      ).sandTestPdf(fixture),
+        globalThis as unknown as { sandPreparePdf(fixture: string): unknown }
+      ).sandPreparePdf(fixture),
     Buffer.from(helloPdf()).toString("base64"),
   );
   assert.deepEqual(pdfResult, { requests: 2, pages: 1, text: "Hello" });
+  await page.context().setOffline(true);
+  try {
+    const offline = await boardFrame.evaluate(() =>
+      (
+        globalThis as unknown as { sandReadPdfOffline(): unknown }
+      ).sandReadPdfOffline(),
+    );
+    assert.deepEqual(offline, pdfResult);
+  } finally {
+    await page.context().setOffline(false);
+  }
 
   await board.getByRole("button", { name: "和 AI 协作", exact: true }).click();
   const input = board.getByRole("textbox", { name: "给 AI 的编排请求" });
