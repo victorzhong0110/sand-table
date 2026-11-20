@@ -10,7 +10,7 @@
 | 会话/投影 | 两个真实 CLI 进程完成 JSONL 冷读、单写者/只读、消息重建、投影注销/重注册 |
 | 上下文 | dsh-context 0.85.1 的 Host 投影运行；官方 profile 安装、卸载、重装通过；UI 未测 |
 | 白板 | 真实 DSH 的四个工具注册并完成创建/读回；客户端仍调用已移除的 slots.inject，需适配 |
-| 绘图 | dsh-diagram 0.6.1 被该宿主拒绝，未安装；不豁免旧版约束，T54 做版本适配评估 |
+| 绘图 | 原版 dsh-diagram 0.6.1 被固定宿主拒绝；T81 的 `0.6.1-sand-table.1` 通过官方 profile 安装、试验及重装 |
 | 运行边界 | Web 压缩器位于隔离 Agent preset，不能依赖 root compaction；实验 plugin: 记录不能承诺跨版本无损 |
 | UI/模型 | Mac 基础 DSH 界面渲染通过，后续连接超时；组合 UI、真实模型、Desktop 和实际压缩/搜索未测 |
 
@@ -38,7 +38,7 @@
 | 消息编辑/失败重试 | @linxin666/dsh-chat-recovery | 作者包说明为分叉后重提最后消息；可选候选 | 不承担整个工作区恢复；T77 核对目标版本是否已有同等能力 |
 | 网络搜索/读取 | DSH ctx.web + search/fetch providers + tool-web | 官方接口文档；采用 | 选定可用 provider；凭据由宿主管理 |
 | 文件/进程/远程运行 | DSH fs/subprocess/jobs/MCP 对应能力 | 官方能力目录；具体 provider 待验证 | T77 核对；业务插件管理任务语义 |
-| 可编辑绘图 | hanzhangzzz/dsh-diagram | 作者文档：0.6.1、Excalidraw 0.18.1；列出 DSH 0.1.7-rc.2 等验证版本 | 优先试装候选；T54/T81 补引用、版本、复制/导出 |
+| 可编辑绘图 | hanzhangzzz/dsh-diagram | 上游 0.6.1、Excalidraw 0.18.1，T81 兼容制品在 DSH 0.2.2-rc.1 实测 | 组合安装与整板导出见 T82 |
 | 其他图形候选 | Jegozhou/dsh-excalidraw | 目录发现；本轮未取得足够作者源码证据 | 暂不选为默认，不把目录评语当验收 |
 | 结构化总览画布 | 当前 React Flow 12.12.0 实现 | 本仓库已有固定依赖与测试 | 先保留，T78/T82 纳入提供者与组合 |
 | 白板原生文档 | 当前 kernel SQLite/命令/历史 | 本仓库已有实现 | T78 包装成默认提供者，不先重写数据 |
@@ -86,3 +86,9 @@
 ### 2026-11-17 槽位证据更正
 
 ADR 0008 的原判断只查看 SlotCore，遗漏 renderer 提供的 SlotRegistry。后者在同一固定版本中提供公开 slots.inject(key, callback)，现有白板与 dsh-context 的调用无需因此改写。verify-api 同时核对两层发布源码；原始 client-api.json 另存为 client-api-2026-11-16.json，保留更正过程。静态接口匹配仍不计组合界面通过。
+
+### 2026-11-20 绘图提供者复测
+
+Linux Node 24.22.3、Chromium 153、DSH Web `0.2.2-rc.1`、pnpm 10.32.1。通过 `dsh-plugin/drawing/prepare.mjs` 从固定上游 npm 制品生成 `0.6.1-sand-table.1`，完整性及来源同 ADR 0005。`dsh-plugin/drawing/verify.mjs` 在临时 profile 用 DSH CLI 安装和卸载，运行真实绘图编辑器、宿主、白板服务和白板数据库。
+
+通过：生成图稿、由精确引用打开 Chromium 编辑器、手动输入标签、DSH 工具读回新版本、按版本修改、拒绝过期写入、白板交付引用、图稿可编辑导入、会话分叉隔离、删除副本、重启、停用时保留白板引用、重新安装恢复。Agent 工具调用由脚本驱动。真实模型、从 DSH 侧栏打开可安装组合、整板组合导出由后续卡验收。
