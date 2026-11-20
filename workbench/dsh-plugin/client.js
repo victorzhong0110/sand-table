@@ -25,6 +25,22 @@ window.__ModuleLoader__.load({
     const PANEL_ID = "sand-table";
     /** 白板画布地址默认值（宿主会用它自己的配置覆盖）。 */
     const DEFAULT_BOARD_URL = "http://127.0.0.1:4173/embed";
+    const initialBoardUrl = () => {
+      try {
+        const url = new URL(globalThis.__SAND_TABLE_BOARD_URL__);
+        if (
+          url.protocol === "http:" &&
+          url.hostname === "127.0.0.1" &&
+          url.pathname === "/embed" &&
+          !url.username &&
+          !url.password
+        )
+          return url.href;
+      } catch {
+        // The source checkout and standalone bridge have no packaged entry.
+      }
+      return DEFAULT_BOARD_URL;
+    };
     /** 宿主侧的会话命令名。 */
     const COMMAND_NAME = "sand-table";
     /** 宿主标识。 */
@@ -45,7 +61,7 @@ window.__ModuleLoader__.load({
          * 面板共享状态。组件用订阅拿变化，宿主能力探测完就更新一次。
          */
         const state = {
-          boardUrl: DEFAULT_BOARD_URL,
+          boardUrl: initialBoardUrl(),
           version: "",
           capabilities: null,
           status: "idle",

@@ -27,6 +27,12 @@ const emit = fixture.emit;
 let turn = 0;
 const prompts: any[] = [];
 let finishDetached: (() => void) | undefined;
+const experimentDrawing = {
+  providerId: "comparison-drawing",
+  namespace: "workbench",
+  resourceId: "experiment-map",
+};
+let experimentRevision = "map-original";
 const controller = {
   prompt: async (request: any) => {
     prompts.push(request);
@@ -45,6 +51,19 @@ const controller = {
           content: [{ type: "text", text: `Host response ${current}` }],
         },
       });
+      if (request.content[0].text.startsWith("compare experiments")) {
+        finishDetached = () => {
+          experimentRevision = "map-compared";
+          emitArtifact(fixture, current, {
+            kind: "resource",
+            title: "实验对照图新版本",
+            note: "实验甲与实验乙比较",
+            resource: { ...experimentDrawing, revision: experimentRevision },
+          });
+          emit("turn/end", { turn: current, reason: { kind: "completed" } });
+        };
+        return;
+      }
       if (request.content[0].text.startsWith("detach")) {
         finishDetached = () => {
           emitArtifact(fixture, current, {
@@ -540,6 +559,7 @@ try {
     .waitFor();
   await submitted.getByText("提交时的上下文", { exact: true }).click();
   await submitted.getByText("资源版本 diagram-r7", { exact: true }).waitFor();
+
   await submitted
     .getByText(/^资源插件尚未加载/)
     .first()
@@ -556,9 +576,185 @@ try {
   await board.getByRole("button", { name: "和 AI 协作", exact: true }).click();
   await submitted.getByText("提交时的上下文", { exact: true }).click();
   await submitted.getByText("资源版本 diagram-r7", { exact: true }).waitFor();
+
+  const unregisterComparison = resourceRegistry.register({
+    describe: () => ({
+      ...experimentDrawing,
+      title: "实验对照图",
+      capabilities: { read: true },
+      idempotency: "none",
+    }),
+    read: (ref) =>
+      ref.revision && ref.revision !== experimentRevision
+        ? { status: "version_unavailable", ref, reason: "图稿已更新" }
+        : {
+            status: "available",
+            ref,
+            revision: experimentRevision,
+            title: "实验对照图",
+            summary: "分析数据图稿",
+            capabilities: { read: true },
+          },
+  });
+  disposers.push(unregisterComparison);
+  const target = openWorkspace(join(root, "workspaces"), "default", registry);
+  let scenario: Record<string, string>;
+  try {
+    const commands: Command[] = [
+      { op: "pack.enable", id: "research" },
+      {
+        op: "object.create",
+        ref: "comparison",
+        type: "base.board",
+        title: "跨资源验收",
+      },
+      {
+        op: "presentation.create",
+        ref: "entry",
+        boardId,
+        objectId: "@comparison",
+        x: 315,
+        y: 420,
+      },
+      {
+        op: "object.create",
+        ref: "A",
+        type: "research.evidence",
+        title: "实验甲",
+        data: { method: "实验", summary: "甲组结果" },
+      },
+      {
+        op: "object.create",
+        ref: "B",
+        type: "research.evidence",
+        title: "实验乙",
+        data: { method: "实验", summary: "乙组结果" },
+      },
+      {
+        op: "object.create",
+        ref: "map",
+        type: "base.resource_reference",
+        title: "实验对照图",
+        source: {
+          origin: "human",
+          resource: { ...experimentDrawing, revision: experimentRevision },
+        },
+      },
+      ...["A", "B", "map"].map((id, index): Command => ({
+        op: "presentation.create",
+        ref: "place" + id,
+        boardId: "@comparison",
+        objectId: "@" + id,
+        x: index * 245,
+        y: 0,
+        width: 206,
+        height: 100,
+      })),
+    ];
+    scenario = applyCommands(target.db, registry, {
+      actor: { kind: "human", id: "comparison" },
+      commands,
+    }).created;
+  } finally {
+    target.db.close();
+  }
+  const entry = board.locator(`[data-instance-id="${scenario.entry}"]`);
+  const enterScenario = () =>
+    entry
+      .getByRole("button", { name: "进入白板" })
+      .evaluate((button: HTMLButtonElement) => button.click());
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await enterScenario();
+  const cards = ["placeA", "placeB", "placemap"].map((key) =>
+    board.locator(`[data-instance-id="${scenario[key]}"]`),
+  );
+  for (const card of cards) await card.waitFor();
+  const positions = await Promise.all(cards.map((card) => card.boundingBox()));
+  assert.ok(positions.every(Boolean));
+  const bounds = positions as {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }[];
+  await page.keyboard.down("Shift");
+  await page.mouse.move(
+    Math.min(...bounds.map((r) => r.x)) - 8,
+    Math.min(...bounds.map((r) => r.y)) - 8,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    Math.max(...bounds.map((r) => r.x + r.width)) + 8,
+    Math.max(...bounds.map((r) => r.y + r.height)) + 8,
+    { steps: 8 },
+  );
+  await page.mouse.up();
+  await page.keyboard.up("Shift");
+  if (!(await ai.isVisible()))
+    await board
+      .getByRole("button", { name: "和 AI 协作", exact: true })
+      .click();
+  await ai.getByLabel("AI 讨论范围").selectOption("selection");
+  await ai
+    .getByLabel("AI 目标预览")
+    .getByText("3 个对象", { exact: true })
+    .waitFor();
+  finishDetached = undefined;
+  await input.fill("compare experiments and update the drawing");
+  await ai.getByRole("button", { name: "发送", exact: true }).click();
+  await board.getByRole("button", { name: "停止 AI", exact: true }).waitFor();
+  const comparisonsSent = prompts.length;
+  await page.goto("about:blank");
+  assert.ok(finishDetached);
+  (finishDetached as () => void)();
+  const readScenario = async () =>
+    JSON.parse(
+      await tools
+        .get("sand_table_read_board")
+        .execute({ boardId: scenario.comparison }),
+    );
+  for (let attempt = 0; attempt < 80; attempt++) {
+    if (JSON.stringify(await readScenario()).includes("实验对照图新版本"))
+      break;
+    assert.notEqual(attempt, 79, "关闭浏览器时也应写入版本化绘图引用");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  await page.goto(origin);
+  await cards[0].or(entry).first().waitFor();
+  if (await entry.isVisible()) await enterScenario();
+  if (!(await ai.isVisible()))
+    await board
+      .getByRole("button", { name: "和 AI 协作", exact: true })
+      .click();
+  const comparisonTurn = conversation
+    .locator(".ai-turn")
+    .filter({ hasText: "compare experiments and update the drawing" });
+  await comparisonTurn
+    .getByLabel("AI 任务状态")
+    .getByText("已完成", { exact: true })
+    .waitFor();
+  await comparisonTurn.getByText("提交时的上下文", { exact: true }).click();
+  await comparisonTurn
+    .getByText("资源版本 map-original", { exact: true })
+    .waitFor();
+  const output = (await readScenario()).objects.filter(
+    (object: { title: string }) => object.title === "实验对照图新版本",
+  );
+  assert.equal(output.length, 1);
+  const updated = JSON.parse(
+    await tools
+      .get("sand_table_read_object")
+      .execute({ boardId: scenario.comparison, objectId: output[0].id }),
+  );
+  assert.deepEqual(updated.source.resource, {
+    ...experimentDrawing,
+    revision: "map-compared",
+  });
+  assert.equal(updated.resource.value.status, "available");
+  assert.equal(prompts.length, comparisonsSent, "跨资源任务恢复时不得重发");
   assert.deepEqual(errors, []);
   console.log(
-    "HOST BROWSER PASSED: actual local service and plugin, cross-origin nested canvas, real request ID, replies remain in conversation, structured table persisted, follow-up and cancellation (scripted DSH execution fixture).",
+    "HOST BROWSER PASSED: actual local service and plugin, cross-origin nested canvas, real request ID, replies remain in conversation, structured delivery, follow-up, cancellation and cross-resource recovery (scripted DSH execution fixture).",
   );
 } catch (error) {
   for (const frame of page?.frames() ?? [])

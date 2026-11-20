@@ -13,6 +13,10 @@ import {
   writeConnection,
   removeConnection,
 } from "./session.ts";
+import {
+  MAX_BUNDLE_JSON_BYTES,
+  type BundleImportReport,
+} from "../kernel/index.ts";
 
 /**
  * 桥接由 MCP 客户端启动，它看到的是客户端自己的环境变量。
@@ -46,6 +50,11 @@ export async function startLocal(options: {
   /** 工作空间 ID。 */
   workspaceId?: string;
   embedOrigins?: string[];
+  serverEntry?: string;
+  composition?: {
+    export(mode: "full" | "references", signal: AbortSignal): Promise<string>;
+    import(raw: string, signal: AbortSignal): Promise<BundleImportReport>;
+  };
   /**
    * 启动 MCP 服务端子进程时附加的环境变量。
    * stdio 传输只继承白名单变量（PATH、HOME 等），自定义变量必须显式传，
@@ -98,7 +107,8 @@ export async function startLocal(options: {
       command: process.execPath,
       args: [
         "--experimental-strip-types",
-        fileURLToPath(new URL("../server/main.ts", import.meta.url)),
+        options.serverEntry ??
+          fileURLToPath(new URL("../server/main.ts", import.meta.url)),
         ...options.workspaces.flatMap((w) => ["--workspace", w]),
         ...(options.workspaceDir
           ? ["--workspace-dir", options.workspaceDir]
@@ -202,7 +212,7 @@ export async function startLocal(options: {
           `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; frame-src 'self'; img-src 'self' data:; media-src data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors ${path === "/embed" ? embedOrigins.join(" ") : "'none'"}`,
         );
         res.end(
-          `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sand Table · 本地工作台</title><style>${css}</style></head><body><div id="error" role="alert" hidden><span id="error-text"></span><button id="retry" type="button">重新连接</button></div><div id="board-stage"><iframe title="Sand Table 白板" sandbox="allow-scripts"></iframe><p id="opening" role="status" hidden>正在打开白板…</p></div><script src="/host.js"></script></body></html>`,
+          `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sand Table · 本地工作台</title><style>${css}</style></head><body>${options.composition ? compositionToolbar : ""}<div id="error" role="alert" hidden><span id="error-text"></span><button id="retry" type="button">重新连接</button></div><div id="board-stage"><iframe title="Sand Table 白板" sandbox="allow-scripts"></iframe><p id="opening" role="status" hidden>正在打开白板…</p></div><script src="/host.js"></script></body></html>`,
         );
         return;
       }
@@ -241,6 +251,43 @@ export async function startLocal(options: {
           : req.headers.origin !== origin
       ) {
         json({ error: "Origin rejected" }, 403);
+        return;
+      }
+      if (path.startsWith("/composition/") && options.composition) {
+        const action = path.slice("/composition/".length);
+        const controller = new AbortController();
+        res.once("close", () => controller.abort());
+        if (action === "full" || action === "references") {
+          const archive = await options.composition.export(
+            action,
+            controller.signal,
+          );
+          res.writeHead(200, {
+            "Content-Type": "application/json; charset=utf-8",
+          });
+          res.end(archive);
+          return;
+        }
+        if (action === "import") {
+          const buffers: Buffer[] = [];
+          let bytes = 0;
+          for await (const chunk of req) {
+            bytes += chunk.length;
+            if (bytes > MAX_BUNDLE_JSON_BYTES) {
+              json({ error: "完整组合超过 300 MiB。" }, 413);
+              return;
+            }
+            buffers.push(chunk);
+          }
+          json(
+            await options.composition.import(
+              Buffer.concat(buffers).toString("utf8"),
+              controller.signal,
+            ),
+          );
+          return;
+        }
+        json({ error: "未知的工作台组合操作。" }, 404);
         return;
       }
       let body = "";
@@ -336,6 +383,9 @@ export async function startLocal(options: {
     url: origin + "/#session=" + token,
     close,
     sessionFile: options.sessionFile,
+    callTool: (name: string, args: Record<string, unknown>) =>
+      client.callTool({ name, arguments: args }),
   };
 }
+const compositionToolbar = `<nav aria-label="工作台组合文件"><details id="composition-actions"><summary>组合文件</summary><button id="composition-export" type="button">导出完整组合</button> <button id="composition-references" type="button">导出引用清单</button> <button id="composition-import" type="button">导入组合</button><input id="composition-file" type="file" accept=".json,application/json" hidden></details><span id="composition-status" role="status"></span></nav>`;
 const css = `html{scrollbar-width:none}html::-webkit-scrollbar{display:none}body{height:100dvh;overflow:hidden;display:flex;flex-direction:column}body>nav{flex-shrink:0}body>iframe{flex:1;min-height:0;height:auto}#setup-panel{overflow:auto;scrollbar-width:none}#setup-panel::-webkit-scrollbar{display:none}*[hidden]{display:none!important}*{box-sizing:border-box}body{margin:0;background:#f6f1e6;color:#322f28;font:14px/1.6 system-ui,sans-serif}nav{display:flex;align-items:center;gap:16px;padding:10px 20px;background:#fffdf7;color:#322f28;border-bottom:1px solid #ddd5c4;min-height:44px}nav span{flex:1;font-size:12px}button{cursor:pointer;border:1px solid #d9d0be;border-radius:6px;padding:7px 12px;background:#fffdf7;color:#322f28;font:inherit}button:focus-visible,textarea:focus-visible{outline:2px solid #b67547;outline-offset:3px}iframe{border:0;width:100%;height:calc(100vh - 44px);display:block}section{padding:28px;max-width:900px;margin:auto}textarea{display:block;width:100%;min-height:84px;padding:12px;border:1px solid #ddd5c4;border-radius:8px;background:#fffdf7;font:12px/1.6 ui-monospace,monospace;color:inherit;resize:vertical;margin:6px 0 10px}label{display:block;margin-top:18px}details{margin-top:20px}summary{cursor:pointer}.muted{color:#777366;font-size:12px}#error{padding:16px;background:#fbe7e1;color:#833c28;display:flex;gap:12px;align-items:center;flex-wrap:wrap}#error-text{flex:1;white-space:pre-wrap}#setup-status{min-height:24px}h1{font-weight:500;font-size:28px}@media(max-width:600px){nav{flex-wrap:wrap;gap:8px}nav span{flex-basis:70%}iframe{height:calc(100vh - 90px)}section{padding:18px}}#board-stage{position:relative;flex:1;min-height:0;display:flex}#board-stage>iframe{flex:1;min-height:0;width:100%;height:100%}#opening{position:absolute;inset:0;z-index:2;margin:0;display:flex;align-items:center;justify-content:center;background:#f6f1e6;color:#322f28;font-size:16px}`;

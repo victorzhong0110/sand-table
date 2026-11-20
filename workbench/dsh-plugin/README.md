@@ -88,3 +88,21 @@ dsh plugin --profile web add "$PWD/artifacts/drawing/dsh-diagram-0.6.1-sand-tabl
 停用绘图插件后，白板仍显示引用，重装回同一个 DSH profile 后可重新打开。永久删除图稿需要在 DSH 确认，并检查提交时版本。白板引用仍保留为失效状态。
 
 隔离宿主检查使用 `npm run build`、`npm --prefix spikes/dsh-providers ci` 和 `CHROMIUM_PATH=/path/to/chromium node --experimental-strip-types dsh-plugin/drawing/verify.mjs`。验证自动化使用固定版本真实插件和 Chromium，Agent 调用由脚本驱动。
+
+### 构建 DSH 组合安装包
+
+在 `workbench/` 中安装锁定依赖并执行：
+
+```bash
+npm ci
+npm run build
+node dsh-plugin/bundle/package.mjs artifacts/dsh-bundle
+```
+
+同一目录生成 Sand Table 与兼容绘图插件的两个压缩包、固定版本清单和安装脚本。将这些文件放到一起，在已安装 DSH `0.2.2-rc.1` 和 Node 24.9+ 的环境运行 `node install.mjs`，然后打开 DSH Web 的 Sand Table 侧栏。安装脚本校验两个包的 SHA-256，并交给 DSH 的 Web profile 安装。上下文观察插件 `dsh-context@0.85.1` 可以单独安装。
+
+安装包启动本地工作台服务，沿用 `~/.sand-table/workspaces`，已有工作区可以直接打开。需要切换存储目录时，在对应 profile 的 `cordis.patch.yml` 为 `sand-table` 设置 `workspaceDir`。DSH 管理模型账户、会话和插件卸载。
+
+侧栏打开白板后，顶栏「组合文件」提供三项操作。完整组合携带 T25 白板快照和可读的精确资源版本。来源停用或指定版本无法读取时，完整导出失败，可另选「导出引用清单」。导入完整组合创建新工作空间，绘图提供者生成独立可编辑副本，共享引用仍指向同一份副本。工作空间内的普通导入导出仍适用 T25。
+
+安装验证使用隔离 profile 和 Chromium。先执行 `npm --prefix spikes/dsh-providers ci`，再运行 `CHROMIUM_PATH=/path/to/chromium node dsh-plugin/bundle/verify-install.mjs artifacts/dsh-bundle`。GitHub Actions 的 **DSH workbench bundle** 提供同一构建的 `sand-table-dsh-bundle` 制品。自动安装覆盖 Linux Web profile，macOS、Windows、DSH Desktop 和真实模型留待实机观察。
