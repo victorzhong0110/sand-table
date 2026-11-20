@@ -24,12 +24,15 @@ ECharts 按需块使用 `echarts/core` 与明确导入的三种图、CanvasRende
 type ChartConfigV2 = {
   kind: "bar" | "line" | "scatter";
   mapping: { x: string; y: string[] };
+  aggregation?: "none" | "sum" | "mean" | "count" | "max" | "min";
   title?: string;
   legacyPoints?: unknown;
 };
 ```
 
-字段使用表格列的稳定 key，来源由 `base.data_source` 持久关系绑定。显示名字和单位从表格列读取。`legacyPoints` 在 v1 的旧图没有绑定来源时保留原数据，迁移保持无损。T48 的聚合配置按源列和运算枚举另行声明。图表转换层读运行时配置，当前原型在 [echarts.mjs](../../workbench/spikes/charts/echarts.mjs)。主题和行高亮由调用方作为运行时状态传入。
+字段使用表格列的稳定 key，来源由 `base.data_source` 持久关系绑定。显示名字和单位从表格列读取。`legacyPoints` 在 v1 的旧图没有绑定来源时保留原数据，迁移保持无损。
+
+`aggregation` 缺省为 `none`。其余操作按 `mapping.x` 的有类型值分组，对 `mapping.y` 的每个数字列分别计算。空的 x 不进分组，空的 y 不进入计算，`count` 只计非空数字，无有效值的组结果仍为 `null`。T47 输出原始逐行图。T48 先从受控来源派生聚合视图，转换层用对应结果绘图，并保留成员行 key 用于联动。当前原型在 [echarts.mjs](../../workbench/spikes/charts/echarts.mjs)。主题和行高亮由调用方作为运行时状态传入。
 
 T47 订阅 `source`，删除表格或字段时显示具体原因。基础图默认选第一列和首个数字列，缺数字列时提示选择，禁止偷偷按 0 补齐。T48 把框选索引映射回行 key 后再发筛选或高亮，多个图表各自订阅显式关系，撤销筛选应恢复显示。用户或数据来源提供的值当作文本使用。
 

@@ -85,6 +85,16 @@ try {
           kind.sample.every(({ surface, missing }) => surface > 0 && missing),
         );
       }
+      if (name === "echarts") {
+        assert.ok(
+          charts.kinds.line.sample.every(({ lineBreaks }) => lineBreaks === 2),
+          "折线必须跳过两个缺失数据点",
+        );
+        assert.equal(charts.interaction.hovered, true, "提示事件未触发");
+        assert.equal(charts.interaction.legend, true, "图例未切换");
+        assert.equal(charts.interaction.brushed, 7, "框选返回了错误的范围");
+        assert.equal(charts.interaction.highlight, true, "外部行未高亮");
+      }
       report[name] = {
         bytes: asset.contents.length,
         gzip: gzipSync(asset.contents).length,
