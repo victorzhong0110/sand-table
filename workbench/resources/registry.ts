@@ -5,6 +5,7 @@ import type {
   ResourceRead,
   ResourceOpen,
   ResourceEdit,
+  ResourceRestore,
   Unavailable,
 } from "./types.ts";
 
@@ -207,6 +208,43 @@ export function createResourceRegistry() {
           ? provider.export(ref)
           : unavailable(ref, "unsupported", "原插件不支持导出这个资源。"),
       );
+    },
+    restorer(ref: ResourceRef): ResourceRestore | undefined {
+      const original = find(ref);
+      const alternatives = [...providers.values()].filter(
+        ({ provider }) =>
+          provider.describe().providerId === ref.providerId &&
+          typeof provider.restore === "function",
+      );
+      const entry = original?.provider.restore
+        ? original
+        : alternatives.length === 1
+          ? alternatives[0]
+          : undefined;
+      if (!entry?.provider.restore) return;
+      const description = entry.provider.describe();
+      return async (file, owner, signal) => {
+        if (providers.get(keyOf(description)) !== entry)
+          throw Error("导入期间资源插件已停用，请重新启用后导入。");
+        const result = await entry.provider.restore!(file, owner, signal);
+        if (
+          isResourceRef(result.ref) &&
+          keyOf(result.ref) === keyOf(ref) &&
+          result.ref.resourceId === ref.resourceId
+        )
+          throw Error("资源插件返回了原对象，请检查独立副本支持。");
+        if (
+          !isResourceRef(result.ref) ||
+          keyOf(result.ref) !== keyOf(description) ||
+          !result.ref.revision ||
+          result.ref.anchor ||
+          providers.get(keyOf(description)) !== entry
+        ) {
+          await result.discard();
+          throw Error("原插件没有返回有效的独立资源引用。");
+        }
+        return result;
+      };
     },
     watch(ref: ResourceRef, listener: (value: ResourceRead) => void) {
       find(ref);

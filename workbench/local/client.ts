@@ -102,6 +102,58 @@ async function request(route: string, data: unknown = {}) {
   }
   return result;
 }
+function bindCompositionToolbar() {
+  const actions = document.getElementById("composition-actions");
+  if (!actions) return;
+  const output = element("composition-status");
+  const fileInput = element<HTMLInputElement>("composition-file");
+  const buttons = [...actions.querySelectorAll("button")];
+  async function run(action: "full" | "references" | "import", file?: File) {
+    buttons.forEach((button) => (button.disabled = true));
+    output.textContent =
+      action === "import" ? "正在导入组合…" : "正在导出组合…";
+    try {
+      const response = await fetch(`/composition/${action}`, {
+        method: "POST",
+        headers: { "X-Sand-Token": await ensureToken(false) },
+        body: file,
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => undefined);
+        throw Error(result?.error || "组合操作失败，请重新连接工作台后再试。");
+      }
+      if (action === "import") {
+        const report = await response.json();
+        output.textContent = `已导入「${report.title}」。从工作空间菜单打开。`;
+        return;
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download =
+        action === "full"
+          ? "sand-table-composition.json"
+          : "sand-table-references.json";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      output.textContent =
+        action === "full" ? "完整组合已下载。" : "引用清单已下载。";
+    } catch (error) {
+      output.textContent =
+        error instanceof Error ? error.message : String(error);
+    } finally {
+      fileInput.value = "";
+      buttons.forEach((button) => (button.disabled = false));
+    }
+  }
+  element("composition-export").onclick = () => void run("full");
+  element("composition-references").onclick = () => void run("references");
+  element("composition-import").onclick = () => fileInput.click();
+  fileInput.onchange = () => {
+    const file = fileInput.files?.[0];
+    if (file) void run("import", file);
+  };
+}
 async function rpc(name: string, args: Record<string, unknown> = {}) {
   const r = await request("/rpc", {
     method: "tools/call",
@@ -391,6 +443,7 @@ async function connect(force = false) {
   }
 }
 element("retry").onclick = () => void connect(true).catch(showError);
+bindCompositionToolbar();
 // Pasting a new link into an open tab changes only the fragment, so the
 // document is never reloaded and the new credential would be ignored: the
 // page would keep using the old one and every request would come back

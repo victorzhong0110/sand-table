@@ -68,6 +68,16 @@ export type ResourceEdit = {
     unset?: string[];
   };
 };
+export type ResourceRestoreOwner = {
+  id: string;
+  createdAt: number;
+  cwd?: string;
+};
+export type ResourceRestore = (
+  file: { mediaType: string; text: string },
+  owner: ResourceRestoreOwner,
+  signal: AbortSignal,
+) => Promise<{ ref: ResourceRef; discard(): Promise<void> }>;
 export type ResourceProvider = {
   describe(): ResourceDescription;
   read(
@@ -83,6 +93,7 @@ export type ResourceProvider = {
     ref: ResourceRef,
     request: ResourceEdit,
   ): Promise<ResourceRead> | ResourceRead;
+  restore?: ResourceRestore;
   export?(ref: ResourceRef): Promise<
     | Unavailable
     | {

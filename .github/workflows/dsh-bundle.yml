@@ -1,0 +1,36 @@
+name: DSH workbench bundle
+on:
+  push:
+    branches: [main]
+    paths: ["workbench/**", ".github/workflows/dsh-bundle.yml"]
+  pull_request:
+    paths: ["workbench/**", ".github/workflows/dsh-bundle.yml"]
+permissions:
+  contents: read
+jobs:
+  install-and-run:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workbench
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            workbench/package-lock.json
+            workbench/spikes/dsh-providers/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm --prefix spikes/dsh-providers ci --ignore-scripts
+      - run: npm run build
+      - run: node dsh-plugin/bundle/package.mjs
+      - run: npx playwright install --with-deps chromium
+      - run: node dsh-plugin/bundle/verify-install.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sand-table-dsh-bundle
+          path: workbench/artifacts/dsh-bundle/
+          if-no-files-found: error
+          retention-days: 14

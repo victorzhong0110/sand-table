@@ -13,6 +13,12 @@ export function registerDrawing(ctx, registry, defineTool) {
       get: (args, signal) => host.diagram.get(args, signal),
       getOrigin: () => host.webServer.getOrigin(),
       save: (args, signal) => host.diagram.save(args, signal),
+      ...(typeof host.diagram.removeDiagram === "function"
+        ? {
+            remove: (session, id, revision, signal) =>
+              host.diagram.removeDiagram(session, id, revision, signal),
+          }
+        : {}),
       ...(typeof host.diagram.importDiagram === "function"
         ? {
             load: (session, input, signal) =>

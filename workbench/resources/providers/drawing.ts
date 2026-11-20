@@ -97,7 +97,34 @@ export function createDrawingProvider(options: {
   getOrigin(): string;
   save: Save;
   load?: Load;
+  remove?(
+    session: Session,
+    id: string,
+    expectedRevision: string,
+    signal: AbortSignal,
+  ): Promise<{ ok: boolean }>;
 }) {
+  async function importDiagram(
+    session: Session,
+    text: string,
+    signal: AbortSignal,
+  ) {
+    if (!options.load)
+      throw Error("当前绘图插件不支持可编辑导入，请安装兼容包。");
+    if (key(session.id, session.createdAt, "0".repeat(36)).length > 512)
+      throw Error("当前绘图会话标识过长。");
+    if (Buffer.byteLength(text) > maxDocumentBytes)
+      throw Error("图稿文件超过 8 MiB。");
+    let document;
+    try {
+      document = JSON.parse(text);
+    } catch {
+      throw Error("图稿 JSON 格式无效。");
+    }
+    if (document?.format !== "sand-table.dsh-diagram" || document.version !== 1)
+      throw Error("请使用白板导出的 DSH 图稿文件。");
+    return options.load(session, document, signal);
+  }
   function refFor(diagram: Drawing) {
     const resourceId = key(
       diagram.sessionId,
@@ -244,6 +271,27 @@ export function createDrawingProvider(options: {
         }),
       };
     },
+    ...(options.load && options.remove
+      ? {
+          async restore(file, session, signal) {
+            if (file.mediaType !== mediaType)
+              throw Error("组合里的图稿文件格式不受支持。");
+            const diagram = await importDiagram(session, file.text, signal);
+            return {
+              ref: refFor(diagram),
+              async discard() {
+                const removed = await options.remove!(
+                  session,
+                  diagram.id,
+                  diagram.revision,
+                  AbortSignal.timeout(5000),
+                );
+                if (!removed.ok) throw Error("未能清理导入的图稿副本。");
+              },
+            };
+          },
+        }
+      : {}),
   };
 
   async function reference(
@@ -348,23 +396,7 @@ export function createDrawingProvider(options: {
       );
     },
     async importDocument(session: Session, text: string, signal: AbortSignal) {
-      if (!options.load)
-        throw Error("当前绘图插件不支持可编辑导入，请安装兼容包。");
-      if (Buffer.byteLength(text) > maxDocumentBytes)
-        throw Error("图稿文件超过 8 MiB。");
-      let document;
-      try {
-        document = JSON.parse(text);
-      } catch {
-        throw Error("图稿 JSON 格式无效。");
-      }
-      if (
-        document?.format !== "sand-table.dsh-diagram" ||
-        document.version !== 1
-      )
-        throw Error("请使用白板导出的 DSH 图稿文件。");
-      const diagram = await options.load(session, document, signal);
-      return readDrawing(diagram);
+      return readDrawing(await importDiagram(session, text, signal));
     },
   };
 }
