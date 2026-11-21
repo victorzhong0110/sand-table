@@ -288,8 +288,22 @@ try {
   const table = board
     .locator(".component-card")
     .filter({ hasText: "Plugin table" });
-  assert.match(await table.innerText(), /Round/);
-  assert.match(await table.innerText(), /Score/);
+  assert.equal(
+    await table.getByRole("textbox", { name: "Round列名" }).inputValue(),
+    "Round",
+  );
+  assert.equal(
+    await table.getByRole("textbox", { name: "Score列名" }).inputValue(),
+    "Score",
+  );
+  assert.equal(
+    await table.getByLabel("第 1 行 Round", { exact: true }).inputValue(),
+    "1",
+  );
+  assert.equal(
+    await table.getByLabel("第 1 行 Score", { exact: true }).inputValue(),
+    "0.9",
+  );
   const ai = board.getByRole("complementary", {
     name: "和 AI 协作",
     exact: true,
@@ -317,7 +331,7 @@ try {
   assert.ok(JSON.stringify(firstArtifacts).includes("Plugin table"));
   assert.ok(!JSON.stringify(firstArtifacts).includes("AI 回复"));
   await ai.getByRole("button", { name: "收起 AI 协作" }).click();
-  await table.click();
+  await table.click({ position: { x: 8, y: 90 } });
   await board.getByRole("button", { name: /询问选区/ }).click();
   assert.equal(await ai.getByLabel("AI 讨论范围").inputValue(), "selection");
   await ai
