@@ -169,7 +169,7 @@ export const V3_FIELDS: Record<string, string[]> = {
   "base.metric": ["description", "unit", "value"],
   "base.status": ["description", "observedAt", "sourceUrl", "state"],
   "base.table": ["columns", "rows"],
-  "base.chart": ["kind", "points"],
+  "base.chart": ["kind", "mapping", "title", "legacyPoints", "aggregation"],
   "base.events": ["events"],
   "base.task": ["goal", "items"],
   "base.reasoning": ["decision", "evidence", "options", "question", "unknowns"],

@@ -94,8 +94,8 @@ const samples: {
     type: "base.table",
     ok: [
       {
-        columns: ["名称", "数量", "完成", "备注"],
-        rows: [["甲", 1, true, null]],
+        columns: [{ key: "c1", label: "数量", type: "number" }],
+        rows: [{ key: "r1", cells: { c1: 1 } }],
       },
       { columns: [], rows: [] },
     ],
@@ -103,8 +103,8 @@ const samples: {
   },
   {
     type: "base.chart",
-    ok: [{ kind: "bar", points: [{ label: "一月", value: 3 }] }],
-    bad: [{ points: [{ label: "一月" }] }, { kind: "pie" }],
+    ok: [{ kind: "bar", legacyPoints: [{ label: "一月", value: 3 }] }],
+    bad: [{ legacyPoints: [{ label: "一月" }] }, { kind: "pie" }],
   },
   {
     type: "base.events",
@@ -542,10 +542,14 @@ test("每个字段都有中文标签和控件，摘要只取可见字段", () =>
       );
     else assert.equal(pack.registerTools, undefined, `${pack.id} 不该注册工具`);
     for (const type of pack.types ?? []) {
+      const builtinViews: Record<string, string> = {
+        "base.table": "table",
+        "base.chart": "chart",
+      };
       assert.equal(
         type.display.view,
-        undefined,
-        `${type.type} 不该指定自定义视图`,
+        builtinViews[type.type],
+        `${type.type} 的视图须使用约定的名称`,
       );
       const hits: string[] = [];
       fieldsMissingHints(type.schema, type.type, hits);

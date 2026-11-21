@@ -27,6 +27,7 @@ export function createComponentRuntime(read: ChunkRead) {
   const globals = globalThis as typeof globalThis & {
     pdfjsWorker?: { WorkerMessageHandler?: unknown };
     sandTablePdf?: { getDocument: typeof getDocument };
+    sandTableChart?: unknown;
   };
 
   function startLoad(name: ComponentResource, uri: string) {

@@ -260,8 +260,8 @@ v1 清单（`{version: 1, id, name, components: [...]}`）导入时自动转换�
 | `base.code_snippet` | 代码片段 | 否 | `language`（`x-sand-default: "text"`）、`text` |
 | `base.metric` | 指标 | 否 | `value`、`unit`、`description` |
 | `base.status` | 状态 | 否 | `state`、`description`、`sourceUrl` |
-| `base.table` | 表格 | 否 | `columns`、`rows` |
-| `base.chart` | 图表 | 否 | `kind`（`x-sand-default: "bar"`）、`points` |
+| `base.table` | 表格 | 否 | v2 `columns`（稳定 key、标题、类型、可选单位）、`rows`（稳定 key、cells） |
+| `base.chart` | 图表 | 否 | v2 `kind`、`mapping`、可选 `title` 与 `legacyPoints`，`source` 槽绑定 `base.table` |
 | `base.events` | 事件流 | 否 | `events` |
 | `base.task` | 任务清单 | 否 | `goal`、`items` |
 | `base.reasoning` | 推理 | 否 | `question`、`evidence`、`options`、`decision`、`unknowns` |
@@ -290,6 +290,8 @@ v1 清单（`{version: 1, id, name, components: [...]}`）导入时自动转换�
 
 
 ## 9. 功能组件的受控绑定（组件阶段验收）
+
+`base.data_source` 从 `base.chart` 指向 `base.table`。`source` 槽最多绑定一个表格，图表的 `mapping.x` 与 `mapping.y` 保存列 key。没有绑定时，v1 的图表数据从 `legacyPoints` 读取。表格的行和列重命名不改变 key，清空的单元格保存为 `null`。
 
 图表读取表格、比较读取两个对象/版本、关系图读取有界查询，通过持久关系槽声明绑定，不复制源数据。宿主提供 readBindings({slot, ids?, fields?, limit?, cursor?})：仅可访问声明并已绑定的目标，返回版本、来源与失效原因。任意未绑定 ID 拒绝。
 

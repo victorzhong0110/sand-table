@@ -428,6 +428,7 @@ export function unframeCommandCount(
 
 export type MenuAction =
   | "edit"
+  | "generate-chart"
   | "duplicate"
   | "clone"
   | "align-left"
@@ -472,6 +473,7 @@ export function componentMenu(input: {
   alignCount: number;
   targetLocked: boolean;
   targetIsFrame: boolean;
+  targetIsTable?: boolean;
   canFrame: boolean;
 }): MenuEntry[] {
   const distribute: MenuEntry[] = [
@@ -492,6 +494,9 @@ export function componentMenu(input: {
   ];
   return [
     { id: "edit", label: "编辑" },
+    ...(input.targetIsTable
+      ? [{ id: "generate-chart" as const, label: "生成图表" }]
+      : []),
     { id: "duplicate", label: "再放一份" },
     { id: "clone", label: "复制为独立对象" },
     ...(input.alignCount >= 2 ? [...ALIGN_ENTRIES, ...distribute] : []),
