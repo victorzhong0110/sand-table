@@ -1,6 +1,7 @@
 import type {
   BindingItem,
   BindingsResult,
+  ExpandedBindings,
   VersionResult,
 } from "../../kernel/index.ts";
 import type { V3Store, V3Tool } from "../data-client/store.ts";
@@ -21,7 +22,11 @@ export type Bindings = {
   ): Promise<VersionResult>;
   subscribe(slot: string, onChange: () => void): () => void;
 };
-export type BindingSession = Bindings & { dispose(): void };
+export type BindingSession = Bindings & {
+  readGraph(forAction?: boolean): Promise<ExpandedBindings>;
+  subscribeGraph(onChange: () => void): () => void;
+  dispose(): void;
+};
 
 type Subscription = {
   slot: string;
@@ -42,6 +47,8 @@ export function createBindings(
   const readerPack = store.cache.objects.get(objectId)?.type.split(".")[0];
   const pending = new Map<string, number>();
   const subscriptions = new Set<Subscription>();
+  const graphSubscribers = new Set<() => void>();
+  let graphNodes: Set<string> | undefined;
   let disposed = false;
   let serial = 0;
   const stale = () => Error("绑定读取结果已过期。请刷新后重试。");
@@ -51,7 +58,7 @@ export function createBindings(
     );
   }
   async function request(
-    action: "read" | "version",
+    action: "read" | "version" | "expand",
     slot: string,
     options: Record<string, unknown>,
     key: string,
@@ -105,6 +112,22 @@ export function createBindings(
       dispose();
       return;
     }
+    if (
+      graphSubscribers.size &&
+      (event.reset ||
+        event.packs.length ||
+        event.objects.some(
+          ({ id }) => id === objectId || !graphNodes || graphNodes.has(id),
+        ) ||
+        event.relations.some(
+          ({ sourceId, targetId }) =>
+            sourceId === objectId ||
+            !graphNodes ||
+            graphNodes.has(sourceId) ||
+            graphNodes.has(targetId),
+        ))
+    )
+      for (const callback of graphSubscribers) callback();
     for (const sub of subscriptions) {
       const slot = slots.find((item) => item.key === sub.slot);
       const relationChanged = event.relations.some(
@@ -138,9 +161,29 @@ export function createBindings(
     disposed = true;
     pending.clear();
     subscriptions.clear();
+    graphSubscribers.clear();
+    graphNodes = undefined;
     unsubscribeStore();
   }
   return {
+    async readGraph(forAction = false) {
+      const result: ExpandedBindings = await request(
+        "expand",
+        "focus",
+        {},
+        forAction ? "graph-action" : "graph",
+      );
+      if (!forAction) graphNodes = new Set(result.nodes.map(({ id }) => id));
+      return result;
+    },
+    subscribeGraph(callback) {
+      if (!valid()) return () => {};
+      graphSubscribers.add(callback);
+      return () => {
+        graphSubscribers.delete(callback);
+        if (!graphSubscribers.size) graphNodes = undefined;
+      };
+    },
     async read(slot, opts = {}) {
       const result = await request("read", slot, opts, `read:${slot}`);
       return {

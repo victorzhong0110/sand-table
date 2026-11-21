@@ -1,0 +1,66 @@
+.relation-graph {
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.graph-surface {
+  position: relative;
+  min-height: 130px;
+  flex: 1;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.graph-fit {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+}
+
+.graph-vertex {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  cursor: grab;
+}
+
+.graph-vertex span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-vertex .react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.graph-center {
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.graph-filter {
+  font-size: 12px;
+}
+
+.graph-filter label {
+  display: flex;
+  flex-direction: column;
+}
+
+.graph-error,
+.graph-object-detail {
+  font-size: 12px;
+}

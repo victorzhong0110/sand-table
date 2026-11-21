@@ -134,6 +134,44 @@ export function CustomView({
       return runtime.call("app_edit", { workspaceId, commands: plan.commands });
     },
   };
+  const graph =
+    object.type === "base.relation_graph"
+      ? {
+          read: active.session.readGraph,
+          subscribe: active.session.subscribeGraph,
+          async locate(id: string) {
+            requireActive();
+            const result = await active.session.readGraph(true);
+            requireActive();
+            const node = result.nodes.find((item) => item.id === id);
+            if (!node) throw Error("该对象已不在关系图范围内。");
+            return (await runtime.focusObject?.(id)) ? null : node;
+          },
+          async addCenter(id: string) {
+            requireActive();
+            if (object.migrationError || !catalog.specs.has(object.type))
+              throw Error("当前关系图是只读的。");
+            const result = await active.session.readGraph(true);
+            requireActive();
+            const node = result.nodes.find((item) => item.id === id);
+            if (!node) throw Error("该对象已不在关系图范围内。");
+            if (node.depth === 0) return;
+            await runtime.call("app_edit", {
+              workspaceId,
+              commands: [
+                {
+                  op: "relation.create",
+                  kind: "base.graph_focus",
+                  sourceId: objectId,
+                  targetId: id,
+                  expectedSourceVersion: object.version,
+                  expectedTargetVersion: node.version,
+                },
+              ],
+            });
+          },
+        }
+      : undefined;
   return (
     <View
       workspaceId={workspaceId}
@@ -145,6 +183,7 @@ export function CustomView({
       dispatch={dispatch}
       bindings={active.session}
       actions={actions}
+      graph={graph}
     />
   );
 }

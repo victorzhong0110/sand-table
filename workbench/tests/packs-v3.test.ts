@@ -34,6 +34,16 @@ const samples: {
     ],
   },
   {
+    type: "base.relation_graph",
+    ok: [{}, { depth: 3, layout: "radial", kinds: ["base.related"] }],
+    bad: [
+      { depth: 4 },
+      { layout: "grid" },
+      { kinds: ["a", "a"] },
+      { positions: {} },
+    ],
+  },
+  {
     type: "base.note",
     ok: [{ body: "一段说明" }, { body: "" }],
     bad: [{ body: 42 }, { text: "旧字段名" }],
@@ -545,6 +555,7 @@ test("每个字段都有中文标签和控件，摘要只取可见字段", () =>
       const builtinViews: Record<string, string> = {
         "base.table": "table",
         "base.chart": "chart",
+        "base.relation_graph": "relation-graph",
       };
       assert.equal(
         type.display.view,

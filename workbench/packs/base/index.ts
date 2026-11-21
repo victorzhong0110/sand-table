@@ -174,6 +174,58 @@ export const basePack: PackSpec = {
       },
     },
     {
+      type: "base.relation_graph",
+      title: "关系图",
+      description: "从中心对象展开工作空间中已有的关系。",
+      icon: "link",
+      version: 1,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          depth: {
+            type: "integer",
+            enum: [1, 2, 3],
+            "x-sand-default": 1,
+            "x-sand-label": "展开层数",
+            "x-sand-widget": "integer",
+          },
+          kinds: {
+            type: "array",
+            items: { type: "string", maxLength: 100 },
+            maxItems: 200,
+            uniqueItems: true,
+            "x-sand-label": "关系类型",
+            "x-sand-widget": "list",
+            "x-sand-hidden": true,
+          },
+          layout: {
+            type: "string",
+            enum: ["layered", "radial"],
+            "x-sand-default": "layered",
+            "x-sand-label": "布局",
+            "x-sand-widget": "enum",
+            "x-sand-enum-labels": { layered: "分层", radial: "放射" },
+          },
+        },
+      },
+      display: {
+        view: "relation-graph",
+        material: "document",
+        defaultSize: { width: 520, height: 390 },
+        summary: ["depth", "layout"],
+      },
+      relationSlots: [
+        {
+          key: "focus",
+          label: "中心对象",
+          kind: "base.graph_focus",
+          direction: "out",
+          many: true,
+        },
+      ],
+    },
+    {
       type: "base.note",
       title: "便签",
       description: "一段文字：可以关于某个对象。",
@@ -880,6 +932,13 @@ export const basePack: PackSpec = {
       allowsInferred: false,
       sourceTypes: ["base.chart"],
       targetTypes: ["base.table"],
+    },
+    {
+      kind: "base.graph_focus",
+      title: "图中心",
+      inverseTitle: "所在关系图",
+      sourceTypes: ["base.relation_graph"],
+      allowsInferred: false,
     },
     {
       kind: "base.related",

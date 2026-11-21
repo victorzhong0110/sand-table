@@ -26,6 +26,7 @@ export function createComponentRuntime(read: ChunkRead) {
   >();
   const globals = globalThis as typeof globalThis & {
     pdfjsWorker?: { WorkerMessageHandler?: unknown };
+    sandTableGraphLayout?: typeof import("@dagrejs/dagre");
     sandTablePdf?: { getDocument: typeof getDocument };
     sandTableChart?: unknown;
   };
