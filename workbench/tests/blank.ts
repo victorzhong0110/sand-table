@@ -4155,6 +4155,25 @@ try {
     ).depth,
     0,
   );
+  const personHandle = frame
+    .locator(`[data-instance-id="${graphFixture.created.personPresentation}"]`)
+    .getByLabel("拖出关系");
+  await personHandle.dragTo(third);
+  await frame
+    .getByRole("dialog", { name: "选择关系" })
+    .getByRole("button", { name: "相关", exact: true })
+    .click();
+  const graphLink = await call("sand_read", {
+    ids: [graphFixture.created.person1],
+    include: ["relations"],
+  });
+  assert.ok(
+    graphLink.objects[0].relations.some(
+      (relation: { kind: string; otherId: string }) =>
+        relation.kind === "base.related" &&
+        relation.otherId === graphFixture.created.graph,
+    ),
+  );
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",

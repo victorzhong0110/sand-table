@@ -161,7 +161,9 @@ function releasePoint(
 /** 连线预览画在卡片上面。从最上层往下找，落到哪张卡片上。 */
 function nodeIdAtPoint(x: number, y: number): string | null {
   for (const element of document.elementsFromPoint(x, y)) {
-    const id = element.closest(".react-flow__node")?.getAttribute("data-id");
+    const id = element
+      .closest(".react-flow__node-card")
+      ?.getAttribute("data-id");
     if (id) return id;
   }
   return null;
