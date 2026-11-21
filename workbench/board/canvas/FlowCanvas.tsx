@@ -73,6 +73,8 @@ import {
   type NavFrame,
 } from "./navigation.ts";
 import { v3TypeOf } from "../data-client/adapter.ts";
+import { initialMapping } from "../data/chart-config.ts";
+import { tableOf } from "../data/table-model.ts";
 import {
   componentTypes,
   displayRect,
@@ -1884,6 +1886,48 @@ function FlowSurface({
     closeMenu();
     if (action !== "edit" && action !== "delete-object") restoreFocus();
     switch (action) {
+      case "generate-chart": {
+        if (!target?.objectId || target.kernelType !== "base.table") return;
+        const source = b.contentObjects.find(
+          (item) => item.id === target.objectId,
+        );
+        if (!source) {
+          showNotice("请重新打开源表格后生成图表。");
+          return;
+        }
+        const mapping = initialMapping(tableOf(source.data).columns);
+        const title = (source.title || "表格").slice(0, 190) + "图表";
+        void call("app_edit", {
+          workspaceId: b.workspaceId,
+          commands: [
+            {
+              op: "object.create",
+              type: "base.chart",
+              ref: "chart",
+              title,
+              data: { kind: "bar", ...(mapping ? { mapping } : {}) },
+            },
+            {
+              op: "presentation.create",
+              boardId: view.spaceId,
+              objectId: "@chart",
+              x: target.rect.x + target.rect.width + 24,
+              y: target.rect.y,
+              ...(target.parentId ? { parentId: target.parentId } : {}),
+            },
+            {
+              op: "relation.create",
+              kind: "base.data_source",
+              sourceId: "@chart",
+              targetId: source.id,
+              expectedTargetVersion: source.version,
+            },
+          ],
+        }).catch((error) =>
+          showNotice(error instanceof Error ? error.message : "图表未能生成。"),
+        );
+        return;
+      }
       case "edit": {
         focusReturn.current = null;
         if (!target) {
@@ -2237,6 +2281,9 @@ function FlowSurface({
           targetIsFrame:
             b.instances.find((item) => item.id === menu.targetId)?.type ===
             "base.frame",
+          targetIsTable:
+            b.instances.find((item) => item.id === menu.targetId)
+              ?.kernelType === "base.table",
           canFrame: framePlan(boardItems, menu.ids) !== null,
         })
       : paneMenu();

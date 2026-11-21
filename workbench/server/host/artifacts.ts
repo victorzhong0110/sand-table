@@ -11,6 +11,7 @@ import {
   type PresentationRow,
 } from "../../kernel/index.ts";
 import { builtinPacks } from "../../packs/index.ts";
+import { migrateTable } from "../../packs/base/index.ts";
 import {
   BOARD_PROVIDER_ID,
   boardNamespace,
@@ -187,7 +188,7 @@ export function createArtifactWriter(root: string) {
                       : value.body,
                   }
                 : value.kind === "table"
-                  ? { columns: value.columns, rows: value.rows }
+                  ? migrateTable({ columns: value.columns, rows: value.rows })
                   : { note: value.note ?? "" },
             source,
           },

@@ -10,10 +10,103 @@
 // v2 的占位值不留：内容字段不写 default，配置类默认值写在 x-sand-default，
 // 没填就是字段不存在。
 
-import type { PackSpec } from "../../kernel/index.ts";
+import type { JsonSchema, PackSpec } from "../../kernel/index.ts";
 
 /** 空字符串表示还没填；填了就必须是 http 或 https。 */
 const HTTP_URL = "^(?:[hH][tT][tT][pP][sS]?://\\S+)?$";
+
+const tableKey = {
+  type: "string",
+  pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+  "x-sand-label": "标识",
+  "x-sand-widget": "text",
+};
+const cell = {
+  anyOf: [
+    { type: "string" },
+    { type: "number" },
+    { type: "boolean" },
+    { type: "null" },
+  ],
+};
+const oldChartPoints: JsonSchema = {
+  type: "array",
+  maxItems: 100,
+  "x-sand-label": "旧图表数据点",
+  "x-sand-widget": "list",
+  "x-sand-hidden": true,
+  items: {
+    type: "object",
+    additionalProperties: false,
+    required: ["label", "value"],
+    properties: {
+      label: {
+        type: "string",
+        maxLength: 100,
+        "x-sand-label": "标签",
+        "x-sand-widget": "text",
+      },
+      value: {
+        type: "number",
+        "x-sand-label": "数值",
+        "x-sand-widget": "number",
+      },
+    },
+  },
+};
+
+function numericCell(value: unknown) {
+  return (
+    (typeof value === "number" && Number.isFinite(value)) ||
+    (typeof value === "string" &&
+      Number.isFinite(Number(value)) &&
+      String(Number(value)) === value)
+  );
+}
+
+export function migrateTable(
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  const labels = Array.isArray(data.columns) ? data.columns : [];
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  if (rows.length > 200) throw Error("原表超过 200 行。");
+  const width = Math.max(labels.length, ...rows.map((row) => row.length));
+  if (width > 200) throw Error("原表超过 200 列。");
+  const columns = Array.from({ length: width }, (_, index) => {
+    const items = rows
+      .map((row) => row[index])
+      .filter((value) => value != null && value !== "");
+    return {
+      key: `c${index + 1}`,
+      label: labels[index] ?? `列 ${index + 1}`,
+      type: items.length && items.every(numericCell) ? "number" : "text",
+    };
+  });
+  return {
+    columns,
+    rows: rows.map((row, index) => ({
+      key: `r${index + 1}`,
+      cells: Object.fromEntries(
+        columns.map(({ key, type }, column) => {
+          const value = row[column] ?? null;
+          return [
+            key,
+            type === "number" && value !== "" && value !== null
+              ? Number(value)
+              : value,
+          ];
+        }),
+      ),
+    })),
+  };
+}
+
+export function migrateChart(
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  const { points, ...rest } = data;
+  return { ...rest, ...(points === undefined ? {} : { legacyPoints: points }) };
+}
 
 export const basePack: PackSpec = {
   id: "base",
@@ -339,93 +432,151 @@ export const basePack: PackSpec = {
     {
       type: "base.table",
       title: "表格",
-      description: "一张表：列名加上若干行。",
+      description: "按列类型保存、编辑和引用数据。",
       icon: "table",
-      version: 1,
+      version: 2,
       schema: {
         type: "object",
         additionalProperties: false,
         properties: {
           columns: {
             type: "array",
-            maxItems: 20,
-            items: { type: "string", maxLength: 200 },
-            "x-sand-label": "列名",
-            "x-sand-widget": "tags",
+            maxItems: 200,
+            "x-sand-label": "列定义",
+            "x-sand-widget": "list",
+            "x-sand-hidden": true,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["key", "label", "type"],
+              properties: {
+                key: tableKey,
+                label: {
+                  type: "string",
+                  maxLength: 200,
+                  "x-sand-label": "名称",
+                  "x-sand-widget": "text",
+                },
+                type: {
+                  type: "string",
+                  enum: ["text", "number", "date", "boolean"],
+                  "x-sand-label": "类型",
+                  "x-sand-widget": "enum",
+                },
+                unit: {
+                  type: "string",
+                  maxLength: 200,
+                  "x-sand-label": "单位",
+                  "x-sand-widget": "text",
+                },
+              },
+            },
           },
           rows: {
             type: "array",
             maxItems: 200,
+            "x-sand-label": "行数据",
+            "x-sand-widget": "list",
+            "x-sand-hidden": true,
             items: {
-              type: "array",
-              items: {
-                anyOf: [
-                  { type: "string" },
-                  { type: "number" },
-                  { type: "boolean" },
-                  { type: "null" },
-                ],
+              type: "object",
+              additionalProperties: false,
+              required: ["key", "cells"],
+              properties: {
+                key: tableKey,
+                cells: {
+                  type: "object",
+                  propertyNames: tableKey,
+                  additionalProperties: cell,
+                  "x-sand-label": "单元格",
+                  "x-sand-widget": "table",
+                },
               },
             },
-            "x-sand-label": "数据",
-            "x-sand-widget": "table",
           },
         },
       },
+      migrations: [{ from: 1, migrate: migrateTable }],
       display: {
         material: "document",
-        defaultSize: { width: 360, height: 220 },
-        summary: ["columns", "rows"],
+        defaultSize: { width: 420, height: 255 },
+        summary: [],
+        view: "table",
       },
     },
     {
       type: "base.chart",
       title: "图表",
-      description: "一组带标签的数值。",
+      description: "用柱状图、折线或散点查看同一份表格数据。",
       icon: "chart",
-      version: 1,
+      version: 2,
       schema: {
         type: "object",
         additionalProperties: false,
         properties: {
           kind: {
             type: "string",
-            enum: ["bar", "line"],
+            enum: ["bar", "line", "scatter"],
+            "x-sand-default": "bar",
             "x-sand-label": "图表形式",
             "x-sand-widget": "enum",
-            "x-sand-default": "bar",
-            "x-sand-enum-labels": { bar: "柱状图", line: "折线图" },
+            "x-sand-enum-labels": {
+              bar: "柱状图",
+              line: "折线图",
+              scatter: "散点图",
+            },
           },
-          points: {
-            type: "array",
-            maxItems: 100,
-            items: {
-              type: "object",
-              additionalProperties: false,
-              required: ["label", "value"],
-              properties: {
-                label: {
-                  type: "string",
-                  maxLength: 100,
-                  "x-sand-label": "标签",
-                  "x-sand-widget": "text",
-                },
-                value: {
-                  type: "number",
-                  "x-sand-label": "数值",
-                  "x-sand-widget": "number",
-                },
+          title: {
+            type: "string",
+            maxLength: 200,
+            "x-sand-label": "图表标题",
+            "x-sand-widget": "text",
+          },
+          mapping: {
+            type: "object",
+            additionalProperties: false,
+            required: ["x", "y"],
+            "x-sand-label": "字段映射",
+            "x-sand-widget": "table",
+            "x-sand-hidden": true,
+            properties: {
+              x: tableKey,
+              y: {
+                type: "array",
+                maxItems: 20,
+                uniqueItems: true,
+                items: tableKey,
+                "x-sand-label": "数值列",
+                "x-sand-widget": "tags",
               },
             },
-            "x-sand-label": "数据点",
-            "x-sand-widget": "list",
           },
+          aggregation: {
+            type: "string",
+            enum: ["none"],
+            "x-sand-label": "聚合",
+            "x-sand-widget": "enum",
+            "x-sand-hidden": true,
+          },
+          legacyPoints: oldChartPoints,
         },
       },
+      migrations: [{ from: 1, migrate: migrateChart }],
+      relationSlots: [
+        {
+          key: "source",
+          label: "源表格",
+          kind: "base.data_source",
+          direction: "out",
+          targetTypes: ["base.table"],
+          many: false,
+        },
+      ],
       display: {
         material: "gauge",
         defaultSize: { width: 360, height: 240 },
-        summary: ["kind", "points"],
+        summary: ["kind", "title"],
+        view: "chart",
       },
     },
     {
@@ -722,6 +873,14 @@ export const basePack: PackSpec = {
     },
   ],
   relationKinds: [
+    {
+      kind: "base.data_source",
+      title: "数据来源",
+      inverseTitle: "供图表使用",
+      allowsInferred: false,
+      sourceTypes: ["base.chart"],
+      targetTypes: ["base.table"],
+    },
     {
       kind: "base.related",
       title: "相关",

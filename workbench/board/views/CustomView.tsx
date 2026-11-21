@@ -53,6 +53,7 @@ export function CustomView({
   if (
     !View ||
     !runtime ||
+    !workspaceId ||
     !active ||
     active.objectId !== objectId ||
     active.workspaceId !== workspaceId ||
@@ -135,6 +136,7 @@ export function CustomView({
   };
   return (
     <View
+      workspaceId={workspaceId}
       object={object as unknown as ObjectRow}
       spec={spec as TypeSpec}
       presentation={presentation as PresentationRow}

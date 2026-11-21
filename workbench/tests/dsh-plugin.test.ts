@@ -164,6 +164,7 @@ test("X7：Host 半导出 apply，并且不 import 宿主包", () => {
           "./drawing/host.js",
           "../server/host/artifacts.ts",
           "../server/host/contracts.ts",
+          "../packs/base/index.ts",
         ].includes(specifier),
       `运行时代码不 import ${specifier}（不引宿主包、不引第三方包）`,
     );

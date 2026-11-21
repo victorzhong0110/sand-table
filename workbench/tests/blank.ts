@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
+import { DatabaseSync } from "node:sqlite";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { build } from "esbuild";
@@ -3830,6 +3831,206 @@ try {
     .waitFor({ timeout: 2000 });
   await bindingPage.close();
   await editingPage.close();
+  await call("app_workspace", {
+    action: "create",
+    id: "table-chart-verify",
+    title: "表格和图表",
+  });
+  await call("app_workspace", { action: "switch", id: "table-chart-verify" });
+  const tableHome = (await call("sand_status")).homeBoardId;
+  const chartFixture = await call("app_edit", {
+    commands: [
+      {
+        op: "object.create",
+        ref: "table",
+        type: "base.table",
+        title: "测量日志",
+        data: {
+          columns: [
+            { key: "x", label: "组别", type: "text" },
+            { key: "y", label: "测量值", type: "number" },
+          ],
+          rows: [
+            { key: "r1", cells: { x: "甲", y: 4 } },
+            { key: "r2", cells: { x: "乙", y: 12 } },
+          ],
+        },
+      },
+      {
+        op: "presentation.create",
+        ref: "tablePlace",
+        boardId: tableHome,
+        objectId: "@table",
+        x: 80,
+        y: 150,
+      },
+      {
+        op: "object.create",
+        ref: "oldTable",
+        type: "base.table",
+        title: "旧数据表",
+      },
+      {
+        op: "presentation.create",
+        ref: "oldTablePlace",
+        boardId: tableHome,
+        objectId: "@oldTable",
+        x: 80,
+        y: 430,
+      },
+    ],
+  });
+  const legacyDb = new DatabaseSync(
+    join(root, "workspaces/table-chart-verify/workspace.db"),
+  );
+  try {
+    legacyDb
+      .prepare("UPDATE objects SET type_version = 1, data = ? WHERE id = ?")
+      .run(
+        JSON.stringify({ columns: ["旧数字"], rows: [["8"]] }),
+        chartFixture.created.oldTable,
+      );
+  } finally {
+    legacyDb.close();
+  }
+  await page.goto(c.url);
+  const tableCard = frame.locator(
+    `[data-instance-id="${chartFixture.created.tablePlace}"]`,
+  );
+  await tableCard
+    .getByText("测量日志", { exact: true })
+    .first()
+    .click({ button: "right" });
+  await frame.getByRole("menuitem", { name: "生成图表", exact: true }).click();
+  const chart = frame.getByRole("region", { name: "图表", exact: true });
+  const plot = chart.locator("canvas").first();
+  await plot.waitFor();
+  const oldCell = frame
+    .locator(`[data-instance-id="${chartFixture.created.oldTablePlace}"]`)
+    .getByLabel("第 1 行 旧数字");
+  assert.equal(await oldCell.inputValue(), "8");
+  await oldCell.fill("11");
+  for (let attempt = 0; ; attempt++) {
+    const { objects } = await call("sand_read", {
+      ids: [chartFixture.created.oldTable],
+    });
+    if (objects[0].data.rows[0].cells.c1 === 11) {
+      assert.equal(objects[0].typeVersion, 2);
+      break;
+    }
+    assert.notEqual(attempt, 29, "旧表格必须可以编辑并保存为当前版本");
+    await page.waitForTimeout(50);
+  }
+  const chartRecord = (
+    await call("app_board", { boardId: tableHome })
+  ).objects.find((item: { title: string }) => item.title === "测量日志图表");
+  assert.ok(chartRecord);
+  const shared = await call("app_edit", {
+    commands: [
+      {
+        op: "object.create",
+        ref: "chartBoard",
+        type: "base.board",
+        title: "共享图表白板",
+      },
+      {
+        op: "presentation.create",
+        ref: "chartBoardEntry",
+        boardId: tableHome,
+        objectId: "@chartBoard",
+        x: 530,
+        y: 430,
+      },
+      {
+        op: "presentation.create",
+        ref: "chartCopy",
+        boardId: "@chartBoard",
+        objectId: chartRecord.id,
+        x: 0,
+        y: 0,
+      },
+    ],
+  });
+  const enterChartBoard = () =>
+    frame
+      .locator(`[data-instance-id="${shared.created.chartBoardEntry}"]`)
+      .getByRole("button", { name: "进入白板" })
+      .evaluate((node: HTMLButtonElement) => node.click());
+  const chartCopy = frame
+    .locator(`[data-instance-id="${shared.created.chartCopy}"]`)
+    .locator("canvas")
+    .first();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await enterChartBoard();
+  const copyBefore = await chartCopy.evaluate((node: HTMLCanvasElement) =>
+    node.toDataURL(),
+  );
+  await frame
+    .locator(".breadcrumbs")
+    .getByRole("button", { name: "返回", exact: true })
+    .click();
+  const chartBytes = () =>
+    plot.evaluate((node: HTMLCanvasElement) => node.toDataURL());
+  const tableObject = () =>
+    call("sand_read", { ids: [chartFixture.created.table] }).then(
+      (out) => out.objects[0],
+    );
+  const initialPixels = await chartBytes();
+  const cell = tableCard.getByLabel("第 1 行 测量值", { exact: true });
+  await cell.fill("21");
+  async function changedChart(before: string, value: number | null) {
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline) {
+      await page.waitForTimeout(50);
+      if (
+        (await tableObject()).data.rows[0].cells.y !== value ||
+        !(await plot.count())
+      )
+        continue;
+      const latest = await chartBytes().catch(() => before);
+      if (latest !== before) return latest;
+    }
+    throw Error("表格改值后图表没有在 2 秒内刷新。");
+  }
+  const afterEdit = await changedChart(initialPixels, 21);
+  assert.equal((await tableObject()).data.rows[0].cells.y, 21);
+  await enterChartBoard();
+  assert.notEqual(
+    await chartCopy.evaluate((node: HTMLCanvasElement) => node.toDataURL()),
+    copyBefore,
+  );
+  await frame
+    .locator(".breadcrumbs")
+    .getByRole("button", { name: "返回", exact: true })
+    .click();
+  await cell.fill("");
+  await changedChart(afterEdit, null);
+  assert.equal((await tableObject()).data.rows[0].cells.y, null);
+  await call("app_edit", {
+    commands: [{ op: "object.delete", id: chartFixture.created.table }],
+  });
+  await chart.getByText("绑定的表格已删除。", { exact: true }).waitFor();
+  await call("app_history", { action: "undo" });
+  await plot.waitFor();
+  await cell.fill("34");
+  await call("app_edit", {
+    commands: [
+      {
+        op: "object.update",
+        id: chartFixture.created.table,
+        title: "并发重命名的测量日志",
+      },
+    ],
+  });
+  await tableCard.getByText("并发重命名的测量日志", { exact: true }).waitFor();
+  const draftDeadline = Date.now() + 4500;
+  let savedTable = await tableObject();
+  while (savedTable.data.rows[0].cells.y !== 34 && Date.now() < draftDeadline) {
+    await page.waitForTimeout(50);
+    savedTable = await tableObject();
+  }
+  assert.equal(savedTable.title, "并发重命名的测量日志");
+  assert.equal(savedTable.data.rows[0].cells.y, 34);
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",

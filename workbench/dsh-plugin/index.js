@@ -18,6 +18,7 @@ import { createTaskChannel } from "./tasks.js";
 import { ARTIFACT_TOOL } from "./projection.js";
 import { createArtifactWriter } from "../server/host/artifacts.ts";
 import { artifact } from "../server/host/contracts.ts";
+import { migrateChart, migrateTable } from "../packs/base/index.ts";
 import { applyResources } from "./resources.js";
 import { registerDrawing } from "./drawing/host.js";
 import { spawn } from "node:child_process";
@@ -327,6 +328,18 @@ const SHA256 = /^[0-9a-f]{64}$/;
 function mapContentData(type, data) {
   const next =
     data && typeof data === "object" && !Array.isArray(data) ? { ...data } : {};
+  if (
+    (type === "table" || type === "base.table") &&
+    (next.columns !== undefined || next.rows !== undefined) &&
+    (next.columns === undefined ||
+      (Array.isArray(next.columns) &&
+        next.columns.every((column) => typeof column === "string"))) &&
+    (next.rows === undefined ||
+      (Array.isArray(next.rows) && next.rows.every(Array.isArray)))
+  )
+    return migrateTable(next);
+  if ((type === "chart" || type === "base.chart") && next.points !== undefined)
+    return migrateChart(next);
   if (
     (type === "text" || type === "base.note") &&
     !Object.prototype.hasOwnProperty.call(next, "body") &&

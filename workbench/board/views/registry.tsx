@@ -2,7 +2,7 @@ import { createContext, useContext, type JSX } from "react";
 import type {
   Command,
   CommandResult,
-  ObjectRow,
+  MigratedObjectRow,
   PresentationRow,
   TypeSpec,
 } from "../../kernel/index.ts";
@@ -30,6 +30,8 @@ import { TableEditor } from "../widgets/table.tsx";
 import { TagsEditor } from "../widgets/tags.tsx";
 import { TextEditor } from "../widgets/text.tsx";
 import { UrlEditor } from "../widgets/url.tsx";
+import { ChartView } from "../data/ChartView.tsx";
+import { TableView } from "../data/TableView.tsx";
 
 export type WidgetProps = {
   value: unknown;
@@ -47,7 +49,8 @@ export type Widget = {
 };
 
 export type ViewProps = {
-  object: ObjectRow;
+  workspaceId: string;
+  object: MigratedObjectRow;
   spec: TypeSpec;
   presentation: PresentationRow;
   detail: "full" | "label" | "icon";
@@ -83,9 +86,10 @@ export function useViewRuntime() {
   return useContext(ViewRuntimeContext);
 }
 
-/** 本卡只留空表。display.view 对上名字才用，对不上就用通用视图。 */
-export const customViews: Record<string, (props: ViewProps) => JSX.Element> =
-  {};
+export const customViews: Record<string, (props: ViewProps) => JSX.Element> = {
+  table: TableView,
+  chart: ChartView,
+};
 
 export function customView(name: string | undefined) {
   if (!name) return undefined;

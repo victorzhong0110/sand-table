@@ -406,7 +406,7 @@ export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
             size={20}
           />
         </span>
-        {!expanded &&
+        {(!expanded || hasCustomView) &&
           (editor ??
             (detail !== "icon" && (
               <strong className="collapsed-title">{resolved.title}</strong>
