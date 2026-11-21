@@ -35,6 +35,7 @@ import { UrlEditor } from "../widgets/url.tsx";
 import { ChartView } from "../data/ChartView.tsx";
 import { TableView } from "../data/TableView.tsx";
 import { RelationGraphView } from "../graph/GraphView.tsx";
+import type { TableData } from "../data/table-model.ts";
 
 export type WidgetProps = {
   value: unknown;
@@ -69,6 +70,10 @@ export type ViewProps = {
     locate(id: string): Promise<GraphNode | null>;
     addCenter(id: string): Promise<void>;
   };
+  tableFiles?: {
+    create(title: string, table: TableData): Promise<void>;
+    download?(filename: string, text: string): Promise<void>;
+  };
   actions: {
     focusObject(slot: string, targetId: string): Promise<void>;
     openObjectPicker(
@@ -90,6 +95,7 @@ export const ViewRuntimeContext = createContext<{
   store: V3Store;
   call: V3Tool;
   focusObject?: (objectId: string) => Promise<boolean>;
+  downloadFile?: (filename: string, text: string) => Promise<void>;
 } | null>(null);
 export function useViewRuntime() {
   return useContext(ViewRuntimeContext);

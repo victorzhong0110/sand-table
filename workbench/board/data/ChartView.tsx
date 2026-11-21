@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { EChartsType, init } from "echarts/core";
 import type { BindingItem } from "../../kernel/index.ts";
 import { useComponentRuntime } from "../runtime/resources.ts";
@@ -13,6 +13,7 @@ import {
   type ChartKind,
 } from "./chart-config.ts";
 import { tableOf } from "./table-model.ts";
+import { deriveTable, tableViewOf } from "./derive-table.ts";
 
 export function ChartView({ object, readOnly, dispatch, bindings }: ViewProps) {
   const runtime = useComponentRuntime();
@@ -23,8 +24,13 @@ export function ChartView({ object, readOnly, dispatch, bindings }: ViewProps) {
   const [chartError, setChartError] = useState("");
   const [editError, setEditError] = useState("");
   const config = chartOf(object.data);
-  const table =
-    source && !source.migrationError ? tableOf(source.data) : undefined;
+  const table = useMemo(
+    () =>
+      source && !source.migrationError
+        ? deriveTable(tableOf(source.data), tableViewOf(source.data))
+        : undefined,
+    [source],
+  );
   const chartKey = JSON.stringify(config);
 
   useEffect(() => {
@@ -71,10 +77,7 @@ export function ChartView({ object, readOnly, dispatch, bindings }: ViewProps) {
     void (async () => {
       try {
         const settings = JSON.parse(chartKey) as ChartConfig;
-        const data = seriesFor(
-          settings,
-          source ? tableOf(source.data) : undefined,
-        );
+        const data = seriesFor(settings, table);
         if (!runtime) throw Error("当前宿主无法加载图表组件。");
         await runtime.loadComponentResource("charts", controller.signal);
         controller.signal.throwIfAborted();
@@ -107,7 +110,7 @@ export function ChartView({ object, readOnly, dispatch, bindings }: ViewProps) {
       resize?.disconnect();
       chart?.dispose();
     };
-  }, [runtime, chartKey, source, reading, bindingError]);
+  }, [runtime, chartKey, table, reading, bindingError]);
 
   async function edit(set: Record<string, unknown>) {
     try {
@@ -135,6 +138,11 @@ export function ChartView({ object, readOnly, dispatch, bindings }: ViewProps) {
       {!reading && (bindingError || chartError) && (
         <p role="status">{bindingError || chartError}</p>
       )}
+      {table?.configurationErrors.map((error) => (
+        <p role="status" key={error}>
+          {error}
+        </p>
+      ))}
       {!reading && !source && Boolean(config.legacyPoints?.length) && (
         <p>当前显示原有数据点。绑定表格后将改用表格数据，原数据点仍保留。</p>
       )}

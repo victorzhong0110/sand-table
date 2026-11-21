@@ -29,6 +29,93 @@ const cell = {
     { type: "null" },
   ],
 };
+const tableView: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  "x-sand-label": "表格视图",
+  "x-sand-widget": "table",
+  "x-sand-hidden": true,
+  properties: {
+    calculated: {
+      type: "array",
+      maxItems: 200,
+      "x-sand-label": "计算列",
+      "x-sand-widget": "list",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["key", "label", "formula"],
+        properties: {
+          key: tableKey,
+          label: {
+            type: "string",
+            maxLength: 200,
+            "x-sand-label": "名称",
+            "x-sand-widget": "text",
+          },
+          formula: {
+            type: "string",
+            minLength: 1,
+            maxLength: 20000,
+            "x-sand-label": "公式",
+            "x-sand-widget": "text",
+          },
+        },
+      },
+    },
+    filters: {
+      type: "array",
+      maxItems: 200,
+      "x-sand-label": "筛选条件",
+      "x-sand-widget": "list",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["column", "op"],
+        properties: {
+          column: { ...tableKey, "x-sand-label": "列" },
+          op: {
+            type: "string",
+            enum: [
+              "eq",
+              "contains",
+              "gt",
+              "lt",
+              "between",
+              "empty",
+              "not_empty",
+            ],
+            "x-sand-label": "条件",
+            "x-sand-widget": "enum",
+          },
+          value: { ...cell, "x-sand-label": "筛选值", "x-sand-widget": "text" },
+          upper: { ...cell, "x-sand-label": "上限", "x-sand-widget": "text" },
+        },
+      },
+    },
+    sort: {
+      type: "array",
+      maxItems: 200,
+      "x-sand-label": "排序",
+      "x-sand-widget": "list",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["column", "direction"],
+        properties: {
+          column: { ...tableKey, "x-sand-label": "列" },
+          direction: {
+            type: "string",
+            enum: ["asc", "desc"],
+            "x-sand-label": "方向",
+            "x-sand-widget": "enum",
+          },
+        },
+      },
+    },
+    groupBy: { ...tableKey, "x-sand-label": "分组列" },
+  },
+};
 const oldChartPoints: JsonSchema = {
   type: "array",
   maxItems: 100,
@@ -491,6 +578,7 @@ export const basePack: PackSpec = {
         type: "object",
         additionalProperties: false,
         properties: {
+          view: tableView,
           columns: {
             type: "array",
             maxItems: 200,
