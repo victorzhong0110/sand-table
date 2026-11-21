@@ -4163,17 +4163,24 @@ try {
     .getByRole("dialog", { name: "选择关系" })
     .getByRole("button", { name: "相关", exact: true })
     .click();
-  const graphLink = await call("sand_read", {
-    ids: [graphFixture.created.person1],
-    include: ["relations"],
-  });
-  assert.ok(
-    graphLink.objects[0].relations.some(
+  const linkedToGraphCard = async () => {
+    const graphLink = await call("sand_read", {
+      ids: [graphFixture.created.person1],
+      include: ["relations"],
+    });
+    return graphLink.objects[0].relations.some(
       (relation: { kind: string; otherId: string }) =>
         relation.kind === "base.related" &&
         relation.otherId === graphFixture.created.graph,
-    ),
-  );
+    );
+  };
+  const graphLinkDeadline = Date.now() + 4000;
+  let graphLinkSaved = await linkedToGraphCard();
+  while (!graphLinkSaved && Date.now() < graphLinkDeadline) {
+    await page.waitForTimeout(50);
+    graphLinkSaved = await linkedToGraphCard();
+  }
+  assert.ok(graphLinkSaved, "从图内节点落点建立的关系必须指向外层关系图卡片。");
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",
