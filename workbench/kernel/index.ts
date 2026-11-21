@@ -27,8 +27,11 @@ export type {
 } from "./types.ts";
 export { isResourceRef } from "./resource.ts";
 export { CommandError } from "./errors.ts";
-export { readBindings, readObjectVersion } from "./bindings.ts";
+export { expandBindings, readBindings, readObjectVersion } from "./bindings.ts";
 export type {
+  ExpandedBindings,
+  GraphEdge,
+  GraphNode,
   BindingInput,
   BindingItem,
   BindingsResult,

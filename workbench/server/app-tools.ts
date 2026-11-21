@@ -12,6 +12,7 @@ import {
   boardContents,
   changesSince,
   CommandError,
+  expandBindings,
   getMeta,
   historyList,
   jump,
@@ -61,9 +62,9 @@ export function registerAppTools(
 ): void {
   registrar.tool(
     "app_bindings",
-    "Read only objects bound to a declared relation slot, or a bound object's recorded version.",
+    "Read a declared slot or bound object version, or expand the focus of a built-in relation graph.",
     {
-      action: z.enum(["read", "version"]),
+      action: z.enum(["read", "version", "expand"]),
       workspaceId: z.string().min(1),
       objectId: z.string().min(1),
       slot: z.string().min(1),
@@ -77,6 +78,21 @@ export function registerAppTools(
     (args, ctx) => {
       const session = host.session();
       assertSameWorkspace(session.workspaceId, args.workspaceId);
+      if (args.action === "expand") {
+        const result = expandBindings(ctx.db, ctx.registry, {
+          objectId: args.objectId,
+          slot: args.slot,
+        });
+        return toolValue(
+          {
+            workspaceId: session.workspaceId,
+            revision: result.revision,
+            count: result.nodes.length,
+            truncated: result.truncated,
+          },
+          { workspaceId: session.workspaceId, ...result },
+        );
+      }
       if (args.action === "version") {
         if (!args.targetId || args.version === undefined)
           throw new CommandError(

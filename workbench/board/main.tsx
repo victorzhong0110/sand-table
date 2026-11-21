@@ -17,6 +17,7 @@ import { createRoot } from "react-dom/client";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
 import type { Board, Item, GuideFocus } from "./data-client/model.ts";
 import "./style.css";
+import "./graph/graph.css";
 import { FlowCanvas } from "./canvas/FlowCanvas.tsx";
 import { ChangePanel } from "./ChangePanel.tsx";
 import { ThemePanel } from "./ThemePanel.tsx";

@@ -3,6 +3,8 @@ import type {
   Command,
   CommandResult,
   MigratedObjectRow,
+  ExpandedBindings,
+  GraphNode,
   PresentationRow,
   TypeSpec,
 } from "../../kernel/index.ts";
@@ -32,6 +34,7 @@ import { TextEditor } from "../widgets/text.tsx";
 import { UrlEditor } from "../widgets/url.tsx";
 import { ChartView } from "../data/ChartView.tsx";
 import { TableView } from "../data/TableView.tsx";
+import { RelationGraphView } from "../graph/GraphView.tsx";
 
 export type WidgetProps = {
   value: unknown;
@@ -60,6 +63,12 @@ export type ViewProps = {
     options?: { intentId?: string },
   ) => Promise<CommandResult>;
   bindings: Bindings;
+  graph?: {
+    read(): Promise<ExpandedBindings>;
+    subscribe(onChange: () => void): () => void;
+    locate(id: string): Promise<GraphNode | null>;
+    addCenter(id: string): Promise<void>;
+  };
   actions: {
     focusObject(slot: string, targetId: string): Promise<void>;
     openObjectPicker(
@@ -80,7 +89,7 @@ export type ViewProps = {
 export const ViewRuntimeContext = createContext<{
   store: V3Store;
   call: V3Tool;
-  focusObject?: (objectId: string) => Promise<void>;
+  focusObject?: (objectId: string) => Promise<boolean>;
 } | null>(null);
 export function useViewRuntime() {
   return useContext(ViewRuntimeContext);
@@ -89,6 +98,7 @@ export function useViewRuntime() {
 export const customViews: Record<string, (props: ViewProps) => JSX.Element> = {
   table: TableView,
   chart: ChartView,
+  "relation-graph": RelationGraphView,
 };
 
 export function customView(name: string | undefined) {

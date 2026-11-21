@@ -1,4 +1,5 @@
 export const COMPONENT_RESOURCES = {
+  "graph-layout": { file: "graph-layout.js", global: "sandTableGraphLayout" },
   "pdf-worker": { file: "pdf-worker.js", global: "pdfjsWorker" },
   "pdf-api": { file: "pdf-api.js", global: "sandTablePdf" },
   charts: { file: "charts.js", global: "sandTableChart" },

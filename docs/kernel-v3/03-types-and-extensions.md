@@ -254,6 +254,7 @@ v1 清单（`{version: 1, id, name, components: [...]}`）导入时自动转换�
 | `base.board` | 白板 | 是 | 无（标题即白板名） |
 | `base.frame` | 画布上的框，用来分组 | 否 | 无 |
 | `base.note` | 便签 / 文字 | 否 | `body`（markdown） |
+| `base.relation_graph` | 关系图 | 否 | `depth`（1–3，默认 1）、`kinds?`（未设或空数组显示所有声明关系）、`layout`（分层或放射，默认分层） |
 | `base.heading` | 标题 | 否 | `text`、`level`（1–3，`x-sand-default: 1`） |
 | `base.link` | 超链接 | 否 | `url`、`description` |
 | `base.media` | 图片 / 音频 / 视频 | 否 | `blob`、`mime`、`caption`、`alt` |
@@ -293,7 +294,7 @@ v1 清单（`{version: 1, id, name, components: [...]}`）导入时自动转换�
 
 `base.data_source` 从 `base.chart` 指向 `base.table`。`source` 槽最多绑定一个表格，图表的 `mapping.x` 与 `mapping.y` 保存列 key。没有绑定时，v1 的图表数据从 `legacyPoints` 读取。表格的行和列重命名不改变 key，清空的单元格保存为 `null`。
 
-图表读取表格、比较读取两个对象/版本、关系图读取有界查询，通过持久关系槽声明绑定，不复制源数据。宿主提供 readBindings({slot, ids?, fields?, limit?, cursor?})：仅可访问声明并已绑定的目标，返回版本、来源与失效原因。任意未绑定 ID 拒绝。
+图表读取表格、比较读取两个对象/版本、关系图读取有界查询，通过持久关系槽声明绑定，不复制源数据。宿主提供 readBindings({slot, ids?, fields?, limit?, cursor?})：仅可访问声明并已绑定的目标，返回版本、来源与失效原因。任意未绑定 ID 拒绝。内置关系图的多值 focus 槽使用 `base.graph_focus`。展开时从中心遍历有向事实的两个端点，图中按原有方向渲染；中心槽关系不作为事实边。节点位置只属于当前界面会话。
 
 subscribeBindings 提供可取消订阅，源对象/关系变化、删除、包停用或权限变化时通知；卸载释放，以 revision/version 拒绝过期结果。沙箱消息携带 requestId 并逐次验证声明与范围；可读不等于可跨对象写。跨对象动作由显式规则/用户操作授权。
 

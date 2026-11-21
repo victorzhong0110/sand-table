@@ -4031,6 +4031,156 @@ try {
   }
   assert.equal(savedTable.title, "并发重命名的测量日志");
   assert.equal(savedTable.data.rows[0].cells.y, 34);
+  await call("app_workspace", {
+    action: "create",
+    id: "relation-graph-verify",
+    title: "关系图验收",
+  });
+  await call("app_workspace", {
+    action: "switch",
+    id: "relation-graph-verify",
+  });
+  const graphStatus = await call("sand_status");
+  const graphBoardId = graphStatus.homeBoardId as string;
+  const graphFixture = await call("app_edit", {
+    commands: [
+      ...["甲", "乙", "丙"].map((title, index) => ({
+        op: "object.create",
+        type: "novel.character",
+        ref: `person${index}`,
+        title: `关系测试${title}`,
+      })),
+      {
+        op: "object.create",
+        type: "base.relation_graph",
+        ref: "graph",
+        title: "关系测试图",
+        data: { depth: 2, layout: "layered" },
+      },
+      {
+        op: "relation.create",
+        kind: "base.graph_focus",
+        sourceId: "@graph",
+        targetId: "@person0",
+      },
+      {
+        op: "relation.create",
+        kind: "base.related",
+        sourceId: "@person0",
+        targetId: "@person1",
+      },
+      {
+        op: "relation.create",
+        ref: "remove",
+        kind: "base.depends_on",
+        sourceId: "@person1",
+        targetId: "@person2",
+      },
+      {
+        op: "presentation.create",
+        ref: "graphPresentation",
+        boardId: graphBoardId,
+        objectId: "@graph",
+        layout: { x: 140, y: 135, width: 540, height: 390 },
+      },
+      {
+        op: "presentation.create",
+        ref: "personPresentation",
+        boardId: graphBoardId,
+        objectId: "@person1",
+        layout: { x: 790, y: 135, width: 235, height: 145 },
+      },
+    ],
+  });
+  await page.reload();
+  const graph = frame.locator(".relation-graph");
+  await graph.waitFor();
+  const closeTools = frame
+    .getByRole("complementary", { name: "组件工具箱" })
+    .getByRole("button", { name: "收起面板", exact: true });
+  if (await closeTools.isVisible()) await closeTools.click();
+  const vertex = (title: string) =>
+    graph.locator(".react-flow__node").filter({ hasText: title });
+  const second = vertex("关系测试乙");
+  const third = vertex("关系测试丙");
+  await vertex("关系测试甲").waitFor();
+  await second.waitFor();
+  await third.waitFor();
+  assert.equal(await graph.locator(".react-flow__edge").count(), 2);
+  const readGraph = () =>
+    call("app_bindings", {
+      action: "expand",
+      workspaceId: graphStatus.workspace.id,
+      objectId: graphFixture.created.graph,
+      slot: "focus",
+    });
+  const graphBeforeDrag = await readGraph();
+  const bounds = await second.boundingBox();
+  assert.ok(bounds);
+  const beforePosition = await second.getAttribute("style");
+  await page.mouse.move(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    bounds.x + bounds.width / 2 + 30,
+    bounds.y + bounds.height / 2 + 34,
+    { steps: 8 },
+  );
+  await page.mouse.up();
+  assert.notEqual(await second.getAttribute("style"), beforePosition);
+  assert.deepEqual(await readGraph(), graphBeforeDrag);
+  await call("app_edit", {
+    commands: [{ op: "relation.delete", id: graphFixture.created.remove }],
+  });
+  await third.waitFor({ state: "detached", timeout: 2000 });
+  assert.equal(await graph.locator(".react-flow__edge").count(), 1);
+  await second.click();
+  await frame
+    .locator(
+      `.react-flow__node.selected[data-id="${graphFixture.created.personPresentation}"]`,
+    )
+    .waitFor();
+  await call("app_history", { action: "undo" });
+  await third.waitFor({ timeout: 2000 });
+  await third.click();
+  await graph.locator(".graph-object-detail").getByText("关闭详情").waitFor();
+  await graph.getByRole("button", { name: "关闭详情" }).press("Enter");
+  await third.dblclick();
+  await third.locator(".graph-center").waitFor({ timeout: 2000 });
+  assert.equal(
+    (await readGraph()).nodes.find(
+      (node: any) => node.id === graphFixture.created.person2,
+    ).depth,
+    0,
+  );
+  const personHandle = frame
+    .locator(`[data-instance-id="${graphFixture.created.personPresentation}"]`)
+    .getByLabel("拖出关系");
+  await personHandle.dragTo(third);
+  await frame
+    .getByRole("dialog", { name: "选择关系" })
+    .getByRole("button", { name: "相关", exact: true })
+    .click();
+  const linkedToGraphCard = async () => {
+    const graphLink = await call("sand_read", {
+      ids: [graphFixture.created.person1],
+      include: ["relations"],
+    });
+    return graphLink.objects[0].relations.some(
+      (relation: { kind: string; otherId: string }) =>
+        relation.kind === "base.related" &&
+        relation.otherId === graphFixture.created.graph,
+    );
+  };
+  const graphLinkDeadline = Date.now() + 4000;
+  let graphLinkSaved = await linkedToGraphCard();
+  while (!graphLinkSaved && Date.now() < graphLinkDeadline) {
+    await page.waitForTimeout(50);
+    graphLinkSaved = await linkedToGraphCard();
+  }
+  assert.ok(graphLinkSaved, "从图内节点落点建立的关系必须指向外层关系图卡片。");
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",

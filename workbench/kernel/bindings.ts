@@ -38,6 +38,29 @@ export type BindingsResult = {
   items: BindingItem[];
   nextCursor: string | null;
 };
+export type GraphNode = {
+  id: string;
+  title: string;
+  type: string;
+  version: number;
+  icon: string;
+  depth: number;
+};
+export type GraphEdge = {
+  id: string;
+  kind: string;
+  title: string;
+  sourceId: string;
+  targetId: string;
+  status: "confirmed" | "inferred";
+};
+export type ExpandedBindings = {
+  revision: number;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  kinds: { kind: string; title: string }[];
+  truncated: boolean;
+};
 export type HistoricalObjectRow = Omit<ObjectRow, "rev"> & { rev: null };
 export type VersionResult =
   | { revision: number; ok: true; row: ObjectRow | HistoricalObjectRow }
@@ -185,6 +208,127 @@ export function readBindings(
       revision: revision(db),
       items: page.map((row) => readItem(db, registry, row, input.fields)),
       nextCursor: selected.length > limit ? page.at(-1)!.id : null,
+    };
+  });
+}
+
+const GRAPH_TYPE = "base.relation_graph";
+const FOCUS_KIND = "base.graph_focus";
+const NODE_LIMIT = 200;
+const EDGE_LIMIT = 1000;
+
+export function expandBindings(
+  db: Db,
+  registry: Registry,
+  input: { objectId: string; slot: string },
+): ExpandedBindings {
+  return readOnly(db, () => {
+    const reader = object(db, input.objectId);
+    if (
+      reader?.type !== GRAPH_TYPE ||
+      reader.deleted_rev != null ||
+      input.slot !== "focus" ||
+      registry.getPack("base")?.kind !== "builtin" ||
+      !isPackEnabled(db, "base")
+    )
+      fail("只有启用的内置关系图能展开中心关系。");
+    const graph = migrateRow(registry, toObjectRow(reader));
+    if ("migrationError" in graph) fail("关系图配置无法读取，请检查组件版本。");
+    const depth = graph.data.depth === 3 ? 3 : graph.data.depth === 2 ? 2 : 1;
+    const packs = registry
+      .listPacks()
+      .filter(({ spec }) => isPackEnabled(db, spec.id));
+    const icons = new Map(
+      packs.flatMap(({ spec }) =>
+        (spec.types ?? []).map(({ type, icon }) => [type, icon] as const),
+      ),
+    );
+    const kinds = packs
+      .flatMap(({ spec }) => spec.relationKinds ?? [])
+      .filter(({ kind }) => kind !== FOCUS_KIND)
+      .map(({ kind, title }) => ({ kind, title }));
+    const selected = Array.isArray(graph.data.kinds) ? graph.data.kinds : [];
+    const activeKinds = new Map(
+      kinds
+        .filter(({ kind }) => !selected.length || selected.includes(kind))
+        .map(({ kind, title }) => [kind, title]),
+    );
+    const nodeTypes = JSON.stringify([...icons.keys()]);
+    const relationKinds = JSON.stringify([...activeKinds.keys()]);
+    type NodeRow = Omit<GraphNode, "depth" | "icon">;
+    type EdgeRow = Omit<GraphEdge, "title">;
+    const centers = db
+      .prepare(
+        `SELECT DISTINCT o.id, o.title, o.type, o.version
+         FROM relations r JOIN objects o ON o.id = r.target_id
+         WHERE r.source_id = ? AND r.kind = ? AND r.deleted_rev IS NULL
+           AND o.deleted_rev IS NULL AND o.type IN (SELECT value FROM json_each(?))
+         ORDER BY o.id LIMIT ?`,
+      )
+      .all(input.objectId, FOCUS_KIND, nodeTypes, NODE_LIMIT + 1) as NodeRow[];
+    const neighbors = db.prepare(
+      `WITH incident(id) AS (
+         SELECT r.target_id FROM relations r
+          WHERE r.deleted_rev IS NULL AND r.source_id IN (SELECT value FROM json_each(?))
+            AND r.kind IN (SELECT value FROM json_each(?))
+         UNION
+         SELECT r.source_id FROM relations r
+          WHERE r.deleted_rev IS NULL AND r.target_id IN (SELECT value FROM json_each(?))
+            AND r.kind IN (SELECT value FROM json_each(?))
+       )
+       SELECT o.id, o.title, o.type, o.version FROM incident i JOIN objects o ON o.id = i.id
+       WHERE o.deleted_rev IS NULL AND o.type IN (SELECT value FROM json_each(?))
+         AND o.id NOT IN (SELECT value FROM json_each(?))
+       ORDER BY o.id LIMIT ?`,
+    );
+    const nodes = new Map<string, GraphNode>();
+    function add(rows: NodeRow[], level: number) {
+      const count = NODE_LIMIT - nodes.size;
+      const accepted = rows.slice(0, count);
+      for (const row of accepted)
+        nodes.set(row.id, { ...row, icon: icons.get(row.type)!, depth: level });
+      return {
+        frontier: accepted.map(({ id }) => id),
+        overflow: rows.length > count,
+      };
+    }
+    let { frontier, overflow: truncated } = add(centers, 0);
+    for (
+      let level = 1;
+      level <= depth && frontier.length && !truncated;
+      level++
+    ) {
+      const ids = JSON.stringify(frontier);
+      const rows = neighbors.all(
+        ids,
+        relationKinds,
+        ids,
+        relationKinds,
+        nodeTypes,
+        JSON.stringify([...nodes.keys()]),
+        NODE_LIMIT - nodes.size + 1,
+      ) as NodeRow[];
+      ({ frontier, overflow: truncated } = add(rows, level));
+    }
+    const endpoints = JSON.stringify([...nodes.keys()]);
+    const edges = db
+      .prepare(
+        `SELECT id, kind, source_id AS sourceId, target_id AS targetId, status
+         FROM relations WHERE deleted_rev IS NULL
+           AND source_id IN (SELECT value FROM json_each(?))
+           AND target_id IN (SELECT value FROM json_each(?))
+           AND kind IN (SELECT value FROM json_each(?))
+         ORDER BY id LIMIT ?`,
+      )
+      .all(endpoints, endpoints, relationKinds, EDGE_LIMIT + 1) as EdgeRow[];
+    return {
+      revision: revision(db),
+      nodes: [...nodes.values()],
+      edges: edges
+        .slice(0, EDGE_LIMIT)
+        .map((edge) => ({ ...edge, title: activeKinds.get(edge.kind)! })),
+      kinds,
+      truncated: truncated || edges.length > EDGE_LIMIT,
     };
   });
 }

@@ -382,10 +382,13 @@ export function CanvasShell({
         await operate({ kind: "navigate", spaceId: here.boardId });
       await operate({ kind: "select", ids: [here.id] });
       setFocusRevision((n) => n + 1);
-      return;
+      return true;
     }
-    if (objectRow?.type === "base.board")
+    if (objectRow?.type === "base.board") {
       await operate({ kind: "navigate", spaceId: objectId });
+      return true;
+    }
+    return false;
   }
   async function openActivity(
     activity: Activity,
@@ -552,7 +555,9 @@ export function CanvasShell({
                   void operate({ kind: "navigate", spaceId: id });
                 }}
                 onFocusInstance={(id) => void focusInstance(id)}
-                onFocusObject={focusObject}
+                onFocusObject={async (id) => {
+                  await focusObject(id);
+                }}
               />
             ) : nav === "history" ? (
               <HistoryPanel
