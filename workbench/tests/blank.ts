@@ -4012,6 +4012,25 @@ try {
   await chart.getByText("绑定的表格已删除。", { exact: true }).waitFor();
   await call("app_history", { action: "undo" });
   await plot.waitFor();
+  await cell.fill("34");
+  await call("app_edit", {
+    commands: [
+      {
+        op: "object.update",
+        id: chartFixture.created.table,
+        title: "并发重命名的测量日志",
+      },
+    ],
+  });
+  await tableCard.getByText("并发重命名的测量日志", { exact: true }).waitFor();
+  const draftDeadline = Date.now() + 4500;
+  let savedTable = await tableObject();
+  while (savedTable.data.rows[0].cells.y !== 34 && Date.now() < draftDeadline) {
+    await page.waitForTimeout(50);
+    savedTable = await tableObject();
+  }
+  assert.equal(savedTable.title, "并发重命名的测量日志");
+  assert.equal(savedTable.data.rows[0].cells.y, 34);
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",

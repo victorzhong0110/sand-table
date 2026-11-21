@@ -70,7 +70,7 @@ export function TableView({
       return;
     }
     writing.current = true;
-    const expected = version.current;
+    const expected = Math.max(version.current, object.version);
     try {
       const result = await dispatch(
         [
@@ -100,13 +100,17 @@ export function TableView({
       setError(
         e instanceof Error ? e.message : "表格保存失败，编辑内容仍在草稿中。",
       );
+      if (latest.current.object.version > expected) queue();
     } finally {
       writing.current = false;
     }
   }
   useEffect(() => {
-    if (existing() || writing.current || object.version < version.current)
+    if (writing.current || object.version < version.current) return;
+    if (existing()) {
+      if (object.version > version.current) queue();
       return;
+    }
     const table = tableOf(object.data);
     version.current = object.version;
     active.current = table;
