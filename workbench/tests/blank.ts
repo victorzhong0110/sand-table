@@ -4031,6 +4031,92 @@ try {
   }
   assert.equal(savedTable.title, "并发重命名的测量日志");
   assert.equal(savedTable.data.rows[0].cells.y, 34);
+  const originalRows = savedTable.data.rows;
+  await tableCard.getByText("表格分析", { exact: true }).click();
+  await tableCard.getByLabel("筛选列", { exact: true }).selectOption("y");
+  await tableCard.getByLabel("筛选条件", { exact: true }).selectOption("gt");
+  await tableCard.getByLabel("筛选值", { exact: true }).fill("20");
+  const unfiltered = await chartBytes();
+  await tableCard
+    .getByRole("button", { name: "添加筛选条件", exact: true })
+    .click();
+  const afterFilter = await changedChart(unfiltered, 34);
+  assert.deepEqual((await tableObject()).data.rows, originalRows);
+  assert.equal(
+    await tableCard.getByLabel("第 2 行 测量值", { exact: true }).count(),
+    0,
+  );
+  const csvMenu = tableCard.getByText("CSV 导入与导出", { exact: true });
+  await csvMenu.click();
+  async function exportedCsv(name: string) {
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      tableCard.getByRole("button", { name, exact: true }).click(),
+    ]);
+    return readFileSync(await download.path(), "utf8");
+  }
+  assert.equal(await exportedCsv("导出当前视图"), "组别,测量值\r\n甲,34\r\n");
+  assert.equal(
+    await exportedCsv("导出全部数据"),
+    "组别,测量值\r\n甲,34\r\n乙,12\r\n",
+  );
+  await csvMenu.click();
+  await tableCard
+    .getByRole("button", { name: "清除筛选", exact: true })
+    .click();
+  await changedChart(afterFilter, 34);
+  await tableCard.getByLabel("第 2 行 测量值", { exact: true }).waitFor();
+  await tableCard.getByLabel("计算列名称", { exact: true }).fill("金额");
+  await tableCard.getByLabel("计算列公式", { exact: true }).fill("[测量值]*2");
+  await tableCard
+    .getByRole("button", { name: "添加计算列", exact: true })
+    .click();
+  const computed = tableCard.getByLabel("第 1 行 金额", { exact: true });
+  await computed.filter({ hasText: /^68$/ }).waitFor();
+  const originalCalculation = (await tableObject()).data.view.calculated[0].key;
+  await tableCard
+    .getByRole("button", { name: "编辑计算列「金额」", exact: true })
+    .click();
+  const formulaInput = tableCard.getByLabel("计算列公式", { exact: true });
+  assert.equal(await formulaInput.inputValue(), "[测量值]*2");
+  await formulaInput.fill("[测量值]*3");
+  await tableCard
+    .getByRole("button", { name: "保存计算列", exact: true })
+    .click();
+  await computed.filter({ hasText: /^102$/ }).waitFor();
+  assert.equal(
+    (await tableObject()).data.view.calculated[0].key,
+    originalCalculation,
+  );
+  await cell.fill("");
+  await computed.filter({ hasText: /^计算需要的单元格为空。$/ }).waitFor();
+  await tableCard.getByText(/^表格分析/).click();
+  await tableCard.getByText("CSV 导入与导出", { exact: true }).click();
+  await tableCard.getByLabel("选择 CSV 或 TSV 文件").setInputFiles({
+    name: "导入记录.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("组别,测量值\n丙,7\n"),
+  });
+  const csvPreview = tableCard.getByRole("region", { name: "CSV 导入预览" });
+  await csvPreview.getByText("测量值（数字）", { exact: true }).waitFor();
+  await csvPreview.getByText("丙", { exact: true }).waitFor();
+  const findImportedTable = () =>
+    call("sand_query", { text: "导入记录", types: ["base.table"] });
+  assert.equal((await findImportedTable()).rows.length, 0);
+  await csvPreview.getByRole("button", { name: "确认新建表格" }).click();
+  await tableCard
+    .getByText("已新建表格「导入记录」。", { exact: true })
+    .waitFor();
+  const imported = (await findImportedTable()).rows;
+  assert.equal(imported.length, 1);
+  const importedCard = frame.locator(`[data-object-id="${imported[0].id}"]`);
+  await importedCard.getByLabel("第 1 行 测量值", { exact: true }).waitFor();
+  assert.equal(
+    await importedCard
+      .getByLabel("第 1 行 测量值", { exact: true })
+      .inputValue(),
+    "7",
+  );
   await call("app_workspace", {
     action: "create",
     id: "relation-graph-verify",

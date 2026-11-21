@@ -184,6 +184,36 @@ export function CustomView({
       bindings={active.session}
       actions={actions}
       graph={graph}
+      tableFiles={
+        object.type === "base.table"
+          ? {
+              async create(title, table) {
+                requireActive();
+                if (object.migrationError) throw Error("当前表格是只读的。");
+                const result: CommandResult = await runtime.call("app_edit", {
+                  workspaceId,
+                  commands: [
+                    {
+                      op: "object.create",
+                      ref: "imported",
+                      type: "base.table",
+                      title,
+                      data: table,
+                    },
+                    {
+                      op: "presentation.create",
+                      objectId: "@imported",
+                      boardId: presentation.boardId,
+                    },
+                  ],
+                });
+                const id = result.created.imported;
+                if (id) void runtime.focusObject?.(id).catch(() => {});
+              },
+              download: runtime.downloadFile,
+            }
+          : undefined
+      }
     />
   );
 }

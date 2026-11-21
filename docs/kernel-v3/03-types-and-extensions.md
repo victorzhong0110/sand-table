@@ -294,6 +294,8 @@ v1 清单（`{version: 1, id, name, components: [...]}`）导入时自动转换�
 
 `base.data_source` 从 `base.chart` 指向 `base.table`。`source` 槽最多绑定一个表格，图表的 `mapping.x` 与 `mapping.y` 保存列 key。没有绑定时，v1 的图表数据从 `legacyPoints` 读取。表格的行和列重命名不改变 key，清空的单元格保存为 `null`。
 
+表格可选 `view` 保存 `calculated`（列 key、标签、以列 key 引用的公式）、`filters`、多列 `sort` 和 `groupBy`。省略时显示全部原始行。表格和图表共用派生逻辑，计算结果和筛选后的行不写入 `rows`。CSV 导入预览后创建独立表格，导出可选当前视图或原始数据。
+
 图表读取表格、比较读取两个对象/版本、关系图读取有界查询，通过持久关系槽声明绑定，不复制源数据。宿主提供 readBindings({slot, ids?, fields?, limit?, cursor?})：仅可访问声明并已绑定的目标，返回版本、来源与失效原因。任意未绑定 ID 拒绝。内置关系图的多值 focus 槽使用 `base.graph_focus`。展开时从中心遍历有向事实的两个端点，图中按原有方向渲染；中心槽关系不作为事实边。节点位置只属于当前界面会话。
 
 subscribeBindings 提供可取消订阅，源对象/关系变化、删除、包停用或权限变化时通知；卸载释放，以 revision/version 拒绝过期结果。沙箱消息携带 requestId 并逐次验证声明与范围；可读不等于可跨对象写。跨对象动作由显式规则/用户操作授权。

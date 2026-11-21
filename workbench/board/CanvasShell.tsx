@@ -682,7 +682,9 @@ export function CanvasShell({
             />
           </div>
           <ViewRuntimeContext.Provider
-            value={viewRuntime ? { ...viewRuntime, focusObject } : null}
+            value={
+              viewRuntime ? { ...viewRuntime, focusObject, downloadFile } : null
+            }
           >
             <FlowCanvas
               board={b}
