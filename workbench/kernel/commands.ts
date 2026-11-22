@@ -1368,6 +1368,33 @@ function assertRelationRules(
         message: "必须写下依据",
       },
     );
+  if (
+    kind === "base.filters" &&
+    (source.type === "base.chart") !== (target.type === "base.chart")
+  )
+    throw new CommandError(
+      "INVALID_DATA",
+      "请将筛选器连接表格，或连接两个同源图表。",
+      index,
+    );
+  if (
+    kind === "base.highlights" ||
+    (kind === "base.filters" && source.type === "base.chart")
+  ) {
+    const sources = ctx.db.prepare(
+      `SELECT DISTINCT r.target_id AS id FROM relations r JOIN objects o ON o.id = r.target_id
+       WHERE r.source_id = ? AND r.kind = 'base.data_source' AND r.deleted_rev IS NULL
+         AND o.type = 'base.table' AND o.deleted_rev IS NULL LIMIT 2`,
+    );
+    const left = sources.all(source.id);
+    const right = sources.all(target.id);
+    if (left.length !== 1 || right.length !== 1 || left[0].id !== right[0].id)
+      throw new CommandError(
+        "INVALID_DATA",
+        "图表联动要求两个图表绑定同一张源表。",
+        index,
+      );
+  }
 }
 
 function classifyUpdateErrors(

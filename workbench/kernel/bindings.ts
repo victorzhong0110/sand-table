@@ -32,6 +32,10 @@ export type BindingItem = {
   source: ObjectSource | null;
   unavailable?: string;
   migrationError?: string;
+  tableFilters?: { id: string; data: Record<string, unknown> }[];
+  tableConsumers?: { id: string; title: string }[];
+  tableSource?: string;
+  chartScopes?: { id: string; keys: string[] | null }[];
 };
 export type BindingsResult = {
   revision: number;
@@ -179,6 +183,43 @@ function readItem(
   };
 }
 
+function inbound(db: Db, id: string, kind: string, types: string[]): Raw[] {
+  const rows = db
+    .prepare(
+      `SELECT o.* FROM objects o WHERE o.deleted_rev IS NULL
+     AND o.type IN (SELECT value FROM json_each(?))
+     AND o.id IN (SELECT source_id FROM relations WHERE deleted_rev IS NULL AND kind = ? AND target_id = ?)
+     ORDER BY o.id LIMIT 201`,
+    )
+    .all(JSON.stringify(types), kind, id) as Raw[];
+  if (rows.length > 200)
+    throw new CommandError(
+      "LIMIT",
+      "已连接对象超过 200 个，请缩小组件范围。",
+      null,
+    );
+  return rows;
+}
+
+function chartTable(
+  db: Db,
+  registry: Registry,
+  chart: string,
+): string | undefined {
+  const rows = [...targets(db, registry, chart, "source").values()].filter(
+    (row) => !available(db, registry, row),
+  );
+  return rows.length === 1 ? rows[0].id : undefined;
+}
+
+function activeRowScope(value: unknown): string[] | null {
+  return Array.isArray(value) &&
+    value.length <= 200 &&
+    value.every((key) => typeof key === "string")
+    ? value
+    : null;
+}
+
 export function readBindings(
   db: Db,
   registry: Registry,
@@ -204,9 +245,56 @@ export function readBindings(
       )
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const page = selected.slice(0, limit);
+    const reader = object(db, input.objectId)?.type;
+    const dataView =
+      (reader === "base.table" && input.slot === "self") ||
+      ((reader === "base.chart" || reader === "base.metric") &&
+        input.slot === "source");
     return {
       revision: revision(db),
-      items: page.map((row) => readItem(db, registry, row, input.fields)),
+      items: page.map((row) => {
+        const item = readItem(db, registry, row, input.fields);
+        if (item.unavailable) return item;
+        if (
+          reader === "base.chart" &&
+          row.type === "base.chart" &&
+          (input.slot === "highlights" || input.slot === "highlightedBy")
+        )
+          item.tableSource = chartTable(db, registry, row.id);
+        if (row.type !== "base.table") return item;
+        if (dataView)
+          item.tableFilters = inbound(db, row.id, "base.filters", [
+            "base.filter",
+          ])
+            .map((raw) =>
+              readItem(db, registry, toObjectRow(raw), [
+                "column",
+                "op",
+                "value",
+                "upper",
+              ]),
+            )
+            .filter((filter) => !filter.unavailable && !filter.migrationError)
+            .map(({ id, data }) => ({ id, data }));
+        if (reader === "base.filter" && input.slot === "targets")
+          item.tableConsumers = inbound(db, row.id, "base.data_source", [
+            "base.chart",
+            "base.metric",
+          ]).map((raw) => ({ id: String(raw.id), title: String(raw.title) }));
+        if (reader === "base.chart" && input.slot === "source")
+          item.chartScopes = inbound(db, input.objectId, "base.filters", [
+            "base.chart",
+          ])
+            .map(toObjectRow)
+            .map(({ id, data }) => ({
+              id,
+              keys:
+                chartTable(db, registry, id) === row.id
+                  ? activeRowScope(data.rowScope)
+                  : null,
+            }));
+        return item;
+      }),
       nextCursor: selected.length > limit ? page.at(-1)!.id : null,
     };
   });

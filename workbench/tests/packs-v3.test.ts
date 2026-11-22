@@ -82,7 +82,10 @@ const samples: {
   },
   {
     type: "base.metric",
-    ok: [{ value: "12", unit: "%", description: "占比" }],
+    ok: [
+      { legacy: { value: "12", description: "占比" }, unit: "%" },
+      { column: "c1", aggregate: "sum" },
+    ],
     bad: [{ value: 12 }, { unit: 12 }],
   },
   {
@@ -110,6 +113,14 @@ const samples: {
       { columns: [], rows: [] },
     ],
     bad: [{ columns: new Array(21).fill("列") }, { rows: "不是数组" }],
+  },
+  {
+    type: "base.filter",
+    ok: [
+      {},
+      { kind: "range", column: "c1", op: "between", value: 2, upper: 4 },
+    ],
+    bad: [{ kind: "freeform" }, { upper: {} }],
   },
   {
     type: "base.chart",
@@ -555,6 +566,8 @@ test("每个字段都有中文标签和控件，摘要只取可见字段", () =>
       const builtinViews: Record<string, string> = {
         "base.table": "table",
         "base.chart": "chart",
+        "base.filter": "filter",
+        "base.metric": "metric",
         "base.relation_graph": "relation-graph",
       };
       assert.equal(

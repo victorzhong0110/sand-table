@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { migrateMetric } from "../packs/base/index.ts";
+import { seriesFor } from "../board/data/chart-config.ts";
 import { compileFormula, FormulaError } from "../board/data/formula.ts";
 import { formatCsv, parseCsv } from "../board/data/csv.ts";
 import {
@@ -154,4 +156,37 @@ test("计算列可互相引用，同名列要求用标识，循环或删除来�
   assert.ok(
     result.configurationErrors.some((error) => error.includes("类型不符")),
   );
+});
+
+test("指标迁移保留手填空串、单位和说明", () => {
+  assert.deepEqual(
+    migrateMetric({ value: "", unit: "ms", description: "延迟" }),
+    {
+      aggregate: "count",
+      unit: "ms",
+      legacy: { value: "", description: "延迟" },
+    },
+  );
+});
+test("图表按有类型的横轴聚合，保留所涉行 key 和无数据组", () => {
+  const result = seriesFor(
+    { kind: "bar", aggregation: "count", mapping: { x: "x", y: ["y"] } },
+    {
+      columns: [
+        { key: "x", label: "组", type: "text" },
+        { key: "y", label: "值", type: "number" },
+      ],
+      rows: [
+        { key: "r1", cells: { x: "甲", y: 3 } },
+        { key: "r2", cells: { x: "甲", y: null } },
+        { key: "r3", cells: { x: "乙", y: null } },
+        { key: "r4", cells: { x: null, y: 4 } },
+      ],
+    },
+  );
+  assert.deepEqual(result.categories, ["甲", "乙"]);
+  assert.deepEqual(result.series[0].values, [
+    { id: "r1", rowKeys: ["r1", "r2"], value: [0, 1] },
+    { id: "r3", rowKeys: ["r3"], value: [1, null] },
+  ]);
 });

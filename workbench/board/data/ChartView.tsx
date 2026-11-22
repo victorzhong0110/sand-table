@@ -1,72 +1,50 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { EChartsType, init } from "echarts/core";
-import type { BindingItem } from "../../kernel/index.ts";
 import { useComponentRuntime } from "../runtime/resources.ts";
 import type { ViewProps } from "../views/registry.tsx";
 import {
+  chartAggregates,
   chartKinds,
   chartOf,
   chartOptions,
   initialMapping,
+  pointKeys,
   seriesFor,
   type ChartConfig,
   type ChartKind,
 } from "./chart-config.ts";
-import { tableOf } from "./table-model.ts";
-import { deriveTable, tableViewOf } from "./derive-table.ts";
+import { useDerivedTableSource } from "./use-table-source.ts";
 
-export function ChartView({ object, readOnly, dispatch, bindings }: ViewProps) {
+import { signalChartFocus, useLinkedChartFocus } from "./chart-linkage.ts";
+import { useViewSave } from "./use-view-save.ts";
+
+export function ChartView(props: ViewProps) {
+  const { object, readOnly, bindings, workspaceId, presentation } = props;
+  const { save: edit, error: editError, disabled } = useViewSave(props);
   const runtime = useComponentRuntime();
   const frame = useRef<HTMLDivElement>(null);
-  const [source, setSource] = useState<BindingItem>();
-  const [reading, setReading] = useState(true);
-  const [bindingError, setBindingError] = useState("");
+  const {
+    source,
+    table,
+    reading,
+    error: bindingError,
+  } = useDerivedTableSource(bindings);
   const [chartError, setChartError] = useState("");
-  const [editError, setEditError] = useState("");
   const config = chartOf(object.data);
-  const table = useMemo(
-    () =>
-      source && !source.migrationError
-        ? deriveTable(tableOf(source.data), tableViewOf(source.data))
-        : undefined,
-    [source],
-  );
   const chartKey = JSON.stringify(config);
-
-  useEffect(() => {
-    let serial = 0,
-      active = true;
-    async function refresh() {
-      const current = ++serial;
-      try {
-        const { items } = await bindings.read("source");
-        if (!active || current !== serial) return;
-        const item = items[0];
-        setSource(item);
-        setBindingError(
-          item?.migrationError ||
-            (item?.unavailable
-              ? /已删除|被删除/.test(item.unavailable)
-                ? "绑定的表格已删除。"
-                : item.unavailable
-              : ""),
-        );
-      } catch (error) {
-        if (!active || current !== serial) return;
-        setBindingError(
-          error instanceof Error ? error.message : "暂时读取不到源表格。",
-        );
-      } finally {
-        if (active && current === serial) setReading(false);
-      }
-    }
-    const stop = bindings.subscribe("source", () => void refresh());
-    void refresh();
-    return () => {
-      active = false;
-      stop();
-    };
-  }, [bindings]);
+  const tableId = source?.id;
+  const { received, unmatched } = useLinkedChartFocus(
+    bindings,
+    workspaceId,
+    tableId,
+  );
+  const liveChart = useRef<EChartsType | undefined>(undefined);
+  const redrawFocus = useRef<(keys: string[]) => void>(() => {});
+  const latestFocus = useRef(received);
+  latestFocus.current = received;
+  const [selected, setSelected] = useState<string[]>([]);
+  const [brushing, setBrushing] = useState(false);
+  useEffect(() => redrawFocus.current(received), [received]);
 
   useEffect(() => {
     const node = frame.current;
@@ -74,6 +52,17 @@ export function ChartView({ object, readOnly, dispatch, bindings }: ViewProps) {
     const controller = new AbortController();
     let chart: EChartsType | undefined;
     let resize: ResizeObserver | undefined;
+    let brushedKeys: string[] = [];
+    const signal = (keys: string[]) => {
+      if (tableId)
+        signalChartFocus({
+          workspace: workspaceId,
+          chart: object.id,
+          presentation: presentation.id,
+          table: tableId,
+          keys,
+        });
+    };
     void (async () => {
       try {
         const settings = JSON.parse(chartKey) as ChartConfig;
@@ -87,14 +76,41 @@ export function ChartView({ object, readOnly, dispatch, bindings }: ViewProps) {
         if (!module) throw Error("图表资源加载失败。");
         const style = getComputedStyle(node);
         chart = module.init(node, undefined, { renderer: "canvas" });
-        chart.setOption(
-          chartOptions(
-            settings,
-            data,
-            style.getPropertyValue("--ink").trim(),
-            style.getPropertyValue("--accent").trim(),
-          ),
-        );
+        liveChart.current = chart;
+        const ink = style.getPropertyValue("--ink").trim();
+        const accent = style.getPropertyValue("--accent").trim();
+        const options = (keys: string[]) =>
+          chartOptions(settings, data, ink, accent, new Set(keys));
+        chart.setOption(options(latestFocus.current));
+        redrawFocus.current = (keys) =>
+          chart?.setOption({ series: options(keys).series });
+        const keysAt = (series: number, index: number) => {
+          const point = data.series[series]?.values[index];
+          return point ? pointKeys(point) : [];
+        };
+        chart.on("mouseover", "series", ({ seriesIndex, dataIndex }) => {
+          if (typeof seriesIndex === "number" && typeof dataIndex === "number")
+            signal(keysAt(seriesIndex, dataIndex));
+        });
+        chart.on("mouseout", "series", () => signal(brushedKeys));
+        chart.on("globalout", () => signal(brushedKeys));
+        chart.on("brushSelected", (event) => {
+          const { batch } = event as unknown as {
+            batch?: {
+              selected: { seriesIndex: number; dataIndex: number[] }[];
+            }[];
+          };
+          brushedKeys = [
+            ...new Set(
+              (batch?.[0]?.selected ?? []).flatMap(
+                ({ seriesIndex, dataIndex }) =>
+                  dataIndex.flatMap((index) => keysAt(seriesIndex, index)),
+              ),
+            ),
+          ];
+          setSelected(brushedKeys);
+          signal(brushedKeys);
+        });
         resize = new ResizeObserver(() => chart?.resize());
         resize.observe(node);
         setChartError("");
@@ -108,27 +124,41 @@ export function ChartView({ object, readOnly, dispatch, bindings }: ViewProps) {
     return () => {
       controller.abort();
       resize?.disconnect();
+      signal([]);
+      liveChart.current = undefined;
+      redrawFocus.current = () => {};
       chart?.dispose();
     };
-  }, [runtime, chartKey, table, reading, bindingError]);
-
-  async function edit(set: Record<string, unknown>) {
-    try {
-      await dispatch([
-        {
-          op: "object.update",
-          id: object.id,
-          expectedVersion: object.version,
-          set,
-        },
-      ]);
-      setEditError("");
-    } catch (error) {
-      setEditError(
-        error instanceof Error ? error.message : "图表配置暂未保存。",
-      );
-    }
+  }, [
+    runtime,
+    chartKey,
+    table,
+    tableId,
+    object.id,
+    presentation.id,
+    workspaceId,
+    reading,
+    bindingError,
+  ]);
+  useEffect(() => {
+    setSelected([]);
+    setBrushing(false);
+  }, [tableId]);
+  function toggleBrush() {
+    const chart = liveChart.current;
+    if (!chart) return;
+    if (brushing) chart.dispatchAction({ type: "brush", areas: [] });
+    chart.dispatchAction({
+      type: "takeGlobalCursor",
+      key: "brush",
+      brushOption: {
+        brushType: brushing ? false : "lineX",
+        brushMode: "single",
+      },
+    });
+    setBrushing(!brushing);
   }
+
   const mapping =
     config.mapping ?? (table ? initialMapping(table.columns) : undefined);
   return (
@@ -155,6 +185,43 @@ export function ChartView({ object, readOnly, dispatch, bindings }: ViewProps) {
           visibility: bindingError || chartError ? "hidden" : "visible",
         }}
       />
+      {table && !bindingError && !chartError && (
+        <div>
+          <button type="button" aria-pressed={brushing} onClick={toggleBrush}>
+            {brushing ? "结束框选" : "框选横轴范围"}
+          </button>
+          {selected.length > 0 && !readOnly && (
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={async () => {
+                if (await edit({ rowScope: selected })) {
+                  setSelected([]);
+                  setBrushing(false);
+                }
+              }}
+            >
+              只看这一段
+            </button>
+          )}
+          {config.rowScope && !readOnly && (
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => void edit({}, ["rowScope"])}
+            >
+              显示全部行
+            </button>
+          )}
+          {received.length > 0 && (
+            <output aria-label="联动高亮行数">{received.length}</output>
+          )}
+          {unmatched && <p role="status">部分联动图表未绑定同一张源表。</p>}
+          {source?.chartScopes?.some(({ keys }) => keys !== null) && (
+            <p>正在应用同源图表的选区，显示 {table.rows.length} 行。</p>
+          )}
+        </div>
+      )}
       {!readOnly && (
         <details>
           <summary>配置图表</summary>
@@ -183,6 +250,31 @@ export function ChartView({ object, readOnly, dispatch, bindings }: ViewProps) {
           </select>
           {table && mapping && (
             <>
+              <select
+                aria-label="图表聚合方式"
+                value={config.aggregation ?? "none"}
+                disabled={disabled}
+                onChange={(event) =>
+                  void edit({ aggregation: event.target.value })
+                }
+              >
+                {Object.entries(chartAggregates).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={config.showLegend ?? mapping.y.length > 1}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    void edit({ showLegend: event.target.checked })
+                  }
+                />
+                显示图例
+              </label>
               <select
                 aria-label="横轴列"
                 value={mapping.x}

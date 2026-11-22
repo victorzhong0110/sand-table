@@ -8,6 +8,7 @@
 // base.code_snippet → code，novel.* / research.* 走现有的领域兜底分支，
 // 其余未知类型走现有的「未知组件」占位。
 
+import { migrateMetric } from "../../packs/base/index.ts";
 import type { Activity, Board, ComponentPack, SpaceActivity } from "./model.ts";
 import { componentTypes, defaultData } from "./spaces.ts";
 import type {
@@ -166,7 +167,7 @@ export const V3_FIELDS: Record<string, string[]> = {
   "base.link": ["description", "url"],
   "base.media": ["alt", "blob", "caption", "mime"],
   "base.code_snippet": ["language", "text"],
-  "base.metric": ["description", "unit", "value"],
+  "base.metric": ["aggregate", "column", "legacy", "unit"],
   "base.status": ["description", "observedAt", "sourceUrl", "state"],
   "base.table": ["columns", "rows"],
   "base.chart": ["kind", "mapping", "title", "legacyPoints", "aggregation"],
@@ -295,6 +296,8 @@ export function v3DataOf(
   v3Type: string,
   data: Record<string, unknown>,
 ): Record<string, unknown> {
+  if (v3Type === "base.metric" && ("value" in data || "description" in data))
+    data = migrateMetric(data);
   const allowed = V3_FIELDS[v3Type];
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data ?? {})) {
