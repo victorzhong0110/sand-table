@@ -20,6 +20,8 @@ import {
   parsePublicCommands,
   readView,
   readBindings,
+  readCommentCounts,
+  readComments,
   readObjectVersion,
   redo,
   setView,
@@ -125,6 +127,38 @@ export function registerAppTools(
           revision: result.revision,
           count: result.items.length,
         },
+        { workspaceId: session.workspaceId, ...result },
+      );
+    },
+    { appOnly: true, readOnly: true },
+  );
+  registrar.tool(
+    "app_comments",
+    "Read comment counts for a board or a thread associated with one object.",
+    {
+      action: z.enum(["counts", "thread"]),
+      workspaceId: z.string().min(1),
+      objectId: z.string().min(1).optional(),
+      boardId: z.string().min(1).optional(),
+      presentationId: z.string().min(1).optional(),
+    },
+    (args, ctx) => {
+      const session = host.session();
+      assertSameWorkspace(session.workspaceId, args.workspaceId);
+      if (args.action === "counts") {
+        if (!args.boardId || args.objectId || args.presentationId)
+          throw new CommandError("INVALID_DATA", "请选择一块白板。", null);
+        const result = readCommentCounts(ctx.db, args.boardId);
+        return toolValue(
+          { revision: result.revision },
+          { workspaceId: session.workspaceId, ...result },
+        );
+      }
+      if (!args.objectId)
+        throw new CommandError("INVALID_DATA", "请选择评论所附的对象。", null);
+      const result = readComments(ctx.db, args.objectId, args.presentationId);
+      return toolValue(
+        { revision: result.revision, count: result.entries.length },
         { workspaceId: session.workspaceId, ...result },
       );
     },

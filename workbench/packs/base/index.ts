@@ -425,6 +425,37 @@ export const basePack: PackSpec = {
       ],
     },
     {
+      type: "base.comment",
+      title: "评论",
+      description: "附在对象或单处展示上的讨论。",
+      icon: "text",
+      version: 1,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["body"],
+        properties: {
+          body: {
+            type: "string",
+            minLength: 1,
+            maxLength: 20000,
+            "x-sand-label": "评论正文",
+            "x-sand-widget": "markdown",
+          },
+          resolved: {
+            type: "boolean",
+            "x-sand-label": "已解决",
+            "x-sand-widget": "boolean",
+          },
+        },
+      },
+      display: {
+        material: "paper",
+        defaultSize: { width: 280, height: 160 },
+        summary: ["body", "resolved"],
+      },
+    },
+    {
       type: "base.heading",
       title: "标题",
       description: "分段的标题文字。",
@@ -1295,6 +1326,21 @@ export const basePack: PackSpec = {
       kind: "base.about",
       title: "关于",
       inverseTitle: "被讲解",
+      allowsInferred: false,
+    },
+    {
+      kind: "base.comments_on",
+      title: "评论对象",
+      inverseTitle: "评论",
+      sourceTypes: ["base.comment"],
+      allowsInferred: false,
+    },
+    {
+      kind: "base.reply_to",
+      title: "回复评论",
+      inverseTitle: "回复",
+      sourceTypes: ["base.comment"],
+      targetTypes: ["base.comment"],
       allowsInferred: false,
     },
     {

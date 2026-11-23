@@ -4044,26 +4044,28 @@ try {
   assert.equal(savedTable.title, "并发重命名的测量日志");
   assert.equal(savedTable.data.rows[0].cells.y, 34);
   const originalRows = savedTable.data.rows;
-  await tableCard.getByText("表格分析", { exact: true }).click();
+  await tableCard.getByText("表格分析", { exact: true }).press("Enter");
   await tableCard.getByLabel("筛选列", { exact: true }).selectOption("y");
   await tableCard.getByLabel("筛选条件", { exact: true }).selectOption("gt");
   await tableCard.getByLabel("筛选值", { exact: true }).fill("20");
   const unfiltered = await chartBytes();
   await tableCard
     .getByRole("button", { name: "添加筛选条件", exact: true })
-    .click();
+    .press("Enter");
+  await tableCard
+    .getByText("表格分析（1 个筛选条件）", { exact: true })
+    .waitFor();
+  await tableCard
+    .getByLabel("第 2 行 测量值", { exact: true })
+    .waitFor({ state: "detached" });
   const afterFilter = await changedChart(unfiltered, 34);
   assert.deepEqual((await tableObject()).data.rows, originalRows);
-  assert.equal(
-    await tableCard.getByLabel("第 2 行 测量值", { exact: true }).count(),
-    0,
-  );
   const csvMenu = tableCard.getByText("CSV 导入与导出", { exact: true });
-  await csvMenu.click();
+  await csvMenu.press("Enter");
   async function exportedCsv(name: string) {
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      tableCard.getByRole("button", { name, exact: true }).click(),
+      tableCard.getByRole("button", { name, exact: true }).press("Enter"),
     ]);
     return readFileSync(await download.path(), "utf8");
   }
@@ -4072,10 +4074,10 @@ try {
     await exportedCsv("导出全部数据"),
     "组别,测量值\r\n甲,34\r\n乙,12\r\n",
   );
-  await csvMenu.click();
+  await csvMenu.press("Enter");
   await tableCard
     .getByRole("button", { name: "清除筛选", exact: true })
-    .click();
+    .press("Enter");
   await changedChart(afterFilter, 34);
   await tableCard.getByLabel("第 2 行 测量值", { exact: true }).waitFor();
   const indicator = await call("app_edit", {
@@ -4325,24 +4327,24 @@ try {
   );
   const tableAnalysis = tableCard.getByText(/^表格分析/);
   if (!(await tableCard.getByLabel("计算列名称", { exact: true }).isVisible()))
-    await tableAnalysis.click();
+    await tableAnalysis.press("Enter");
   await tableCard.getByLabel("计算列名称", { exact: true }).fill("金额");
   await tableCard.getByLabel("计算列公式", { exact: true }).fill("[测量值]*2");
   await tableCard
     .getByRole("button", { name: "添加计算列", exact: true })
-    .click();
+    .press("Enter");
   const computed = tableCard.getByLabel("第 1 行 金额", { exact: true });
   await computed.filter({ hasText: /^68$/ }).waitFor();
   const originalCalculation = (await tableObject()).data.view.calculated[0].key;
   await tableCard
     .getByRole("button", { name: "编辑计算列「金额」", exact: true })
-    .click();
+    .press("Enter");
   const formulaInput = tableCard.getByLabel("计算列公式", { exact: true });
   assert.equal(await formulaInput.inputValue(), "[测量值]*2");
   await formulaInput.fill("[测量值]*3");
   await tableCard
     .getByRole("button", { name: "保存计算列", exact: true })
-    .click();
+    .press("Enter");
   await computed.filter({ hasText: /^102$/ }).waitFor();
   assert.equal(
     (await tableObject()).data.view.calculated[0].key,
@@ -4350,8 +4352,8 @@ try {
   );
   await cell.fill("");
   await computed.filter({ hasText: /^计算需要的单元格为空。$/ }).waitFor();
-  await tableCard.getByText(/^表格分析/).click();
-  await tableCard.getByText("CSV 导入与导出", { exact: true }).click();
+  await tableCard.getByText(/^表格分析/).press("Enter");
+  await tableCard.getByText("CSV 导入与导出", { exact: true }).press("Enter");
   await tableCard.getByLabel("选择 CSV 或 TSV 文件").setInputFiles({
     name: "导入记录.csv",
     mimeType: "text/csv",
@@ -4363,7 +4365,7 @@ try {
   const findImportedTable = () =>
     call("sand_query", { text: "导入记录", types: ["base.table"] });
   assert.equal((await findImportedTable()).rows.length, 0);
-  await csvPreview.getByRole("button", { name: "确认新建表格" }).click();
+  await csvPreview.getByRole("button", { name: "确认新建表格" }).press("Enter");
   await tableCard
     .getByText("已新建表格「导入记录」。", { exact: true })
     .waitFor();
@@ -4636,6 +4638,127 @@ try {
     names = await order();
   }
   assert.deepEqual(names, ["丙", "甲", "乙"]);
+  await call("app_workspace", {
+    action: "create",
+    id: "comments-verify",
+    title: "评论验收",
+  });
+  await call("app_workspace", { action: "switch", id: "comments-verify" });
+  const commentHome = (await call("sand_status")).homeBoardId;
+  const comments = await call("app_edit", {
+    commands: [
+      {
+        op: "object.create",
+        ref: "note",
+        type: "base.note",
+        title: "双处展示的便签",
+      },
+      {
+        op: "object.create",
+        ref: "otherBoard",
+        type: "base.board",
+        title: "第二块评论白板",
+      },
+      {
+        op: "presentation.create",
+        ref: "first",
+        boardId: commentHome,
+        objectId: "@note",
+        x: 110,
+        y: 165,
+      },
+      {
+        op: "presentation.create",
+        ref: "link",
+        boardId: commentHome,
+        objectId: "@otherBoard",
+        x: 500,
+        y: 165,
+      },
+      {
+        op: "presentation.create",
+        ref: "second",
+        boardId: "@otherBoard",
+        objectId: "@note",
+        x: 140,
+        y: 170,
+      },
+    ],
+  });
+  await page.goto(c.url);
+  const commentCard = (id: string) =>
+    frame.locator(`[data-instance-id="${id}"]`);
+  const firstBadge = commentCard(comments.created.first).locator(
+    ".comment-badge",
+  );
+  const secondBadge = commentCard(comments.created.second).locator(
+    ".comment-badge",
+  );
+  const thread = frame.getByRole("dialog", {
+    name: "评论 · 双处展示的便签",
+    exact: true,
+  });
+  await firstBadge.click();
+  const body = thread.getByRole("textbox", { name: "评论正文" });
+  const postComment = thread.getByRole("button", {
+    name: "发布评论",
+    exact: true,
+  });
+  await body.fill("两处展示都能读到");
+  await postComment.click();
+  await thread
+    .locator("article")
+    .getByText("两处展示都能读到", { exact: true })
+    .waitFor();
+  await thread.getByRole("checkbox", { name: "仅此处", exact: true }).check();
+  await body.fill("两处中的第一处批注");
+  await postComment.click();
+  const localComment = thread
+    .locator("article")
+    .filter({ hasText: "两处中的第一处批注" });
+  await localComment.waitFor();
+  await localComment.getByRole("button", { name: "回复", exact: true }).click();
+  await body.fill("本地批注的回复");
+  await thread.getByRole("button", { name: "发送回复", exact: true }).click();
+  await thread
+    .locator("article")
+    .getByText("本地批注的回复", { exact: true })
+    .waitFor();
+  await firstBadge
+    .and(frame.getByRole("button", { name: "评论（3 条未解决）", exact: true }))
+    .waitFor();
+  await thread.getByRole("button", { name: "关闭评论", exact: true }).click();
+  await commentCard(comments.created.link)
+    .getByRole("button", { name: "进入白板", exact: true })
+    .click();
+  await secondBadge.click();
+  await thread.getByText("两处展示都能读到", { exact: true }).waitFor();
+  assert.equal(
+    await thread.getByText("两处中的第一处批注", { exact: true }).count(),
+    0,
+  );
+  assert.equal(
+    await thread.getByText("本地批注的回复", { exact: true }).count(),
+    0,
+  );
+  await thread.getByRole("button", { name: "标记已解决", exact: true }).click();
+  await secondBadge
+    .and(frame.getByRole("button", { name: "评论", exact: true }))
+    .waitFor();
+  await call("app_history", { action: "undo" });
+  await secondBadge
+    .and(frame.getByRole("button", { name: "评论（1 条未解决）", exact: true }))
+    .waitFor();
+  await call("app_edit", {
+    commands: [{ op: "presentation.delete", id: comments.created.first }],
+  });
+  await thread.getByText("其他位置的批注", { exact: true }).click();
+  await thread.getByText("两处中的第一处批注", { exact: true }).waitFor();
+  await thread.getByText("本地批注的回复", { exact: true }).waitFor();
+  await thread
+    .getByText(/原展示已移除/)
+    .first()
+    .waitFor();
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",

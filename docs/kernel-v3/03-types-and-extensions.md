@@ -294,6 +294,8 @@ v1 清单（`{version: 1, id, name, components: [...]}`）导入时自动转换�
 
 ## 9. 功能组件的受控绑定（组件阶段验收）
 
+`base.comment` 以 `body` 保存 Markdown，省略 `resolved` 表示待解决。新评论随一条 `base.comments_on` 或 `base.reply_to` 在同一事务写入。范围存于根评论关系，回复继承。移除展示后局部批注保留在原对象下，详情显示原展示已移除。
+
 `base.data_source` 从 `base.chart` 或 `base.metric` 指向 `base.table`。`source` 槽最多绑定一个表格，图表的 `mapping.x` 与 `mapping.y` 保存列 key。没有绑定时，v1 的图表数据从 `legacyPoints` 读取。表格的行和列重命名不改变 key，清空的单元格保存为 `null`。
 
 表格可选 `view` 保存 `calculated`（列 key、标签、以列 key 引用的公式）、`filters`、多列 `sort` 和 `groupBy`。省略时显示全部原始行。表格和图表共用派生逻辑，计算结果和筛选后的行不写入 `rows`。CSV 导入预览后创建独立表格，导出可选当前视图或原始数据。

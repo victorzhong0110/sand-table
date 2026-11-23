@@ -27,6 +27,11 @@ export type {
 } from "./types.ts";
 export { isResourceRef } from "./resource.ts";
 export { CommandError } from "./errors.ts";
+export {
+  readCommentCounts,
+  readComments,
+  type CommentEntry,
+} from "./comments.ts";
 export { expandBindings, readBindings, readObjectVersion } from "./bindings.ts";
 export type {
   ExpandedBindings,

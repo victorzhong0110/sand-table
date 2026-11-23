@@ -12,6 +12,7 @@ import {
 } from "@xyflow/react";
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { ShortcutHelp } from "../ShortcutHelp.tsx";
+import { CommentProvider } from "../comments/CommentBadge.tsx";
 import { blocksCanvasShortcut } from "../keyboard.ts";
 import type { Board } from "../data-client/model.ts";
 import {
@@ -214,9 +215,17 @@ function presentationOf(instance: Board["instances"][number]): MapPresentation {
 }
 
 export function FlowCanvas(props: Props) {
+  const board = props.board;
   return (
     <ReactFlowProvider>
-      <FlowSurface {...props} />
+      <CommentProvider
+        boardId={board.views[props.viewId].spaceId}
+        workspaceId={board.workspaceId}
+        revision={board.revision}
+        call={props.call}
+      >
+        <FlowSurface {...props} />
+      </CommentProvider>
     </ReactFlowProvider>
   );
 }

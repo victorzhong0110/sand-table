@@ -44,6 +44,7 @@ const APP_TOOLS = [
   "app_bindings",
   "app_board",
   "app_changes",
+  "app_comments",
   "app_edit",
   "app_history",
   "app_pack",

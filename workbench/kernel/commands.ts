@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import {
+  assertCommentRelation,
+  isCommentRelation,
+} from "./comment-contract.ts";
 import { sourceResourceProblem } from "./resource.ts";
 import { getMeta, setMeta, transaction, type Db } from "./db.ts";
 import { CommandError } from "./errors.ts";
@@ -93,6 +97,7 @@ type Ctx = {
   warnings: CommandResult["warnings"];
   afterCommit: Array<() => void>;
   templateStack: string[];
+  newComments: { id: string; index: number }[];
   registry: Registry;
 };
 
@@ -286,6 +291,7 @@ function executeAll(
     warnings: [],
     afterCommit,
     templateStack: [],
+    newComments: [],
     registry,
   };
   commands.forEach((command, index) => {
@@ -317,6 +323,23 @@ function executeAll(
       String(index),
     );
   });
+  if (ctx.newComments.length) {
+    const unattached = db.prepare(
+      `SELECT o.id FROM objects o
+       WHERE o.id = ? AND o.deleted_rev IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM relations r WHERE r.source_id = o.id
+             AND r.kind IN ('base.comments_on', 'base.reply_to') AND r.deleted_rev IS NULL
+         )`,
+    );
+    for (const { id, index } of ctx.newComments)
+      if (unattached.get(id))
+        throw new CommandError(
+          "INVALID_DATA",
+          "新建评论必须在同一次提交中关联对象或回复已有评论。",
+          index,
+        );
+  }
   setMeta(db, "revision", String(ctx.rev));
   let historyId: string | null = null;
   if (options.record) {
@@ -449,6 +472,7 @@ function createObject(
       ctx.actor.id,
       ctx.rev,
     );
+  if (command.type === "base.comment") ctx.newComments.push({ id, index });
   remember(ctx, command.ref, id, createdKey, index);
   pushChange(ctx, "objects", id, null);
 }
@@ -633,6 +657,7 @@ function cloneObject(
       ctx.actor.id,
       ctx.rev,
     );
+  if (row.type === "base.comment") ctx.newComments.push({ id, index });
   remember(ctx, command.ref, id, createdKey, index);
   pushChange(ctx, "objects", id, null);
 }
@@ -801,6 +826,17 @@ function createRelation(
   assertRelationRules(ctx, command.kind, source, target, status, basis, index);
   const attributes = command.attributes ?? {};
   assertAttributes(attributes, index);
+  if (isCommentRelation(command.kind))
+    assertCommentRelation(
+      ctx.db,
+      {
+        kind: command.kind,
+        sourceId: source.id,
+        targetId: target.id,
+        attributes,
+      },
+      index,
+    );
   const evidence = command.evidence ?? [];
   assertEvidence(evidence, index);
   const id = newId();
@@ -855,6 +891,19 @@ function updateRelation(
     assertAttributes(command.attributes, index);
     sets.attributes = JSON.stringify(command.attributes);
   }
+  if (isCommentRelation(row.kind))
+    assertCommentRelation(
+      ctx.db,
+      {
+        id: row.id,
+        kind: row.kind,
+        sourceId: source.id,
+        targetId: target.id,
+        attributes: command.attributes ?? row.attributes,
+        previousPresentationId: row.attributes.presentationId,
+      },
+      index,
+    );
   if (command.evidence !== undefined) {
     assertEvidence(command.evidence, index);
     sets.evidence = JSON.stringify(command.evidence);

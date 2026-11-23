@@ -14,6 +14,7 @@ import {
   type RefObject,
 } from "react";
 import { Icon } from "../Icon.tsx";
+import { CommentBadge } from "../comments/CommentBadge.tsx";
 import { v3DataOf, v3TypeOf } from "../data-client/adapter.ts";
 import { peekContent } from "../data-client/content.ts";
 import type { Board } from "../data-client/model.ts";
@@ -218,9 +219,9 @@ function fitInlineEdit(el: HTMLTextAreaElement, keepCaret: boolean) {
 
 function quietControls(root: HTMLElement) {
   for (const node of root.querySelectorAll(
-    "input, textarea, select, button, a, [contenteditable='true']",
+    "input, textarea, select, button, a, summary, [contenteditable='true']",
   ))
-    node.classList.add("nodrag", "nowheel", "nopan");
+    node.classList.add("nodrag", "nowheel", "nopan", "nokey");
 }
 
 export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
@@ -317,7 +318,8 @@ export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
       className={`card component-card material-${material(instance.type)} detail-${detail || "full"} ${selected ? "selected" : ""} ${guide && instance.objectId && !onRoute ? "dimmed" : ""} ${editingHere ? "editing" : ""}`}
       onDoubleClick={(event) => {
         const target = event.target as HTMLElement;
-        if (target.closest("button, a, input, textarea, select")) return;
+        if (target.closest("button, a, input, textarea, select, summary"))
+          return;
         event.stopPropagation();
         if (
           instance.type === "board" ||
@@ -411,6 +413,13 @@ export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
             (detail !== "icon" && (
               <strong className="collapsed-title">{resolved.title}</strong>
             )))}
+        {instance.objectId && (
+          <CommentBadge
+            objectId={instance.objectId}
+            presentationId={instance.id}
+            title={resolved.title}
+          />
+        )}
         <button
           className="detail-toggle nodrag nowheel nopan"
           aria-label={`切换 ${resolved.title} 展开层级`}

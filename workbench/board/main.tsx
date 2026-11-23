@@ -402,6 +402,7 @@ function Workbench() {
       }
       case "app_asset":
       case "app_board":
+      case "app_comments":
       case "app_pack":
       case "app_resource":
         return callTool(name, args);

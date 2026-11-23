@@ -19,6 +19,10 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  commentAttributeProblem,
+  isCommentRelation,
+} from "./comment-contract.ts";
+import {
   getMeta,
   openWorkspaceDb,
   setMeta,
@@ -1187,16 +1191,49 @@ function assertGraph(
   }
   assertParentAcyclic(presentations);
   assertBoardAcyclic(presentations, objectById, known.containers);
+  const commentOwners = new Map<string, BundleRelation>();
   for (const relation of relations) {
-    if (
-      !objectById.has(relation.sourceId) ||
-      !objectById.has(relation.targetId)
-    )
+    const source = objectById.get(relation.sourceId);
+    const target = objectById.get(relation.targetId);
+    if (!source || !target)
       throw new CommandError(
         "INVALID_DATA",
         `关系「${relation.id}」的端点不在这份文件里，没有导入。请重新导出一份完整的文件。`,
         null,
       );
+    if (!isCommentRelation(relation.kind)) continue;
+    const issue = commentAttributeProblem(relation.kind, relation.attributes);
+    const placement = presentationById.get(
+      String(relation.attributes.presentationId ?? ""),
+    );
+    if (
+      issue ||
+      source.type !== "base.comment" ||
+      (relation.kind === "base.reply_to" && target.type !== "base.comment") ||
+      relation.status !== "confirmed" ||
+      (placement && placement.objectId !== target.id) ||
+      commentOwners.has(source.id)
+    )
+      throw new CommandError(
+        "INVALID_DATA",
+        `评论关系「${relation.id}」有误，${issue ?? "请检查范围、端点和回复归属。"}`,
+        null,
+      );
+    commentOwners.set(source.id, relation);
+  }
+  const checked = new Set<string>();
+  for (const start of commentOwners.keys()) {
+    const path = new Set<string>();
+    let id = start;
+    while (!checked.has(id)) {
+      const edge = commentOwners.get(id);
+      if (edge?.kind !== "base.reply_to") break;
+      if (path.has(id))
+        throw new CommandError("CYCLE", "评论回复套成了环，没有导入。", null);
+      path.add(id);
+      id = edge.targetId;
+    }
+    for (const member of path) checked.add(member);
   }
 }
 

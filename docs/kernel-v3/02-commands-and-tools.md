@@ -319,6 +319,7 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
 | 工具 | 参数要点 | 作用 |
 |---|---|---|
 | `app_board` | `{ boardId }` | 返回 `boardContents` 的完整结果（对象数据是迁移后的投影），给画布渲染 |
+| `app_comments` | `{ action: "counts", workspaceId, boardId }` 或 `{ action: "thread", workspaceId, objectId, presentationId? }` | 读取白板各展示的未解决评论数量，或读取对象的共享评论、该展示的局部批注和原展示已移除的批注。校验展示归属，返回工作空间、修订号和截断状态 |
 | `app_changes` | `{ since }` | 返回 `changesSince`（对象数据是迁移后的投影），界面每秒调用一次 |
 | `app_bindings` | `{ action: "read" \| "version" \| "expand", workspaceId, objectId, slot, ids?, fields?, limit?, cursor?, targetId?, version? }` | 读取组件声明的槽中已绑定对象或其中一个对象的指定版本。读取版本须给 `targetId` 和 `version`。工作空间、槽和目标逐次校验，`self` 只指读取组件自身。展开仅接受内置关系图的 `focus`，按持久配置返回节点、边、修订号和截断标记 |
 | `app_edit` | 同 `sand_edit` | 人的写入，`actor` 为 human |
