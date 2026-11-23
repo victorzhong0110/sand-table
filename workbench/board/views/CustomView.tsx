@@ -8,6 +8,7 @@ import type {
 } from "../../kernel/index.ts";
 import { createBindings, type BindingSession } from "./bindings.ts";
 import type { TypeSpecView } from "./format.ts";
+import { timelineFields } from "../timeline/fields.ts";
 import { customView, useViewRuntime, type ViewProps } from "./registry.tsx";
 import { openObjectPicker, planLinkedComponent } from "./actions.ts";
 import { useTypeCatalog } from "./catalog.tsx";
@@ -184,6 +185,60 @@ export function CustomView({
       bindings={active.session}
       actions={actions}
       graph={graph}
+      timeline={
+        object.type === "base.timeline"
+          ? {
+              async addFromBoard(dimension) {
+                requireActive();
+                if (object.migrationError) throw Error("当前时间轴是只读的。");
+                const { items, nextCursor } = await active.session.read(
+                  "items",
+                  { limit: 200 },
+                );
+                requireActive();
+                if (nextCursor)
+                  throw Error("时间轴最多加入 200 个条目，请先移除一部分。");
+                const linked = new Set(items.map(({ id }) => id));
+                const candidates = new Set(
+                  [...runtime.store.cache.presentations.values()]
+                    .filter(
+                      (row) =>
+                        row.boardId === presentation.boardId && !row.deleted,
+                    )
+                    .map(({ objectId }) => objectId),
+                );
+                const commands: Command[] = [];
+                for (const id of candidates) {
+                  const row = runtime.store.cache.objects.get(id);
+                  if (!row || row.deleted || id === objectId || linked.has(id))
+                    continue;
+                  const fields = timelineFields(catalog.specs.get(row.type));
+                  if (
+                    !fields.some(
+                      ({ field, kind }) =>
+                        !dimension ||
+                        (field === dimension.field && kind === dimension.kind),
+                    )
+                  )
+                    continue;
+                  commands.push({
+                    op: "relation.create",
+                    kind: "base.timeline_item",
+                    sourceId: objectId,
+                    targetId: id,
+                    expectedSourceVersion: object.version,
+                    expectedTargetVersion: row.version,
+                  });
+                }
+                if (items.length + commands.length > 200)
+                  throw Error("时间轴最多加入 200 个条目，请先移除一部分。");
+                if (commands.length)
+                  await runtime.call("app_edit", { workspaceId, commands });
+                return commands.length;
+              },
+            }
+          : undefined
+      }
       tableFiles={
         object.type === "base.table"
           ? {

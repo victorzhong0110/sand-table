@@ -37,6 +37,8 @@ import { MetricView } from "../data/MetricView.tsx";
 import { ChartView } from "../data/ChartView.tsx";
 import { TableView } from "../data/TableView.tsx";
 import { RelationGraphView } from "../graph/GraphView.tsx";
+import { TimelineView } from "../timeline/TimelineView.tsx";
+import type { Dimension } from "../timeline/scale.ts";
 import type { TableData } from "../data/table-model.ts";
 
 export type WidgetProps = {
@@ -66,6 +68,7 @@ export type ViewProps = {
     options?: { intentId?: string },
   ) => Promise<CommandResult>;
   bindings: Bindings;
+  timeline?: { addFromBoard(dimension?: Dimension): Promise<number> };
   graph?: {
     read(): Promise<ExpandedBindings>;
     subscribe(onChange: () => void): () => void;
@@ -109,6 +112,7 @@ export const customViews: Record<string, (props: ViewProps) => JSX.Element> = {
   filter: FilterView,
   metric: MetricView,
   "relation-graph": RelationGraphView,
+  timeline: TimelineView,
 };
 
 export function customView(name: string | undefined) {

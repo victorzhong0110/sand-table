@@ -254,6 +254,7 @@ v1 清单（`{version: 1, id, name, components: [...]}`）导入时自动转换�
 | `base.board` | 白板 | 是 | 无（标题即白板名） |
 | `base.frame` | 画布上的框，用来分组 | 否 | 无 |
 | `base.note` | 便签 / 文字 | 否 | `body`（markdown） |
+| `base.timeline` | 时间轴 | 否 | `dimension`（显式数值或 ISO 日期字段）、`tracks`（按类型或单轨） |
 | `base.relation_graph` | 关系图 | 否 | `depth`（1–3，默认 1）、`kinds?`（未设或空数组显示所有声明关系）、`layout`（分层或放射，默认分层） |
 | `base.heading` | 标题 | 否 | `text`、`level`（1–3，`x-sand-default: 1`） |
 | `base.link` | 超链接 | 否 | `url`、`description` |
@@ -298,6 +299,8 @@ v1 清单（`{version: 1, id, name, components: [...]}`）导入时自动转换�
 表格可选 `view` 保存 `calculated`（列 key、标签、以列 key 引用的公式）、`filters`、多列 `sort` 和 `groupBy`。省略时显示全部原始行。表格和图表共用派生逻辑，计算结果和筛选后的行不写入 `rows`。CSV 导入预览后创建独立表格，导出可选当前视图或原始数据。
 
 筛选器用 `base.filters` 显式连接目标表。表格、图表和指标在派生同一源表时同时应用连接筛选器与表自身筛选。图间 `base.highlights` / `base.filters` 关系要求两图绑定同一源表。前者传递临时高亮行 key，后者传递图表确认保存的选区。解绑或切换源表后失配的链接暂停生效。旧指标的手填内容保留在 `legacy` 中。
+
+时间轴经 `base.timeline_item` 绑定条目。时间维度显式指定字段、类型（`number` 或 `date`）、显示名称及可选结束字段。无值与非法值列入未排序，结束早于开始时显示错误。仅按 UTC 日解释 ISO 日期。小说事件 v2 增加可选整数 `storyOrder` 与 `storyOrderEnd`，旧 `storyTime` 继续作为文字标签。
 
 图表读取表格、比较读取两个对象/版本、关系图读取有界查询，通过持久关系槽声明绑定，不复制源数据。宿主提供 readBindings({slot, ids?, fields?, limit?, cursor?})：仅可访问声明并已绑定的目标，返回版本、来源与失效原因。任意未绑定 ID 拒绝。内置关系图的多值 focus 槽使用 `base.graph_focus`。展开时从中心遍历有向事实的两个端点，图中按原有方向渲染；中心槽关系不作为事实边。节点位置只属于当前界面会话。
 

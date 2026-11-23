@@ -81,7 +81,7 @@ export const novelPack: PackSpec = {
       title: "事件",
       description: "故事里发生的一件事：谁参与、发生在什么时间。",
       icon: "spark",
-      version: 1,
+      version: 2,
       schema: {
         type: "object",
         additionalProperties: false,
@@ -98,6 +98,16 @@ export const novelPack: PackSpec = {
             "x-sand-label": "故事时间",
             "x-sand-widget": "text",
           },
+          storyOrder: {
+            type: "integer",
+            "x-sand-label": "故事时间排序",
+            "x-sand-widget": "integer",
+          },
+          storyOrderEnd: {
+            type: "integer",
+            "x-sand-label": "故事时间结束",
+            "x-sand-widget": "integer",
+          },
           narrativeOrder: {
             type: "integer",
             minimum: 0,
@@ -112,6 +122,7 @@ export const novelPack: PackSpec = {
           },
         },
       },
+      migrations: [{ from: 1, migrate: (data) => data }],
       display: {
         material: "paper",
         defaultSize: { width: 280, height: 180 },
