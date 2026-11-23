@@ -186,18 +186,6 @@ function isUserViewportEvent(event: unknown): boolean {
   );
 }
 
-function parseCamera(value: unknown): Viewport | null {
-  if (!value || typeof value !== "object") return null;
-  const camera = value as Partial<Viewport>;
-  if (
-    typeof camera.x !== "number" ||
-    typeof camera.y !== "number" ||
-    typeof camera.zoom !== "number"
-  )
-    return null;
-  return { x: camera.x, y: camera.y, zoom: camera.zoom };
-}
-
 function presentationOf(instance: Board["instances"][number]): MapPresentation {
   return {
     id: instance.id,
@@ -328,8 +316,9 @@ function FlowSurface({
   } | null>(null);
   /** 进入或返回的镜头还没走完时，选区定位不能把它掐掉。 */
   const navHold = useRef(false);
-  /** 刚按栈恢复的选区。这次不要再把镜头挪去对准它。 */
+  /** 重开白板或返回时，已保存的镜头与选区一起恢复。 */
   const holdSelection = useRef<string[] | null>(null);
+  const lastFocusRevision = useRef(focusRevision);
   const boardCameras = useRef(new Map<string, Viewport>());
   const focusReturn = useRef<HTMLElement | null>(null);
   const arrangeSeq = useRef(0);
@@ -774,7 +763,7 @@ function FlowSurface({
   });
 
   useEffect(() => {
-    if (!view) return;
+    if (!view || !b.workspaceId) return;
     let cancelled = false;
     const switching = booted.current;
     if (switching) {
@@ -783,7 +772,7 @@ function FlowSurface({
       selectionOverride.current = null;
       stopAnimation(false);
       stopEdge(false);
-    }
+    } else holdSelection.current = [...view.selection];
     const motion = pendingMotion.current;
     if (switching && motion) {
       pendingMotion.current = null;
@@ -827,16 +816,12 @@ function FlowSurface({
         });
       });
     };
-    if (!booted.current) {
-      booted.current = true;
-      void call("app_view", { action: "get", viewId })
-        .then((data) => apply(parseCamera(data?.camera)))
-        .catch(() => apply(null));
-    } else apply(isUnsetViewport(view.camera) ? null : view.camera);
+    booted.current = true;
+    apply(isUnsetViewport(view.camera) ? null : view.camera);
     return () => {
       cancelled = true;
     };
-  }, [view?.spaceId]);
+  }, [view?.spaceId, b.workspaceId]);
 
   useEffect(() => {
     const sync = () => {
@@ -1100,7 +1085,10 @@ function FlowSurface({
   };
 
   useEffect(() => {
+    const requested = lastFocusRevision.current !== focusRevision;
+    lastFocusRevision.current = focusRevision;
     if (
+      !requested &&
       holdSelection.current &&
       sameIds(holdSelection.current, view?.selection ?? [])
     )

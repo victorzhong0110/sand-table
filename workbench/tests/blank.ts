@@ -1611,19 +1611,30 @@ try {
     const zoomLabel = `${Math.max(5, priorZoom - 10)}%`;
     await zoom.getByText(zoomLabel, { exact: true }).waitFor();
     let storedZoom = "";
+    let storedCamera: { x: number; y: number; zoom: number } | undefined;
     for (let i = 0; i < 60; i++) {
       const savedView = await call("app_view", {
         action: "get",
         viewId: "local-human",
       });
       storedZoom = `${Math.round(savedView.camera.zoom * 100)}%`;
-      if (storedZoom === zoomLabel) break;
+      if (storedZoom === zoomLabel) {
+        storedCamera = savedView.camera;
+        break;
+      }
       await page.waitForTimeout(100);
     }
     assert.equal(storedZoom, zoomLabel, "Zoom change is saved before reload.");
+    await call("app_view", {
+      action: "select",
+      viewId: "local-human",
+      selection: [farId],
+    });
     await page.reload();
-    await frame.locator(".zoom span").waitFor();
-    await frame.locator(".component-card").first().waitFor({ timeout: 30000 });
+    await frame
+      .locator(`.component-card.selected[data-instance-id="${farId}"]`)
+      .waitFor();
+    await frame.locator('.flow-canvas:not([data-nav-playing="1"])').waitFor();
     let restored = "";
     for (let i = 0; i < 40; i++) {
       restored = (await frame.locator(".zoom span").innerText()).trim();
@@ -1635,6 +1646,12 @@ try {
       zoomLabel,
       "Reopening the board restores the viewport.",
     );
+    const reopenedView = await call("app_view", {
+      action: "get",
+      viewId: "local-human",
+    });
+    assert.deepEqual(reopenedView.camera, storedCamera);
+    await page.keyboard.press("Escape");
     await page.setViewportSize({ width: 1440, height: 1000 });
     /* T31：复制、粘贴、再放一份、方向键。正文修改是另一步历史，
        所以「撤销一次去掉两份新展示」放在改正文之前。 */
@@ -2569,6 +2586,7 @@ try {
         await page.waitForTimeout(50);
       }
       let previous = await viewCamera();
+      let stable = 0;
       for (let i = 0; i < 20; i += 1) {
         await page.waitForTimeout(150);
         const next = await viewCamera();
@@ -2576,8 +2594,9 @@ try {
           Math.abs(next.x - previous.x) < 1 &&
           Math.abs(next.y - previous.y) < 1 &&
           Math.abs(next.zoom - previous.zoom) < 0.01
-        )
-          return next;
+        ) {
+          if (++stable >= 3) return next;
+        } else stable = 0;
         previous = next;
       }
       return previous;
@@ -2622,6 +2641,10 @@ try {
     await frame.locator(`[data-instance-id="${nearId}"]`).waitFor();
     await frame.locator(`[data-instance-id="${nearId}"]`).focus();
     await page.keyboard.press("Space");
+    for (let i = 0; i < 60 && !(await viewSelection()).includes(nearId); i++) {
+      await page.waitForTimeout(100);
+    }
+    assert.ok((await viewSelection()).includes(nearId));
     const cameraBefore = await waitNavIdle();
     const selectionBefore = await viewSelection();
     await enterCard(nearId);
@@ -4527,7 +4550,8 @@ try {
   await third.click();
   await graph.locator(".graph-object-detail").getByText("关闭详情").waitFor();
   await graph.getByRole("button", { name: "关闭详情" }).press("Enter");
-  await third.dblclick();
+  await graph.locator(".graph-object-detail").waitFor({ state: "hidden" });
+  await third.dispatchEvent("dblclick", { detail: 2, bubbles: true });
   await third.locator(".graph-center").waitFor();
   assert.equal(
     (await readGraph()).nodes.find(
