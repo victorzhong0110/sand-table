@@ -216,3 +216,63 @@ test("组合文件拒绝展示和目标不一致，已移除的展示只保留�
     db.close();
   }
 });
+
+test("祖先移除会使所有下级回复失效，导出保留正文并校验讨论根", (t) => {
+  const s = fixture(t);
+  const root = s.create("根评论");
+  const parent = s.create("中间回复", { parent: root.comment });
+  const child = s.create("仍可读的回复", { parent: parent.comment });
+  const grandchild = s.create("仍可读的下级回复", { parent: child.comment });
+  const read = () => readComments(s.db, s.target, s.first).entries;
+  const nested = [child.comment, grandchild.comment];
+  const checkRemoved = (expected: boolean) => {
+    for (const id of nested)
+      assert.equal(
+        read().find((entry) => entry.id === id)?.threadRemoved,
+        expected,
+      );
+  };
+  checkRemoved(false);
+
+  const invalid = JSON.parse(exportWorkspaceBundle(s.db).json);
+  invalid.relations = invalid.relations.filter(
+    (entry: { id: string }) => entry.id !== root.edge,
+  );
+  assert.throws(
+    () => importWorkspaceBundle(s.dir, s.registry, JSON.stringify(invalid)),
+    /缺少根评论/,
+  );
+
+  s.edit({ op: "object.delete", id: parent.comment });
+  checkRemoved(true);
+  undo(s.db, s.actor);
+  checkRemoved(false);
+
+  s.edit({ op: "object.delete", id: parent.comment });
+  const exported = exportWorkspaceBundle(s.db);
+  const archive = JSON.parse(exported.json);
+  assert.ok(
+    archive.objects.some((entry: { id: string }) => entry.id === child.comment),
+  );
+  assert.ok(
+    archive.objects.some(
+      (entry: { id: string }) => entry.id === grandchild.comment,
+    ),
+  );
+  assert.ok(
+    !archive.relations.some(
+      (entry: { id: string }) =>
+        entry.id === child.edge || entry.id === grandchild.edge,
+    ),
+  );
+  const imported = importWorkspaceBundle(s.dir, s.registry, exported.json);
+  const { db } = openWorkspace(s.dir, imported.workspaceId, s.registry);
+  try {
+    assert.deepEqual(
+      readComments(db, s.target, s.first).entries.map((entry) => entry.id),
+      [root.comment],
+    );
+  } finally {
+    db.close();
+  }
+});

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import type { Command, CommentEntry } from "../../kernel/index.ts";
-import { formatMarkdown } from "../widgets/display.ts";
 import { commentSections } from "./scope.ts";
 
 export type CommentTarget = {
@@ -78,11 +77,8 @@ export function CommentThread({
     entries,
     presentationId,
   );
-  const removed = new Set(
-    entries.filter(({ removed }) => removed).map(({ id }) => id),
-  );
   const reply = replyId
-    ? entries.find((item) => item.id === replyId && !item.removed)
+    ? entries.find((item) => item.id === replyId && !item.threadRemoved)
     : undefined;
   const canWrite = thread && !thread.targetRemoved;
 
@@ -135,9 +131,6 @@ export function CommentThread({
   }
 
   function item(entry: CommentEntry) {
-    const invalidParent =
-      removed.has(entry.rootId) ||
-      Boolean(entry.parentId && removed.has(entry.parentId));
     const time = new Date(entry.createdAt);
     return (
       <article
@@ -149,13 +142,13 @@ export function CommentThread({
           {entry.createdBy === "human" ? "人" : `Agent · ${entry.createdBy}`} ·{" "}
           <time dateTime={time.toISOString()}>{time.toLocaleString()}</time>
           {entry.originalRemoved && " · 原展示已移除"}
-          {invalidParent && " · 原讨论已移除"}
+          {entry.threadRemoved && " · 原讨论已移除"}
           {entry.resolved && " · 已解决"}
         </small>
-        <p>{formatMarkdown(entry.body) || entry.body}</p>
+        <p>{entry.body}</p>
         {canWrite && (
           <div>
-            {!invalidParent && (
+            {!entry.threadRemoved && (
               <button
                 type="button"
                 disabled={pending}

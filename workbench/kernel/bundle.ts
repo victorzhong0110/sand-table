@@ -310,7 +310,19 @@ function readBundle(
       null,
     );
   const presentations = livePresentations(db);
-  const relations = liveRelations(db);
+  const liveEdges = liveRelations(db);
+  const commentStates = commentChainStates(
+    new Map(
+      liveEdges
+        .filter((edge) => isCommentRelation(edge.kind))
+        .map((edge) => [edge.sourceId, edge]),
+    ),
+  );
+  const relations = liveEdges.filter(
+    (edge) =>
+      edge.kind !== "base.reply_to" ||
+      commentStates.get(edge.sourceId) !== "orphan",
+  );
   const settings = liveSettings(db);
   const packs = livePacks(db);
   const blobMeta = blobTable(db);
@@ -1221,20 +1233,37 @@ function assertGraph(
       );
     commentOwners.set(source.id, relation);
   }
-  const checked = new Set<string>();
+  for (const state of commentChainStates(commentOwners).values()) {
+    if (state === "cyclic")
+      throw new CommandError("CYCLE", "评论回复套成了环，没有导入。", null);
+    if (state === "orphan")
+      throw new CommandError(
+        "INVALID_DATA",
+        "评论回复缺少根评论，没有导入。",
+        null,
+      );
+  }
+}
+
+function commentChainStates(commentOwners: Map<string, BundleRelation>) {
+  const states = new Map<string, "rooted" | "orphan" | "cyclic">();
   for (const start of commentOwners.keys()) {
     const path = new Set<string>();
     let id = start;
-    while (!checked.has(id)) {
+    let state = states.get(id);
+    while (!state) {
       const edge = commentOwners.get(id);
-      if (edge?.kind !== "base.reply_to") break;
-      if (path.has(id))
-        throw new CommandError("CYCLE", "评论回复套成了环，没有导入。", null);
+      if (!edge || edge.kind !== "base.reply_to" || path.has(id)) {
+        state = path.has(id) ? "cyclic" : edge ? "rooted" : "orphan";
+        break;
+      }
       path.add(id);
       id = edge.targetId;
+      state = states.get(id);
     }
-    for (const member of path) checked.add(member);
+    for (const member of path) states.set(member, state);
   }
+  return states;
 }
 
 function assertParentAcyclic(presentations: BundlePresentation[]): void {

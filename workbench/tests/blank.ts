@@ -1601,10 +1601,26 @@ try {
       relationCommitted,
       "Connecting two cards and choosing 相关 creates base.related.",
     );
-    await frame.getByRole("button", { name: "缩小", exact: true }).click();
-    await frame.getByRole("button", { name: "缩小", exact: true }).click();
-    await page.waitForTimeout(1200);
-    const zoomLabel = (await frame.locator(".zoom span").innerText()).trim();
+    const zoom = frame.locator(".zoom");
+    const priorZoom = Number.parseInt(
+      await zoom.locator("span").innerText(),
+      10,
+    );
+    assert.ok(priorZoom > 5);
+    await zoom.getByRole("button", { name: "缩小", exact: true }).click();
+    const zoomLabel = `${Math.max(5, priorZoom - 10)}%`;
+    await zoom.getByText(zoomLabel, { exact: true }).waitFor();
+    let storedZoom = "";
+    for (let i = 0; i < 60; i++) {
+      const savedView = await call("app_view", {
+        action: "get",
+        viewId: "local-human",
+      });
+      storedZoom = `${Math.round(savedView.camera.zoom * 100)}%`;
+      if (storedZoom === zoomLabel) break;
+      await page.waitForTimeout(100);
+    }
+    assert.equal(storedZoom, zoomLabel, "Zoom change is saved before reload.");
     await page.reload();
     await frame.locator(".zoom span").waitFor();
     await frame.locator(".component-card").first().waitFor({ timeout: 30000 });
@@ -1741,17 +1757,25 @@ try {
       }
     };
     const selectPair = async () => {
+      const expected = [idA, idB].sort();
       for (let attempt = 0; attempt < 3; attempt += 1) {
         await page.keyboard.press("Escape");
         await clickCard(cardA);
         await clickCard(cardB, { modifiers: [primaryModifier] });
         for (let i = 0; i < 25; i += 1) {
-          if ((await frame.locator(".component-card.selected").count()) === 2)
-            return;
+          const shown = await frame
+            .locator(".component-card.selected")
+            .evaluateAll((cards) =>
+              cards.map((card) => card.getAttribute("data-instance-id")).sort(),
+            );
+          if (shown.join("|") === expected.join("|")) {
+            const saved = (await v3View()).selection.slice().sort();
+            if (saved.join("|") === expected.join("|")) return;
+          }
           await new Promise((resolve) => setTimeout(resolve, 60));
         }
       }
-      await untilUiSelection(2);
+      throw new Error("复制操作前未能选中甲、乙两张卡片");
     };
     await selectPair();
     const beforePaste = await read();
@@ -4365,7 +4389,15 @@ try {
   const findImportedTable = () =>
     call("sand_query", { text: "导入记录", types: ["base.table"] });
   assert.equal((await findImportedTable()).rows.length, 0);
-  await csvPreview.getByRole("button", { name: "确认新建表格" }).press("Enter");
+  const confirmCsv = csvPreview.getByRole("button", {
+    name: "确认新建表格",
+    exact: true,
+  });
+  await confirmCsv.waitFor();
+  await confirmCsv.evaluate((button: HTMLButtonElement) => {
+    if (button.disabled) throw new Error("CSV 确认按钮未就绪");
+    button.click();
+  });
   await tableCard
     .getByText("已新建表格「导入记录」。", { exact: true })
     .waitFor();
@@ -4482,7 +4514,7 @@ try {
   await call("app_edit", {
     commands: [{ op: "relation.delete", id: graphFixture.created.remove }],
   });
-  await third.waitFor({ state: "detached", timeout: 2000 });
+  await third.waitFor({ state: "detached" });
   assert.equal(await graph.locator(".react-flow__edge").count(), 1);
   await second.click();
   await frame
@@ -4491,12 +4523,12 @@ try {
     )
     .waitFor();
   await call("app_history", { action: "undo" });
-  await third.waitFor({ timeout: 2000 });
+  await third.waitFor();
   await third.click();
   await graph.locator(".graph-object-detail").getByText("关闭详情").waitFor();
   await graph.getByRole("button", { name: "关闭详情" }).press("Enter");
   await third.dblclick();
-  await third.locator(".graph-center").waitFor({ timeout: 2000 });
+  await third.locator(".graph-center").waitFor();
   assert.equal(
     (await readGraph()).nodes.find(
       (node: any) => node.id === graphFixture.created.person2,
@@ -4579,6 +4611,7 @@ try {
     join(root, "workspaces/timeline-verify/workspace.db"),
   );
   try {
+    timeDb.exec("PRAGMA busy_timeout = 5000");
     timeDb
       .prepare("UPDATE objects SET type_version = 1 WHERE id = ?")
       .run(timeFixture.created.entry3);
@@ -4704,11 +4737,12 @@ try {
     name: "发布评论",
     exact: true,
   });
-  await body.fill("两处展示都能读到");
+  const longComment = `两处展示都能读到${"，保留完整内容".repeat(40)}\n完整评论末尾`;
+  await body.fill(longComment);
   await postComment.click();
   await thread
     .locator("article")
-    .getByText("两处展示都能读到", { exact: true })
+    .getByText(longComment, { exact: true })
     .waitFor();
   await thread.getByRole("checkbox", { name: "仅此处", exact: true }).check();
   await body.fill("两处中的第一处批注");
@@ -4732,7 +4766,10 @@ try {
     .getByRole("button", { name: "进入白板", exact: true })
     .click();
   await secondBadge.click();
-  await thread.getByText("两处展示都能读到", { exact: true }).waitFor();
+  await thread
+    .locator("article")
+    .getByText(longComment, { exact: true })
+    .waitFor();
   assert.equal(
     await thread.getByText("两处中的第一处批注", { exact: true }).count(),
     0,

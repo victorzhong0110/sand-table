@@ -11,6 +11,7 @@ export type CommentEntry = {
   originalRemoved: boolean;
   targetRemoved: boolean;
   removed: boolean;
+  threadRemoved: boolean;
   body: string;
   resolved: boolean;
   version: number;
@@ -82,7 +83,8 @@ export function readComments(
        ), roots AS (
          SELECT r.source_id AS id,
            json_extract(r.attributes, '$.presentationId') AS presentationId,
-           (p.id IS NULL OR p.deleted_rev IS NOT NULL) AS placementRemoved
+           (p.id IS NULL OR p.deleted_rev IS NOT NULL) AS placementRemoved,
+           (r.deleted_rev IS NOT NULL OR c.deleted_rev IS NOT NULL) AS threadRemoved
          FROM owners r
          JOIN objects c ON c.id = r.source_id AND c.type = 'base.comment'
          LEFT JOIN presentations p
@@ -90,15 +92,18 @@ export function readComments(
          WHERE r.kind = 'base.comments_on' AND r.target_id = ?
            AND (json_extract(r.attributes, '$.presentationId') IS NULL
              OR p.id = ? OR p.id IS NULL OR p.deleted_rev IS NOT NULL)
-       ), tree(rootId, id, parentId) AS (
-         SELECT DISTINCT id, id, NULL FROM roots
+       ), tree(rootId, id, parentId, threadRemoved) AS (
+         SELECT DISTINCT id, id, NULL, threadRemoved FROM roots
          UNION
-         SELECT t.rootId, r.source_id, t.id FROM tree t
+         SELECT t.rootId, r.source_id, t.id,
+           (t.threadRemoved OR r.deleted_rev IS NOT NULL OR c.deleted_rev IS NOT NULL)
+         FROM tree t
          JOIN owners r ON r.target_id = t.id AND r.kind = 'base.reply_to'
          JOIN objects c ON c.id = r.source_id AND c.type = 'base.comment'
          LIMIT 201
        )
        SELECT c.id, t.rootId, t.parentId, roots.presentationId, roots.placementRemoved,
+         t.threadRemoved,
          c.deleted_rev IS NOT NULL AS removed,
          CASE WHEN c.deleted_rev IS NULL THEN json_extract(c.data, '$.body') ELSE '' END AS body,
          json_extract(c.data, '$.resolved') AS resolved,
@@ -118,6 +123,7 @@ export function readComments(
       originalRemoved: Boolean(row.presentationId && row.placementRemoved),
       targetRemoved,
       removed: Boolean(row.removed),
+      threadRemoved: Boolean(row.threadRemoved),
       body: typeof row.body === "string" ? row.body : "",
       resolved: row.resolved === 1,
       version: Number(row.version),
