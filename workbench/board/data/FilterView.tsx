@@ -1,9 +1,74 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { ViewProps } from "../views/registry.tsx";
 import { deriveTable, tableViewOf } from "./derive-table.ts";
 import { cellValue, tableOf } from "./table-model.ts";
 import { useBoundTables } from "./use-table-source.ts";
 import { useViewSave } from "./use-view-save.ts";
+
+function RangeFilter({
+  min,
+  max,
+  savedLower,
+  savedUpper,
+  disabled,
+  apply,
+}: {
+  min: number;
+  max: number;
+  savedLower?: number;
+  savedUpper?: number;
+  disabled: boolean;
+  apply: (lower: number, upper: number) => void;
+}) {
+  const [lower, setLower] = useState(savedLower ?? min);
+  const [upper, setUpper] = useState(savedUpper ?? max);
+  return (
+    <div>
+      <label>
+        范围下限
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step="any"
+          value={lower}
+          disabled={disabled}
+          onChange={(event) =>
+            setLower(Math.min(event.target.valueAsNumber, upper))
+          }
+        />
+      </label>
+      <label>
+        范围上限
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step="any"
+          value={upper}
+          disabled={disabled}
+          onChange={(event) =>
+            setUpper(Math.max(event.target.valueAsNumber, lower))
+          }
+        />
+      </label>
+      <span>
+        {lower} 至 {upper}
+      </span>
+      <button
+        type="button"
+        disabled={
+          disabled ||
+          lower > upper ||
+          (lower === savedLower && upper === savedUpper)
+        }
+        onClick={() => apply(lower, upper)}
+      >
+        应用范围
+      </button>
+    </div>
+  );
+}
 
 export function FilterView(props: ViewProps) {
   const { data } = props.object;
@@ -46,8 +111,24 @@ export function FilterView(props: ViewProps) {
     (value): value is number =>
       typeof value === "number" && Number.isFinite(value),
   );
-  const min = numbers.length ? Math.min(...numbers) : 0;
-  const max = numbers.length ? Math.max(...numbers) : 0;
+  const savedLower =
+    data.op === "between" && typeof data.value === "number"
+      ? data.value
+      : undefined;
+  const savedUpper =
+    data.op === "between" && typeof data.upper === "number"
+      ? data.upper
+      : undefined;
+  const min = Math.min(
+    savedLower ?? Infinity,
+    savedUpper ?? Infinity,
+    ...numbers,
+  );
+  const max = Math.max(
+    savedLower ?? -Infinity,
+    savedUpper ?? -Infinity,
+    ...numbers,
+  );
   const clear = ["op", "value", "upper"];
   const affected = new Map(
     targets.flatMap(({ id, title, tableConsumers }) => [
@@ -131,27 +212,17 @@ export function FilterView(props: ViewProps) {
         />
       )}
       {column && kind === "range" && numbers.length > 0 && (
-        <label>
-          范围上限
-          <input
-            aria-label="范围上限"
-            type="range"
-            min={min}
-            max={max}
-            step="any"
-            key={String(data.upper)}
-            defaultValue={typeof data.upper === "number" ? data.upper : max}
-            disabled={edit.disabled}
-            onBlur={(event) => {
-              const upper = event.target.valueAsNumber;
-              if (Number.isFinite(upper) && upper !== (data.upper ?? max))
-                void edit.save({ op: "between", value: min, upper });
-            }}
-          />
-          <span>
-            {min} 至 {typeof data.upper === "number" ? data.upper : max}
-          </span>
-        </label>
+        <RangeFilter
+          key={JSON.stringify([column.key, min, max, savedLower, savedUpper])}
+          min={min}
+          max={max}
+          savedLower={savedLower}
+          savedUpper={savedUpper}
+          disabled={edit.disabled}
+          apply={(value, upper) =>
+            void edit.save({ op: "between", value, upper })
+          }
+        />
       )}
       {!props.readOnly && data.op !== undefined && (
         <button

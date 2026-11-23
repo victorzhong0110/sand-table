@@ -1580,16 +1580,25 @@ try {
       .getByRole("dialog", { name: "选择关系" })
       .getByRole("button", { name: "相关", exact: true })
       .click();
-    const related = await call("sand_read", {
-      ids: [sourceNote.objectId],
-      include: ["relations"],
-    });
-    assert.ok(
-      (related.objects?.[0]?.relations ?? []).some(
+    const relationSaved = async () => {
+      const related = await call("sand_read", {
+        ids: [sourceNote.objectId],
+        include: ["relations"],
+      });
+      return (related.objects?.[0]?.relations ?? []).some(
         (relation: { kind?: string; otherId?: string }) =>
           relation.kind === "base.related" &&
           relation.otherId === targetNote.objectId,
-      ),
+      );
+    };
+    const linkDeadline = Date.now() + 4000;
+    let relationCommitted = await relationSaved();
+    while (!relationCommitted && Date.now() < linkDeadline) {
+      await page.waitForTimeout(50);
+      relationCommitted = await relationSaved();
+    }
+    assert.ok(
+      relationCommitted,
       "Connecting two cards and choosing 相关 creates base.related.",
     );
     await frame.getByRole("button", { name: "缩小", exact: true }).click();
@@ -2157,12 +2166,15 @@ try {
     };
     const selectArrange = async (ids: string[]) => {
       await page.keyboard.press("Escape");
+      await untilUiSelection(0);
       for (let index = 0; index < ids.length; index += 1) {
-        await clickCard(arrangeCard(ids[index]!), {
+        const card = arrangeCard(ids[index]!);
+        await clickCard(card, {
           ...(index > 0 ? { modifiers: [primaryModifier] } : {}),
         });
+        await card.and(frame.locator(".selected")).waitFor();
+        await untilUiSelection(index + 1);
       }
-      await untilUiSelection(ids.length);
     };
     const screenBoxes = async (ids: string[]) => {
       const boxes: Record<string, { x: number; y: number }> = {};
@@ -4180,6 +4192,38 @@ try {
   assert.deepEqual((await tableObject()).data.rows, originalRows);
   await filter.getByRole("button", { name: "清除筛选值", exact: true }).click();
   await metric.getByText("46", { exact: true }).waitFor();
+  await call("app_edit", {
+    commands: [
+      {
+        op: "object.update",
+        id: indicator.created.filter,
+        set: { kind: "range", column: "y" },
+      },
+    ],
+  });
+  const applyRange = filter.getByRole("button", {
+    name: "应用范围",
+    exact: true,
+  });
+  await filter
+    .getByRole("slider", { name: "范围下限", exact: true })
+    .press("End");
+  await applyRange.click();
+  await metric.getByText("34", { exact: true }).waitFor();
+  const clearRange = filter.getByRole("button", {
+    name: "清除筛选值",
+    exact: true,
+  });
+  await clearRange.click();
+  await metric.getByText("46", { exact: true }).waitFor();
+  await filter
+    .getByRole("slider", { name: "范围上限", exact: true })
+    .press("Home");
+  await applyRange.click();
+  await metric.getByText("12", { exact: true }).waitFor();
+  await clearRange.click();
+  await metric.getByText("46", { exact: true }).waitFor();
+  assert.deepEqual((await tableObject()).data.rows, originalRows);
   await tableCard.getByLabel("第 2 行 测量值", { exact: true }).waitFor();
   await sourcePlot.waitFor();
   const highlighted = peer.getByLabel("联动高亮行数");
