@@ -267,6 +267,79 @@ export const basePack: PackSpec = {
       },
     },
     {
+      type: "base.timeline",
+      title: "时间轴",
+      description: "按明确选择的时间字段排列绑定条目。",
+      icon: "events",
+      version: 1,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          dimension: {
+            type: "object",
+            additionalProperties: false,
+            required: ["kind", "field", "label"],
+            "x-sand-label": "时间维度",
+            "x-sand-widget": "table",
+            "x-sand-hidden": true,
+            properties: {
+              kind: {
+                type: "string",
+                enum: ["number", "date"],
+                "x-sand-label": "维度类型",
+                "x-sand-widget": "enum",
+              },
+              field: {
+                type: "string",
+                minLength: 1,
+                maxLength: 100,
+                "x-sand-label": "时间字段",
+                "x-sand-widget": "text",
+              },
+              endField: {
+                type: "string",
+                minLength: 1,
+                maxLength: 100,
+                "x-sand-label": "结束字段",
+                "x-sand-widget": "text",
+              },
+              label: {
+                type: "string",
+                minLength: 1,
+                maxLength: 200,
+                "x-sand-label": "维度名称",
+                "x-sand-widget": "text",
+              },
+            },
+          },
+          tracks: {
+            type: "string",
+            enum: ["type", "none"],
+            "x-sand-default": "type",
+            "x-sand-label": "按类型分轨",
+            "x-sand-widget": "enum",
+            "x-sand-enum-labels": { type: "按类型", none: "单轨" },
+          },
+        },
+      },
+      display: {
+        material: "document",
+        defaultSize: { width: 600, height: 400 },
+        summary: ["tracks"],
+        view: "timeline",
+      },
+      relationSlots: [
+        {
+          key: "items",
+          label: "时间条目",
+          kind: "base.timeline_item",
+          direction: "out",
+          many: true,
+        },
+      ],
+    },
+    {
       type: "base.relation_graph",
       title: "关系图",
       description: "从中心对象展开工作空间中已有的关系。",
@@ -1164,6 +1237,13 @@ export const basePack: PackSpec = {
       allowsInferred: false,
       sourceTypes: ["base.chart"],
       targetTypes: ["base.chart"],
+    },
+    {
+      kind: "base.timeline_item",
+      title: "时间条目",
+      inverseTitle: "所在时间轴",
+      allowsInferred: false,
+      sourceTypes: ["base.timeline"],
     },
     {
       kind: "base.data_source",

@@ -4527,6 +4527,115 @@ try {
     graphLinkSaved = await linkedToGraphCard();
   }
   assert.ok(graphLinkSaved, "从图内节点落点建立的关系必须指向外层关系图卡片。");
+  await call("app_workspace", {
+    action: "create",
+    id: "timeline-verify",
+    title: "时间轴验收",
+  });
+  await call("app_workspace", { action: "switch", id: "timeline-verify" });
+  const timelineBoard = (await call("sand_status")).homeBoardId;
+  const timeFixture = await call("app_edit", {
+    commands: [
+      {
+        op: "object.create",
+        ref: "timeline",
+        type: "base.timeline",
+        title: "研究时间轴",
+      },
+      {
+        op: "presentation.create",
+        ref: "timelinePlace",
+        boardId: timelineBoard,
+        objectId: "@timeline",
+        x: 100,
+        y: 110,
+        width: 645,
+        height: 430,
+      },
+      ...["甲", "乙", "丙", "旧事件"].flatMap((title, i) => [
+        {
+          op: "object.create",
+          ref: `entry${i}`,
+          type: "novel.event",
+          title,
+          data:
+            i === 3
+              ? { storyTime: "三年前的冬天" }
+              : { narrativeOrder: i + 1, storyOrder: [3, 1, 2][i] },
+        },
+        {
+          op: "presentation.create",
+          boardId: timelineBoard,
+          objectId: `@entry${i}`,
+          x: 800,
+          y: 130 + i * 185,
+        },
+      ]),
+    ],
+  });
+  const timeDb = new DatabaseSync(
+    join(root, "workspaces/timeline-verify/workspace.db"),
+  );
+  try {
+    timeDb
+      .prepare("UPDATE objects SET type_version = 1 WHERE id = ?")
+      .run(timeFixture.created.entry3);
+  } finally {
+    timeDb.close();
+  }
+  await page.reload();
+  const timelineCard = frame
+    .locator(`[data-instance-id="${timeFixture.created.timelinePlace}"]`)
+    .getByRole("region", { name: "时间轴", exact: true });
+  await timelineCard.waitFor();
+  const closeTimelineToolbox = frame
+    .getByRole("complementary", { name: "组件工具箱" })
+    .getByRole("button", { name: "收起面板", exact: true });
+  if (await closeTimelineToolbox.isVisible())
+    await closeTimelineToolbox.click();
+  await timelineCard
+    .getByRole("button", { name: "从白板添加", exact: true })
+    .click();
+  await timelineCard.getByText("已添加 4 个条目。", { exact: true }).waitFor();
+  const dimensionSelect = timelineCard.getByLabel("时间维度", { exact: true });
+  await dimensionSelect.selectOption({ label: "叙述顺序" });
+  const ordered = timelineCard.getByRole("list", { name: "按时间排序的条目" });
+  await ordered.getByRole("button", { name: "丙", exact: true }).waitFor();
+  const order = () => ordered.getByRole("button").allTextContents();
+  assert.deepEqual(await order(), ["甲", "乙", "丙"]);
+  await timelineCard
+    .getByRole("region", { name: "未排序" })
+    .getByText("旧事件", { exact: true })
+    .waitFor();
+  assert.equal(
+    (await call("sand_read", { ids: [timeFixture.created.entry3] })).objects[0]
+      .data.storyTime,
+    "三年前的冬天",
+  );
+  await dimensionSelect.selectOption({ label: "故事时间排序" });
+  await timelineCard
+    .getByText("故事时间排序", { exact: true })
+    .last()
+    .waitFor();
+  assert.deepEqual(await order(), ["乙", "丙", "甲"]);
+  await dimensionSelect.selectOption({ label: "叙述顺序" });
+  await timelineCard.getByText("叙述顺序", { exact: true }).last().waitFor();
+  await call("app_edit", {
+    commands: [
+      {
+        op: "object.update",
+        id: timeFixture.created.entry2,
+        set: { narrativeOrder: 0 },
+      },
+    ],
+  });
+  const timelineDeadline = Date.now() + 2000;
+  let names = await order();
+  while (names[0] !== "丙" && Date.now() < timelineDeadline) {
+    await page.waitForTimeout(50);
+    names = await order();
+  }
+  assert.deepEqual(names, ["丙", "甲", "乙"]);
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",

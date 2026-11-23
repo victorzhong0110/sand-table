@@ -34,6 +34,20 @@ const samples: {
     ],
   },
   {
+    type: "base.timeline",
+    ok: [
+      {},
+      {
+        dimension: { kind: "date", field: "date", label: "日期" },
+        tracks: "type",
+      },
+    ],
+    bad: [
+      { dimension: { kind: "mixed", field: "date", label: "时间" } },
+      { tracks: "three" },
+    ],
+  },
+  {
     type: "base.relation_graph",
     ok: [{}, { depth: 3, layout: "radial", kinds: ["base.related"] }],
     bad: [
@@ -569,6 +583,7 @@ test("每个字段都有中文标签和控件，摘要只取可见字段", () =>
         "base.filter": "filter",
         "base.metric": "metric",
         "base.relation_graph": "relation-graph",
+        "base.timeline": "timeline",
       };
       assert.equal(
         type.display.view,
