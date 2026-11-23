@@ -32,6 +32,8 @@ import { TableEditor } from "../widgets/table.tsx";
 import { TagsEditor } from "../widgets/tags.tsx";
 import { TextEditor } from "../widgets/text.tsx";
 import { UrlEditor } from "../widgets/url.tsx";
+import { FilterView } from "../data/FilterView.tsx";
+import { MetricView } from "../data/MetricView.tsx";
 import { ChartView } from "../data/ChartView.tsx";
 import { TableView } from "../data/TableView.tsx";
 import { RelationGraphView } from "../graph/GraphView.tsx";
@@ -104,6 +106,8 @@ export function useViewRuntime() {
 export const customViews: Record<string, (props: ViewProps) => JSX.Element> = {
   table: TableView,
   chart: ChartView,
+  filter: FilterView,
+  metric: MetricView,
   "relation-graph": RelationGraphView,
 };
 

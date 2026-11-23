@@ -4,6 +4,7 @@ import {
   GridComponent,
   LegendComponent,
   TooltipComponent,
+  BrushComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 
@@ -14,6 +15,7 @@ use([
   GridComponent,
   LegendComponent,
   TooltipComponent,
+  BrushComponent,
   CanvasRenderer,
 ]);
 globalThis.sandTableChart = { init };

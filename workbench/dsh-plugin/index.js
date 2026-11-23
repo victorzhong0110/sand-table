@@ -18,7 +18,7 @@ import { createTaskChannel } from "./tasks.js";
 import { ARTIFACT_TOOL } from "./projection.js";
 import { createArtifactWriter } from "../server/host/artifacts.ts";
 import { artifact } from "../server/host/contracts.ts";
-import { migrateChart, migrateTable } from "../packs/base/index.ts";
+import { migrateChart, migrateMetric, migrateTable } from "../packs/base/index.ts";
 import { applyResources } from "./resources.js";
 import { registerDrawing } from "./drawing/host.js";
 import { spawn } from "node:child_process";
@@ -325,7 +325,7 @@ function mapContentType(type, data) {
 const SHA256 = /^[0-9a-f]{64}$/;
 
 /** 便签的旧字段 text 写成 v3 的 body。媒体的 assetId / description 写成 blob / caption。 */
-function mapContentData(type, data) {
+function mapContentData(type, data, current) {
   const next =
     data && typeof data === "object" && !Array.isArray(data) ? { ...data } : {};
   if (
@@ -340,6 +340,11 @@ function mapContentData(type, data) {
     return migrateTable(next);
   if ((type === "chart" || type === "base.chart") && next.points !== undefined)
     return migrateChart(next);
+  if ((type === "metric" || type === "base.metric") &&
+      ("value" in next || "description" in next)) {
+    const { legacy, aggregate, ...data } = migrateMetric(next);
+    return { ...data, aggregate: next.aggregate ?? current?.aggregate ?? aggregate, legacy: { ...current?.legacy, ...legacy } };
+  }
   if (
     (type === "text" || type === "base.note") &&
     !Object.prototype.hasOwnProperty.call(next, "body") &&
@@ -500,7 +505,7 @@ async function editOnV3(mcp, args, operation) {
     const object = (contents.objects || []).find(
       (item) => item.id === presentation.objectId,
     );
-    const data = mapContentData(object?.type, operation.data);
+    const data = mapContentData(object?.type, operation.data, object?.data);
     const command = { op: "object.update", id: presentation.objectId };
     if (
       typeof operation.title === "string" &&

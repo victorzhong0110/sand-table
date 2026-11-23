@@ -32,6 +32,7 @@ type Subscription = {
   slot: string;
   callback: () => void;
   ids: Set<string>;
+  sourceTables: Set<string>;
   complete: boolean;
   token: number;
   key: string;
@@ -92,7 +93,20 @@ export function createBindings(
     try {
       const result = await request("read", sub.slot, { limit: 200 }, sub.key);
       if (!subscriptions.has(sub) || token !== sub.token) return;
-      sub.ids = new Set((result.items as BindingItem[]).map((item) => item.id));
+      const items = result.items as BindingItem[];
+      sub.ids = new Set(
+        items.flatMap((item) => [
+          item.id,
+          ...(item.tableFilters ?? []).map(({ id }) => id),
+          ...(item.tableConsumers ?? []).map(({ id }) => id),
+          ...(item.chartScopes ?? []).map(({ id }) => id),
+        ]),
+      );
+      sub.sourceTables = new Set(
+        items
+          .filter((item) => item.tableFilters || item.tableConsumers)
+          .map(({ id }) => id),
+      );
       sub.complete = !result.nextCursor;
     } catch {
       if (subscriptions.has(sub)) sub.complete = false;
@@ -132,9 +146,17 @@ export function createBindings(
       const slot = slots.find((item) => item.key === sub.slot);
       const relationChanged = event.relations.some(
         (row) =>
-          slot &&
-          row.kind === slot.kind &&
-          (slot.direction === "out" ? row.sourceId : row.targetId) === objectId,
+          (slot &&
+            row.kind === slot.kind &&
+            (slot.direction === "out" ? row.sourceId : row.targetId) ===
+              objectId) ||
+          (row.kind === "base.filters" &&
+            (sub.sourceTables.has(row.targetId) ||
+              (sub.slot === "source" && row.targetId === objectId))) ||
+          (row.kind === "base.data_source" &&
+            (sub.sourceTables.has(row.targetId) ||
+              (["source", "highlights", "highlightedBy"].includes(sub.slot) &&
+                sub.ids.has(row.sourceId)))),
       );
       const objectChanged = event.objects.some(
         (row) => row.id === objectId || sub.ids.has(row.id) || !sub.complete,
@@ -209,6 +231,7 @@ export function createBindings(
         slot,
         callback,
         ids: new Set(),
+        sourceTables: new Set(),
         complete: false,
         token: 0,
         key: `subscription:${++serial}`,

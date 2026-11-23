@@ -1580,16 +1580,25 @@ try {
       .getByRole("dialog", { name: "选择关系" })
       .getByRole("button", { name: "相关", exact: true })
       .click();
-    const related = await call("sand_read", {
-      ids: [sourceNote.objectId],
-      include: ["relations"],
-    });
-    assert.ok(
-      (related.objects?.[0]?.relations ?? []).some(
+    const relationSaved = async () => {
+      const related = await call("sand_read", {
+        ids: [sourceNote.objectId],
+        include: ["relations"],
+      });
+      return (related.objects?.[0]?.relations ?? []).some(
         (relation: { kind?: string; otherId?: string }) =>
           relation.kind === "base.related" &&
           relation.otherId === targetNote.objectId,
-      ),
+      );
+    };
+    const linkDeadline = Date.now() + 4000;
+    let relationCommitted = await relationSaved();
+    while (!relationCommitted && Date.now() < linkDeadline) {
+      await page.waitForTimeout(50);
+      relationCommitted = await relationSaved();
+    }
+    assert.ok(
+      relationCommitted,
       "Connecting two cards and choosing 相关 creates base.related.",
     );
     await frame.getByRole("button", { name: "缩小", exact: true }).click();
@@ -2157,12 +2166,15 @@ try {
     };
     const selectArrange = async (ids: string[]) => {
       await page.keyboard.press("Escape");
+      await untilUiSelection(0);
       for (let index = 0; index < ids.length; index += 1) {
-        await clickCard(arrangeCard(ids[index]!), {
+        const card = arrangeCard(ids[index]!);
+        await clickCard(card, {
           ...(index > 0 ? { modifiers: [primaryModifier] } : {}),
         });
+        await card.and(frame.locator(".selected")).waitFor();
+        await untilUiSelection(index + 1);
       }
-      await untilUiSelection(ids.length);
     };
     const screenBoxes = async (ids: string[]) => {
       const boxes: Record<string, { x: number; y: number }> = {};
@@ -4066,6 +4078,254 @@ try {
     .click();
   await changedChart(afterFilter, 34);
   await tableCard.getByLabel("第 2 行 测量值", { exact: true }).waitFor();
+  const indicator = await call("app_edit", {
+    commands: [
+      {
+        op: "object.create",
+        ref: "metric",
+        type: "base.metric",
+        title: "同源测量合计",
+        data: { aggregate: "sum", column: "y" },
+      },
+      {
+        op: "presentation.create",
+        ref: "metricCard",
+        boardId: tableHome,
+        objectId: "@metric",
+        x: 530,
+        y: 590,
+      },
+      {
+        op: "relation.create",
+        kind: "base.data_source",
+        sourceId: "@metric",
+        targetId: chartFixture.created.table,
+      },
+      {
+        op: "object.create",
+        ref: "filter",
+        type: "base.filter",
+        title: "测量过滤",
+        data: { kind: "select", column: "x" },
+      },
+      {
+        op: "presentation.create",
+        ref: "filterCard",
+        boardId: tableHome,
+        objectId: "@filter",
+        x: 920,
+        y: 430,
+      },
+      {
+        op: "relation.create",
+        kind: "base.filters",
+        sourceId: "@filter",
+        targetId: chartFixture.created.table,
+      },
+      {
+        op: "object.create",
+        ref: "peer",
+        type: "base.chart",
+        title: "联动测量图",
+        data: { kind: "bar", mapping: { x: "x", y: ["y"] } },
+      },
+      {
+        op: "presentation.create",
+        ref: "peerCard",
+        boardId: tableHome,
+        objectId: "@peer",
+        x: 920,
+        y: 150,
+        width: 365,
+      },
+      {
+        op: "relation.create",
+        kind: "base.data_source",
+        sourceId: "@peer",
+        targetId: chartFixture.created.table,
+      },
+      {
+        op: "relation.create",
+        kind: "base.highlights",
+        sourceId: chartRecord.id,
+        targetId: "@peer",
+      },
+      {
+        op: "relation.create",
+        kind: "base.filters",
+        sourceId: chartRecord.id,
+        targetId: "@peer",
+      },
+    ],
+  });
+  const metric = frame.locator(
+    `[data-instance-id="${indicator.created.metricCard}"]`,
+  );
+  const filter = frame.locator(
+    `[data-instance-id="${indicator.created.filterCard}"]`,
+  );
+  const peer = frame.locator(
+    `[data-instance-id="${indicator.created.peerCard}"]`,
+  );
+  const linkedSource = frame.locator(`[data-object-id="${chartRecord.id}"]`);
+  const sourcePlot = linkedSource.locator("canvas").first();
+  await metric.getByText("46", { exact: true }).waitFor();
+  await filter.getByText(/作用于 .*同源测量合计/).waitFor();
+  const closeInspector = frame
+    .getByRole("complementary", { name: "组件详情", exact: true })
+    .getByRole("button", { name: "关闭详情", exact: true });
+  if (await closeInspector.isVisible()) await closeInspector.click();
+  const closeDataTools = frame
+    .getByRole("complementary", { name: "组件工具箱" })
+    .getByRole("button", { name: "收起面板", exact: true });
+  if (await closeDataTools.isVisible()) await closeDataTools.click();
+  await frame.getByRole("button", { name: "适应", exact: true }).click();
+  await filter
+    .getByLabel("筛选器的值", { exact: true })
+    .selectOption(JSON.stringify("乙"));
+  await metric.getByText("12", { exact: true }).waitFor();
+  assert.equal(
+    await tableCard.getByLabel("第 1 行 组别", { exact: true }).inputValue(),
+    "乙",
+  );
+  assert.equal(await oldCell.inputValue(), "11");
+  assert.deepEqual((await tableObject()).data.rows, originalRows);
+  await filter.getByRole("button", { name: "清除筛选值", exact: true }).click();
+  await metric.getByText("46", { exact: true }).waitFor();
+  await call("app_edit", {
+    commands: [
+      {
+        op: "object.update",
+        id: indicator.created.filter,
+        set: { kind: "range", column: "y" },
+      },
+    ],
+  });
+  const applyRange = filter.getByRole("button", {
+    name: "应用范围",
+    exact: true,
+  });
+  await filter
+    .getByRole("slider", { name: "范围下限", exact: true })
+    .press("End");
+  await applyRange.click();
+  await metric.getByText("34", { exact: true }).waitFor();
+  const clearRange = filter.getByRole("button", {
+    name: "清除筛选值",
+    exact: true,
+  });
+  await clearRange.click();
+  await metric.getByText("46", { exact: true }).waitFor();
+  await filter
+    .getByRole("slider", { name: "范围上限", exact: true })
+    .press("Home");
+  await applyRange.click();
+  await metric.getByText("12", { exact: true }).waitFor();
+  await clearRange.click();
+  await metric.getByText("46", { exact: true }).waitFor();
+  assert.deepEqual((await tableObject()).data.rows, originalRows);
+  await tableCard.getByLabel("第 2 行 测量值", { exact: true }).waitFor();
+  await sourcePlot.waitFor();
+  const highlighted = peer.getByLabel("联动高亮行数");
+  const oneHighlight = highlighted.filter({ hasText: /^1$/ });
+  const hoverDeadline = Date.now() + 4000;
+  do {
+    const sourceBox = await sourcePlot.boundingBox();
+    assert.ok(sourceBox);
+    const bar = await sourcePlot.evaluate((canvas: HTMLCanvasElement) => {
+      const sample = document.createElement("canvas").getContext("2d")!;
+      sample.fillStyle = getComputedStyle(canvas)
+        .getPropertyValue("--accent")
+        .trim();
+      sample.fillRect(0, 0, 1, 1);
+      const accent = sample.getImageData(0, 0, 1, 1).data;
+      const { width, height } = canvas;
+      const y = Math.floor(height / 2);
+      const pixels = canvas.getContext("2d")!.getImageData(0, y, width, 1).data;
+      let start = 0;
+      for (let x = 0; x < width; x++) {
+        if (accent.every((value, channel) => pixels[x * 4 + channel] === value))
+          continue;
+        if (x - start >= 8)
+          return { x: (x + start) / (2 * width), y: y / height };
+        start = x + 1;
+      }
+      return null;
+    });
+    if (bar) {
+      await page.mouse.move(4, 20);
+      await page.mouse.move(
+        sourceBox.x + sourceBox.width * bar.x,
+        sourceBox.y + sourceBox.height * bar.y,
+      );
+    }
+    await page.waitForTimeout(100);
+  } while (!(await oneHighlight.isVisible()) && Date.now() < hoverDeadline);
+  assert.ok(
+    await oneHighlight.isVisible(),
+    "悬停数据点时同源图表必须高亮对应行。",
+  );
+  await page.mouse.move(4, 20);
+  await highlighted.waitFor({ state: "detached" });
+  await linkedSource
+    .getByRole("button", { name: "框选横轴范围", exact: true })
+    .click();
+  const brushBox = await sourcePlot.boundingBox();
+  assert.ok(brushBox);
+  const brushY = brushBox.y + brushBox.height * 0.58;
+  await page.mouse.move(brushBox.x + brushBox.width * 0.2, brushY);
+  await page.mouse.down();
+  await page.mouse.move(brushBox.x + brushBox.width * 0.42, brushY, {
+    steps: 10,
+  });
+  await page.mouse.up();
+  await linkedSource
+    .getByRole("button", { name: "只看这一段", exact: true })
+    .click();
+  const linkedScope = peer.getByText("正在应用同源图表的选区，显示 1 行。", {
+    exact: true,
+  });
+  await linkedScope.waitFor();
+  const readChart = async () =>
+    (await call("sand_read", { ids: [chartRecord.id] })).objects[0];
+  assert.deepEqual((await readChart()).data.rowScope, ["r1"]);
+  await page.reload();
+  await linkedScope.waitFor();
+  await metric.getByText("46", { exact: true }).waitFor();
+  assert.deepEqual((await readChart()).data.rowScope, ["r1"]);
+  await linkedSource
+    .getByRole("button", { name: "显示全部行", exact: true })
+    .click();
+  await linkedScope.waitFor({ state: "detached" });
+  assert.equal((await readChart()).data.rowScope, undefined);
+  await assert.rejects(
+    call("app_edit", {
+      commands: [
+        {
+          op: "object.create",
+          ref: "other",
+          type: "base.chart",
+          title: "不同源图表",
+        },
+        {
+          op: "relation.create",
+          kind: "base.data_source",
+          sourceId: "@other",
+          targetId: chartFixture.created.oldTable,
+        },
+        {
+          op: "relation.create",
+          kind: "base.highlights",
+          sourceId: chartRecord.id,
+          targetId: "@other",
+        },
+      ],
+    }),
+    /同一张源表/,
+  );
+  const tableAnalysis = tableCard.getByText(/^表格分析/);
+  if (!(await tableCard.getByLabel("计算列名称", { exact: true }).isVisible()))
+    await tableAnalysis.click();
   await tableCard.getByLabel("计算列名称", { exact: true }).fill("金额");
   await tableCard.getByLabel("计算列公式", { exact: true }).fill("[测量值]*2");
   await tableCard

@@ -14,6 +14,7 @@ import {
   type TableViewConfig,
 } from "./derive-table.ts";
 import { TableAnalysisControls } from "./TableAnalysisControls.tsx";
+import { useBoundTables, useConnectedFilters } from "./use-table-source.ts";
 import { TableCsvControls } from "./TableCsvControls.tsx";
 import {
   cellValue,
@@ -36,6 +37,7 @@ export function TableView({
   presentation,
   readOnly,
   dispatch,
+  bindings,
   tableFiles,
 }: ViewProps) {
   const instanceId = `${workspaceId}:${presentation.id}`;
@@ -171,7 +173,12 @@ export function TableView({
     ? reinterpretColumn(draft, pendingType.key, pendingType.type)
     : undefined;
   const config = useMemo(() => tableViewOf(object.data), [object.data]);
-  const view = useMemo(() => deriveTable(draft, config), [draft, config]);
+  const binding = useBoundTables(bindings, "self");
+  const filters = useConnectedFilters(binding.items[0]);
+  const view = useMemo(
+    () => deriveTable(draft, config, filters),
+    [draft, config, filters],
+  );
   const visible = view.groups.length
     ? view.groups.flatMap((group) => group.rows)
     : view.rows;
@@ -261,6 +268,8 @@ export function TableView({
           readOnly={readOnly}
         />
       )}
+      {binding.error && <p role="status">{binding.error}</p>}
+      {filters.length > 0 && <p>{filters.length} 个已连接筛选器正在生效</p>}
       {view.configurationErrors.map((problem) => (
         <p role="status" key={problem}>
           {problem}

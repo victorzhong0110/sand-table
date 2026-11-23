@@ -29,6 +29,17 @@ const cell = {
     { type: "null" },
   ],
 };
+const filterFields: Record<string, JsonSchema> = {
+  column: { ...tableKey, "x-sand-label": "列" },
+  op: {
+    type: "string",
+    enum: ["eq", "contains", "gt", "lt", "between", "empty", "not_empty"],
+    "x-sand-label": "条件",
+    "x-sand-widget": "enum",
+  },
+  value: { ...cell, "x-sand-label": "筛选值", "x-sand-widget": "text" },
+  upper: { ...cell, "x-sand-label": "上限", "x-sand-widget": "text" },
+};
 const tableView: JsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -72,25 +83,7 @@ const tableView: JsonSchema = {
         type: "object",
         additionalProperties: false,
         required: ["column", "op"],
-        properties: {
-          column: { ...tableKey, "x-sand-label": "列" },
-          op: {
-            type: "string",
-            enum: [
-              "eq",
-              "contains",
-              "gt",
-              "lt",
-              "between",
-              "empty",
-              "not_empty",
-            ],
-            "x-sand-label": "条件",
-            "x-sand-widget": "enum",
-          },
-          value: { ...cell, "x-sand-label": "筛选值", "x-sand-widget": "text" },
-          upper: { ...cell, "x-sand-label": "上限", "x-sand-widget": "text" },
-        },
+        properties: filterFields,
       },
     },
     sort: {
@@ -185,6 +178,19 @@ export function migrateTable(
         }),
       ),
     })),
+  };
+}
+
+export function migrateMetric(data: Record<string, unknown>) {
+  const { value, description, ...rest } = data;
+  const legacy = {
+    ...(value === undefined ? {} : { value }),
+    ...(description === undefined ? {} : { description }),
+  };
+  return {
+    aggregate: "count",
+    ...rest,
+    ...(Object.keys(legacy).length ? { legacy } : {}),
   };
 }
 
@@ -485,18 +491,24 @@ export const basePack: PackSpec = {
     {
       type: "base.metric",
       title: "指标",
-      description: "一个数值和它的单位。",
+      description: "手填数值，或统计源表的可见行。",
       icon: "metric",
-      version: 1,
+      version: 2,
       schema: {
         type: "object",
         additionalProperties: false,
         properties: {
-          value: {
+          column: {
+            ...tableKey,
+            "x-sand-label": "统计列",
+            "x-sand-hidden": true,
+          },
+          aggregate: {
             type: "string",
-            maxLength: 200,
-            "x-sand-label": "数值",
-            "x-sand-widget": "text",
+            enum: ["count", "sum", "avg", "min", "max"],
+            "x-sand-label": "统计方式",
+            "x-sand-widget": "enum",
+            "x-sand-default": "count",
           },
           unit: {
             type: "string",
@@ -504,18 +516,45 @@ export const basePack: PackSpec = {
             "x-sand-label": "单位",
             "x-sand-widget": "text",
           },
-          description: {
-            type: "string",
-            maxLength: 200,
-            "x-sand-label": "说明",
-            "x-sand-widget": "text",
+          legacy: {
+            type: "object",
+            additionalProperties: false,
+            "x-sand-label": "手填指标",
+            "x-sand-widget": "table",
+            "x-sand-hidden": true,
+            properties: {
+              value: {
+                type: "string",
+                maxLength: 200,
+                "x-sand-label": "数值",
+                "x-sand-widget": "text",
+              },
+              description: {
+                type: "string",
+                maxLength: 200,
+                "x-sand-label": "说明",
+                "x-sand-widget": "text",
+              },
+            },
           },
         },
       },
+      migrations: [{ from: 1, migrate: migrateMetric }],
+      relationSlots: [
+        {
+          key: "source",
+          label: "源表格",
+          kind: "base.data_source",
+          direction: "out",
+          many: false,
+          targetTypes: ["base.table"],
+        },
+      ],
       display: {
         material: "gauge",
-        defaultSize: { width: 220, height: 140 },
-        summary: ["value", "unit", "description"],
+        defaultSize: { width: 260, height: 170 },
+        summary: ["aggregate", "unit"],
+        view: "metric",
       },
     },
     {
@@ -645,6 +684,56 @@ export const basePack: PackSpec = {
       },
     },
     {
+      type: "base.filter",
+      title: "筛选器",
+      description: "筛选显式连接的表格及其同源数据视图。",
+      icon: "search",
+      version: 1,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          kind: {
+            type: "string",
+            enum: ["select", "range", "text"],
+            "x-sand-default": "select",
+            "x-sand-label": "控件类型",
+            "x-sand-widget": "enum",
+            "x-sand-enum-labels": {
+              select: "下拉",
+              range: "范围",
+              text: "文本",
+            },
+          },
+          ...Object.fromEntries(
+            Object.entries(filterFields).map(([key, field]) => [
+              key,
+              {
+                ...field,
+                "x-sand-hidden": true,
+              },
+            ]),
+          ),
+        },
+      },
+      relationSlots: [
+        {
+          key: "targets",
+          label: "作用表格",
+          kind: "base.filters",
+          direction: "out",
+          many: true,
+          targetTypes: ["base.table"],
+        },
+      ],
+      display: {
+        material: "document",
+        defaultSize: { width: 300, height: 240 },
+        summary: ["kind"],
+        view: "filter",
+      },
+    },
+    {
       type: "base.chart",
       title: "图表",
       description: "用柱状图、折线或散点查看同一份表格数据。",
@@ -693,9 +782,24 @@ export const basePack: PackSpec = {
           },
           aggregation: {
             type: "string",
-            enum: ["none"],
+            enum: ["none", "sum", "mean", "count", "min", "max"],
             "x-sand-label": "聚合",
             "x-sand-widget": "enum",
+            "x-sand-hidden": true,
+          },
+          rowScope: {
+            type: "array",
+            items: tableKey,
+            maxItems: 200,
+            uniqueItems: true,
+            "x-sand-label": "所选行",
+            "x-sand-widget": "tags",
+            "x-sand-hidden": true,
+          },
+          showLegend: {
+            type: "boolean",
+            "x-sand-label": "显示图例",
+            "x-sand-widget": "boolean",
             "x-sand-hidden": true,
           },
           legacyPoints: oldChartPoints,
@@ -703,6 +807,38 @@ export const basePack: PackSpec = {
       },
       migrations: [{ from: 1, migrate: migrateChart }],
       relationSlots: [
+        {
+          key: "filteredByCharts",
+          label: "图表筛选来源",
+          kind: "base.filters",
+          direction: "in",
+          targetTypes: ["base.chart"],
+          many: true,
+        },
+        {
+          key: "filtersCharts",
+          label: "筛选同源图表",
+          kind: "base.filters",
+          direction: "out",
+          targetTypes: ["base.chart"],
+          many: true,
+        },
+        {
+          key: "highlightedBy",
+          label: "高亮来源",
+          kind: "base.highlights",
+          direction: "in",
+          targetTypes: ["base.chart"],
+          many: true,
+        },
+        {
+          key: "highlights",
+          label: "联动高亮",
+          kind: "base.highlights",
+          direction: "out",
+          targetTypes: ["base.chart"],
+          many: true,
+        },
         {
           key: "source",
           label: "源表格",
@@ -1014,11 +1150,27 @@ export const basePack: PackSpec = {
   ],
   relationKinds: [
     {
-      kind: "base.data_source",
-      title: "数据来源",
-      inverseTitle: "供图表使用",
+      kind: "base.filters",
+      title: "筛选",
+      inverseTitle: "受筛选",
+      allowsInferred: false,
+      sourceTypes: ["base.filter", "base.chart"],
+      targetTypes: ["base.table", "base.chart"],
+    },
+    {
+      kind: "base.highlights",
+      title: "高亮联动",
+      inverseTitle: "高亮联动",
       allowsInferred: false,
       sourceTypes: ["base.chart"],
+      targetTypes: ["base.chart"],
+    },
+    {
+      kind: "base.data_source",
+      title: "数据来源",
+      inverseTitle: "被数据组件引用",
+      allowsInferred: false,
+      sourceTypes: ["base.chart", "base.metric"],
       targetTypes: ["base.table"],
     },
     {
