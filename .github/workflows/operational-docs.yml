@@ -1,0 +1,22 @@
+name: Operational docs
+on:
+  pull_request:
+    paths: &operational_docs
+      - 'README.md'
+      - 'workbench/README.md'
+      - 'workbench/docs/QUICKSTART.md'
+      - 'workbench/docs/HOST_ACCEPTANCE.md'
+      - 'docs/kernel-v3/02-commands-and-tools.md'
+      - 'docs/kernel-v3/check_operational_docs.py'
+      - '.github/workflows/operational-docs.yml'
+  push:
+    branches: [main]
+    paths: *operational_docs
+permissions:
+  contents: read
+jobs:
+  retired-mcp-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 docs/kernel-v3/check_operational_docs.py

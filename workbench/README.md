@@ -8,7 +8,7 @@
 npm start
 ~~~
 
-在页面“连接我的 AI”中复制通用 MCP JSON，安装到本机客户端；复制当前选区提问，开始共享同一会话。具体步骤见 [QUICKSTART.md](docs/QUICKSTART.md)。
+从白板「帮助」获取 Codex CLI 安装命令或通用 MCP JSON，只配置一次，再在本机 AI 对话里直接问当前白板或选区。具体步骤见 [QUICKSTART.md](docs/QUICKSTART.md)。
 
 ## 开发
 
@@ -86,4 +86,4 @@ npm run test:performance 使用固定 Hugging Face Hub 场景：1440×1000、120
 
 默认是没有组件的画布与侧边工具箱；MCP 也默认创建空白板。AI 可在没有选区、没有工作区的情况下读取 context 并搭建组件。仓库由人通过工具箱主动导入，成为当前空间中的文件夹／文件子白板；刷新不会把源码重新铺到总览。
 
-npm run test:blank 检查无仓库启动、拖入和编辑、嵌套、AI 消息交接、独立 MCP 编排、可选外部仓库导入、源码读取、主题和窄屏。旧的代码场景回归通过显式 --code-board 或 sand_open_board 的 preset=code 进入，不能代替默认入口验收。
+npm run test:blank 检查无仓库启动、拖入和编辑、嵌套、AI 消息交接、独立 MCP 编排、可选外部仓库导入、源码读取、主题和窄屏。已有代码场景的单独测试不能代替默认入口验收。
