@@ -1,3 +1,3 @@
-import { compareBoundTables, compareText } from "../../board/compare/diff.ts";
+import { CompareView } from "../../board/compare/CompareView.tsx";
 
-globalThis.sandTableCompare = { compareBoundTables, compareText };
+globalThis.sandTableCompare = { CompareView };

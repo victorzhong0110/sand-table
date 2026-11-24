@@ -1,4 +1,5 @@
 import { sourceResourceProblem } from "./resource.ts";
+import { isValidCoverCrop } from "./media-crop.ts";
 // 工作空间整包导出与导入。
 //
 // 在线编辑必须走命令事务。这里是例外：只在尚未发布的临时库里直接恢复内容行，
@@ -1530,6 +1531,12 @@ function normalizeAppearance(value: unknown, id: string): Appearance {
     throw new CommandError(
       "INVALID_DATA",
       `展示「${id}」的强调色无法识别，没有导入。请重新导出一份完整的文件。`,
+      null,
+    );
+  if (!isValidCoverCrop(appearance.coverCrop, appearance.coverBlob))
+    throw new CommandError(
+      "INVALID_DATA",
+      `展示「${id}」的封面裁剪无效，没有导入。`,
       null,
     );
   return appearance as Appearance;

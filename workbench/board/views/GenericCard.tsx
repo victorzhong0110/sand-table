@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon.tsx";
 import { imageDataUrl, summaryLines, type TypeSpecView } from "./format.ts";
 import { UnknownType } from "./UnknownType.tsx";
+import { CroppedCover } from "../media/MediaComponent.tsx";
+import type { MediaCrop } from "../../kernel/index.ts";
 
 type ToolCall = (
   name: string,
@@ -18,6 +20,7 @@ export function GenericCard({
   catalogReady,
   relationLabels,
   coverBlob,
+  coverCrop,
   call,
   editor,
   editingField,
@@ -33,6 +36,7 @@ export function GenericCard({
   catalogReady: boolean;
   relationLabels: { key: string; label: string; titles: string[] }[];
   coverBlob?: string;
+  coverCrop?: MediaCrop;
   call?: ToolCall;
   editor?: ReactNode;
   editingField?: "title" | "text";
@@ -69,7 +73,12 @@ export function GenericCard({
     >
       {cover && coverBlob ? (
         <figure className="card-cover">
-          <CoverImage sha={coverBlob} call={call} />
+          <CoverImage
+            key={coverBlob}
+            sha={coverBlob}
+            crop={coverCrop}
+            call={call}
+          />
           {editingField === "title" && editor ? (
             editor
           ) : (
@@ -124,7 +133,15 @@ export function GenericCard({
   );
 }
 
-function CoverImage({ sha, call }: { sha: string; call?: ToolCall }) {
+function CoverImage({
+  sha,
+  crop,
+  call,
+}: {
+  sha: string;
+  crop?: MediaCrop;
+  call?: ToolCall;
+}) {
   const [src, setSrc] = useState("");
   const [failed, setFailed] = useState(false);
   const callRef = useRef(call);
@@ -167,5 +184,6 @@ function CoverImage({ sha, call }: { sha: string; call?: ToolCall }) {
       <span className="card-cover-mark">封面读不出来。请确认附件还在。</span>
     );
   if (!src) return <span className="card-cover-mark">正在读取封面</span>;
+  if (crop) return <CroppedCover src={src} alt="封面" crop={crop} />;
   return <img className="card-cover-image" alt="封面" src={src} />;
 }

@@ -272,6 +272,7 @@ export type ObjectRow = {
 export type Appearance = {
   detail?: "full" | "label" | "icon"; // 缺省为 full
   coverBlob?: string; // 封面图的 sha256
+  coverCrop?: { x: number; y: number; w: number; h: number }; // 封面图片内的相对区域，与 coverBlob 一起保存
   accent?: string; // 局部强调色
 };
 

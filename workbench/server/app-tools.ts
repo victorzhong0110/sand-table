@@ -3,10 +3,18 @@
 // 这里的写入都是「人做的事」：actor 固定是 human。
 // 完整数据放 _meta.data，画布直接用；content 里的文本只给人看个大概。
 
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
+import { MAX_ASSET_BYTES } from "../core/asset-limits.ts";
 import {
   applyCommands,
   boardContents,
@@ -19,6 +27,8 @@ import {
   listActivities,
   listObjectVersions,
   parsePublicCommands,
+  readAssetMime,
+  recordAsset,
   readView,
   readBindings,
   readCommentCounts,
@@ -55,8 +65,6 @@ export type AppToolsHost = {
   afterHistory: () => void;
 };
 
-/** 一次上传的字节上限。 */
-const MAX_ASSET_BYTES = 20 * 1024 * 1024;
 const SHA256 = /^[0-9a-f]{64}$/;
 
 export function registerAppTools(
@@ -426,6 +434,7 @@ export function registerAppTools(
     "Upload an attachment or read one back by sha256. Attachments are stored by content, so the same file is stored only once.",
     {
       action: z.enum(["upload", "read"]),
+      workspaceId: z.string().min(1).optional(),
       name: z.string().min(1).max(200).optional(),
       mime: z.string().min(1).max(200).optional(),
       base64: z.string().min(1).optional(),
@@ -433,6 +442,7 @@ export function registerAppTools(
     },
     (args) => {
       const session = host.session();
+      assertSameWorkspace(session.workspaceId, args.workspaceId);
       const dir = join(session.root, session.workspaceId, "blobs");
       if (args.action === "upload") {
         if (!args.base64)
@@ -457,10 +467,20 @@ export function registerAppTools(
         const sha = createHash("sha256").update(bytes).digest("hex");
         mkdirSync(dir, { recursive: true });
         const target = join(dir, sha);
-        if (!existsSync(target)) writeFileSync(target, bytes);
+        if (!existsSync(target)) {
+          const staged = join(dir, `.${randomUUID()}.upload`);
+          try {
+            writeFileSync(staged, bytes);
+            renameSync(staged, target);
+          } finally {
+            rmSync(staged, { force: true });
+          }
+        }
+        const mime = args.mime ?? "application/octet-stream";
+        recordAsset(session.db, sha, mime, bytes.length);
         return {
           sha256: sha,
-          mime: args.mime ?? "application/octet-stream",
+          mime,
           bytes: bytes.length,
           ...(args.name ? { name: args.name } : {}),
         };
@@ -485,10 +505,12 @@ export function registerAppTools(
           null,
         );
       const bytes = readFileSync(target);
+      const mime = readAssetMime(session.db, args.sha256);
       return {
         sha256: args.sha256,
         bytes: bytes.length,
         base64: bytes.toString("base64"),
+        ...(mime ? { mime } : {}),
       };
     },
     { appOnly: true },

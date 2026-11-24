@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { v3DataOf } from "../data-client/adapter.ts";
 import { editIntent, endEditSession } from "../edit-session.ts";
+import { uploadAssetFile } from "../media/drop.ts";
+import { CoverEditor } from "../media/MediaComponent.tsx";
 import type { Board } from "../data-client/model.ts";
 import type { ComponentInstance } from "../data-client/spaces.ts";
 import { useTypeCatalog } from "./catalog.tsx";
@@ -205,17 +207,33 @@ export function GenericForm({
     timer.current = window.setTimeout(() => void flush(), 600);
   };
 
-  const changeField = (key: string, next: unknown | undefined) => {
+  const changeFields = (values: Record<string, unknown>) => {
     hold.current = false;
     captureVersion();
-    edits.current = { ...edits.current, [key]: next };
+    edits.current = { ...edits.current, ...values };
     setData((current) => {
       const copy = { ...current };
-      if (next === undefined) delete copy[key];
-      else copy[key] = next;
+      for (const [key, value] of Object.entries(values)) {
+        if (value === undefined) delete copy[key];
+        else copy[key] = value;
+      }
       return copy;
     });
     schedule();
+  };
+
+  const changeField = (key: string, next: unknown) => {
+    changeFields(
+      kernelType === "base.media" && key === "blob" && next === undefined
+        ? {
+            blob: undefined,
+            crop: undefined,
+            filename: undefined,
+            mime: undefined,
+            size: undefined,
+          }
+        : { [key]: next },
+    );
   };
 
   const overwrite = async () => {
@@ -262,19 +280,16 @@ export function GenericForm({
         onOpenLink?.(url);
       },
       async uploadAsset(file) {
-        const base64 = await readFileBase64(file);
-        const result = await call("app_asset", {
-          action: "upload",
-          name: file.name,
-          mime: file.type || "application/octet-stream",
-          base64,
-        });
-        return {
-          sha256: String(result?.sha256 ?? ""),
-          name: file.name,
-          mime: file.type,
-          bytes: file.size,
-        };
+        const asset = await uploadAssetFile(call, file, board.workspaceId);
+        if (kernelType === "base.media") {
+          changeFields({
+            filename: asset.name,
+            mime: asset.mime,
+            size: asset.bytes,
+            crop: undefined,
+          });
+        }
+        return asset;
       },
       async readAsset(sha256) {
         try {
@@ -292,7 +307,7 @@ export function GenericForm({
         }
       },
     }),
-    [call, onOpenLink],
+    [board.workspaceId, call, kernelType, onOpenLink],
   );
   const links = slotLinks(board, objectId, spec);
   const pack = catalog.packs.find((item) => item.id === packIdOf(kernelType));
@@ -313,6 +328,26 @@ export function GenericForm({
     <WidgetHostProvider host={host}>
       <section className="component-editor generic-form">
         <h3>配置</h3>
+        {spec?.capabilities?.cover && board.workspaceId && (
+          <CoverEditor
+            objects={board.contentObjects}
+            call={call}
+            workspaceId={board.workspaceId}
+            covered={Boolean(instance.appearance?.coverBlob)}
+            onSet={async (coverBlob, coverCrop) => {
+              const result = await operate({
+                kind: "media-cover",
+                instanceId: instance.id,
+                workspaceId: board.workspaceId,
+                boardId: instance.spaceId,
+                coverBlob,
+                coverCrop,
+                reportError: true,
+              });
+              if (result?.error) throw Error(result.error.message);
+            }}
+          />
+        )}
         {migrationError && (
           <p role="status" className="migration-error">
             {migrationError}
@@ -402,20 +437,6 @@ export function GenericForm({
       </section>
     </WidgetHostProvider>
   );
-}
-
-function readFileBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
-      const comma = result.indexOf(",");
-      resolve(comma >= 0 ? result.slice(comma + 1) : result);
-    };
-    reader.onerror = () =>
-      reject(reader.error ?? Error("没有读到这个文件。请重新选择后再试。"));
-    reader.readAsDataURL(file);
-  });
 }
 
 function required(spec: TypeSpecView | undefined, key: string): boolean {

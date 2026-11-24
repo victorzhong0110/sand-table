@@ -1,5 +1,6 @@
 import type { Db } from "./db.ts";
 import type { Registry } from "./registry.ts";
+import type { MediaCrop } from "./media-crop.ts";
 
 export type Actor = { id: string; kind: "human" | "agent" };
 
@@ -47,6 +48,7 @@ export type ObjectRow = {
 export type Appearance = {
   detail?: "full" | "label" | "icon";
   coverBlob?: string;
+  coverCrop?: MediaCrop;
   accent?: string;
 };
 

@@ -8,7 +8,11 @@
 // base.code_snippet → code，novel.* / research.* 走现有的领域兜底分支，
 // 其余未知类型走现有的「未知组件」占位。
 
-import { migrateComparison, migrateMetric } from "../../packs/base/index.ts";
+import {
+  migrateComparison,
+  migrateMetric,
+} from "../../packs/base/migrations.ts";
+import type { Appearance } from "../../kernel/index.ts";
 import type { Activity, Board, ComponentPack, SpaceActivity } from "./model.ts";
 import { componentTypes, defaultData } from "./spaces.ts";
 import type {
@@ -171,7 +175,7 @@ export const V3_FIELDS: Record<string, string[]> = {
   "base.note": ["body"],
   "base.heading": ["level", "text"],
   "base.link": ["description", "url"],
-  "base.media": ["alt", "blob", "caption", "mime"],
+  "base.media": ["alt", "blob", "caption", "crop", "filename", "mime", "size"],
   "base.code_snippet": ["language", "text"],
   "base.metric": ["aggregate", "column", "legacy", "unit"],
   "base.status": ["description", "observedAt", "sourceUrl", "state"],
@@ -359,7 +363,10 @@ function toInstance(
               : {}),
             ...(row.appearance.accent ? { icon: row.appearance.accent } : {}),
             ...(typeof row.appearance.coverBlob === "string"
-              ? { coverBlob: row.appearance.coverBlob }
+              ? {
+                  coverBlob: row.appearance.coverBlob,
+                  coverCrop: row.appearance.coverCrop,
+                }
               : {}),
           },
         }
@@ -797,26 +804,22 @@ function arrangeInteger(value: unknown, label: string): number {
 
 const ARRANGE_LIMIT_MESSAGE = "一次最多写入 200 条命令。请缩小选择后再试。";
 
-function pasteAppearance(value: unknown):
-  | {
-      detail?: "full" | "label" | "icon";
-      accent?: string;
-      coverBlob?: string;
-    }
-  | undefined {
+function pasteAppearance(value: unknown): Appearance | undefined {
   if (!value || typeof value !== "object") return undefined;
   const raw = value as Record<string, unknown>;
-  const appearance: {
-    detail?: "full" | "label" | "icon";
-    accent?: string;
-    coverBlob?: string;
-  } = {};
+  const appearance: Appearance = {};
   if (raw.detail === "full" || raw.detail === "label" || raw.detail === "icon")
     appearance.detail = raw.detail;
   if (typeof raw.accent === "string" && raw.accent)
     appearance.accent = raw.accent;
-  if (typeof raw.coverBlob === "string" && /^[a-f0-9]{64}$/.test(raw.coverBlob))
+  if (
+    typeof raw.coverBlob === "string" &&
+    /^[a-f0-9]{64}$/.test(raw.coverBlob)
+  ) {
     appearance.coverBlob = raw.coverBlob;
+    if (raw.coverCrop !== undefined)
+      appearance.coverCrop = raw.coverCrop as Appearance["coverCrop"];
+  }
   return Object.keys(appearance).length ? appearance : undefined;
 }
 
@@ -901,6 +904,32 @@ export function toCommands(op: any, ctx: WriteContext): V3Command[] {
       }
       break;
     }
+    case "media-cover": {
+      const presentation = ctx.presentations.get(String(op.instanceId));
+      if (!presentation || presentation.boardId !== ctx.boardId)
+        throw Error("展示已离开当前白板，请重新选择。");
+      const {
+        coverBlob: _blob,
+        coverCrop: _crop,
+        ...rest
+      } = presentation.appearance;
+      const appearance: Appearance = rest;
+      if (op.coverBlob !== null) {
+        if (
+          typeof op.coverBlob !== "string" ||
+          !/^[a-f0-9]{64}$/.test(op.coverBlob)
+        )
+          throw Error("封面附件编号无效。");
+        appearance.coverBlob = op.coverBlob;
+        if (op.coverCrop !== undefined) appearance.coverCrop = op.coverCrop;
+      }
+      commands.push({
+        op: "presentation.update",
+        id: presentation.id,
+        appearance,
+      });
+      break;
+    }
     case "update": {
       const presentation = ctx.presentations.get(String(op.instanceId));
       if (!presentation)
@@ -910,7 +939,10 @@ export function toCommands(op: any, ctx: WriteContext): V3Command[] {
         commands.push({
           op: "presentation.update",
           id: presentation.id,
-          appearance: { detail: op.appearance.detail },
+          appearance: {
+            ...presentation.appearance,
+            detail: op.appearance.detail,
+          },
         });
       }
       const object = ctx.objects.get(presentation.objectId);
@@ -1150,11 +1182,7 @@ export function toCommands(op: any, ctx: WriteContext): V3Command[] {
             y: number;
             width: number;
             height: number;
-            appearance?: {
-              detail?: "full" | "label" | "icon";
-              accent?: string;
-              coverBlob?: string;
-            };
+            appearance?: Appearance;
           },
           index: number,
         ) => {

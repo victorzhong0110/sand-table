@@ -3,7 +3,17 @@ export const COMPONENT_RESOURCES = {
   "pdf-worker": { file: "pdf-worker.js", global: "pdfjsWorker" },
   "pdf-api": { file: "pdf-api.js", global: "sandTablePdf" },
   charts: { file: "charts.js", global: "sandTableChart" },
-  compare: { file: "compare.js", global: "sandTableCompare" },
+  compare: { file: "compare.js", global: "sandTableCompare", react: true },
+  "context-views": {
+    file: "context-views.js",
+    global: "sandTableContextViews",
+    react: true,
+  },
+  "media-views": {
+    file: "media-views.js",
+    global: "sandTableMediaViews",
+    react: true,
+  },
 } as const;
 
 export type ComponentResource = keyof typeof COMPONENT_RESOURCES;

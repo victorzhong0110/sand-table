@@ -26,6 +26,12 @@ export type {
   TypeSpec,
 } from "./types.ts";
 export { isResourceRef } from "./resource.ts";
+export {
+  MEDIA_CROP_SCHEMA,
+  isMediaCrop,
+  type MediaCrop,
+} from "./media-crop.ts";
+export { readAssetMime, recordAsset } from "./assets.ts";
 export { CommandError } from "./errors.ts";
 export {
   readCommentCounts,

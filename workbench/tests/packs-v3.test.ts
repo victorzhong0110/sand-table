@@ -602,6 +602,8 @@ test("每个字段都有中文标签和控件，摘要只取可见字段", () =>
         "base.relation_graph": "relation-graph",
         "base.timeline": "timeline",
         "base.comparison": "comparison",
+        "base.link": "link",
+        "base.media": "media",
       };
       assert.equal(
         type.display.view,

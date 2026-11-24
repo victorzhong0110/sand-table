@@ -328,7 +328,7 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
 | `app_edit` | 同 `sand_edit` | 人的写入，`actor` 为 human |
 | `app_history` | 同 `sand_history`，或 `{ action: "object-versions", workspaceId, objectId }` | 人的撤销、重做、跳转，或读取单个对象的当前版本号及最近 100 个可比较历史版本的元数据。历史内容通过比较组件的绑定槽读取 |
 | `app_view` | `{ action: "get" \| "select" \| "camera" \| "navigate", viewId, boardId?, ... }` | 视角、选区、进入或返回白板；不进历史。`get` 返回 `navStack`；`select` 与 `camera` 也接受 `boardId`，第一次调用就能登记视角，不用先 `navigate` 一次 |
-| `app_asset` | `{ action: "upload", name, mime, base64 }` / `{ action: "read", sha256 }` | 上传返回 sha256；建 `base.media` 对象由界面再调 `app_edit` |
+| `app_asset` | `{ action: "upload", workspaceId?, name, mime, base64 }` / `{ action: "read", workspaceId?, sha256 }` | 上传返回 `sha256`、`bytes`、`mime` 和可选的 `name`。界面用同一工作空间内的 `app_edit` 创建对象和展示 |
 | `app_workspace` | `{ action: "list" \| "create" \| "switch" \| "rename" \| "delete" \| "export" \| "import", ... }` | 管理工作空间。`export`、`import` 由 T25 实现，T20 只做前五个 |
 | `app_pack` | `{ action: "export", id }` | 导出数据包；导入走 `app_edit` 的 `pack.import` |
 | `app_activity` | `{ action: "list", limit? }` | 列出还没过期的活动，至多 100 条，带 `truncated` 标记。**只读：不推进 `agent_reads`**，界面读活动不会挪走 Agent 的读取游标 |

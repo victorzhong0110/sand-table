@@ -10,10 +10,34 @@
 // v2 的占位值不留：内容字段不写 default，配置类默认值写在 x-sand-default，
 // 没填就是字段不存在。
 
-import type { JsonSchema, PackSpec } from "../../kernel/index.ts";
+import {
+  MEDIA_CROP_SCHEMA,
+  type JsonSchema,
+  type PackSpec,
+} from "../../kernel/index.ts";
+import {
+  migrateChart,
+  migrateComparison,
+  migrateMetric,
+  migrateTable,
+} from "./migrations.ts";
+
+export {
+  migrateChart,
+  migrateComparison,
+  migrateMetric,
+  migrateTable,
+} from "./migrations.ts";
 
 /** 空字符串表示还没填；填了就必须是 http 或 https。 */
 const HTTP_URL = "^(?:[hH][tT][tT][pP][sS]?://\\S+)?$";
+
+const mediaCropLabels = {
+  x: "左边距",
+  y: "上边距",
+  w: "裁剪宽度",
+  h: "裁剪高度",
+} as const;
 
 const tableKey = {
   type: "string",
@@ -134,91 +158,6 @@ const oldChartPoints: JsonSchema = {
     },
   },
 };
-
-function numericCell(value: unknown) {
-  return (
-    (typeof value === "number" && Number.isFinite(value)) ||
-    (typeof value === "string" &&
-      Number.isFinite(Number(value)) &&
-      String(Number(value)) === value)
-  );
-}
-
-export function migrateTable(
-  data: Record<string, unknown>,
-): Record<string, unknown> {
-  const labels = Array.isArray(data.columns) ? data.columns : [];
-  const rows = Array.isArray(data.rows) ? data.rows : [];
-  if (rows.length > 200) throw Error("原表超过 200 行。");
-  const width = Math.max(labels.length, ...rows.map((row) => row.length));
-  if (width > 200) throw Error("原表超过 200 列。");
-  const columns = Array.from({ length: width }, (_, index) => {
-    const items = rows
-      .map((row) => row[index])
-      .filter((value) => value != null && value !== "");
-    return {
-      key: `c${index + 1}`,
-      label: labels[index] ?? `列 ${index + 1}`,
-      type: items.length && items.every(numericCell) ? "number" : "text",
-    };
-  });
-  return {
-    columns,
-    rows: rows.map((row, index) => ({
-      key: `r${index + 1}`,
-      cells: Object.fromEntries(
-        columns.map(({ key, type }, column) => {
-          const value = row[column] ?? null;
-          return [
-            key,
-            type === "number" && value !== "" && value !== null
-              ? Number(value)
-              : value,
-          ];
-        }),
-      ),
-    })),
-  };
-}
-
-export function migrateMetric(data: Record<string, unknown>) {
-  const { value, description, ...rest } = data;
-  const legacy = {
-    ...(value === undefined ? {} : { value }),
-    ...(description === undefined ? {} : { description }),
-  };
-  return {
-    aggregate: "count",
-    ...rest,
-    ...(Object.keys(legacy).length ? { legacy } : {}),
-  };
-}
-
-export function migrateChart(
-  data: Record<string, unknown>,
-): Record<string, unknown> {
-  const { points, ...rest } = data;
-  return { ...rest, ...(points === undefined ? {} : { legacyPoints: points }) };
-}
-
-export function migrateComparison(
-  data: Record<string, unknown>,
-): Record<string, unknown> {
-  const { left, right, legacy, ...rest } = data;
-  if (left === undefined && right === undefined) return data;
-  const previous =
-    legacy && typeof legacy === "object" && !Array.isArray(legacy)
-      ? legacy
-      : {};
-  return {
-    ...rest,
-    legacy: {
-      ...previous,
-      ...(left === undefined ? {} : { left }),
-      ...(right === undefined ? {} : { right }),
-    },
-  };
-}
 
 const comparisonSide = (label: string) => ({
   type: "object",
@@ -584,14 +523,16 @@ export const basePack: PackSpec = {
         material: "document",
         defaultSize: { width: 280, height: 180 },
         summary: ["url", "description"],
+        view: "link",
       },
     },
     {
       type: "base.media",
       title: "媒体",
-      description: "图片、音频或视频，内容存在附件里。",
+      description: "图片、音频、视频或文件，内容存在附件里。",
       icon: "resource",
-      version: 1,
+      version: 2,
+      migrations: [{ from: 1, migrate: (data) => data }],
       schema: {
         type: "object",
         additionalProperties: false,
@@ -607,6 +548,39 @@ export const basePack: PackSpec = {
             maxLength: 200,
             "x-sand-label": "媒体类型",
             "x-sand-widget": "text",
+          },
+          filename: {
+            type: "string",
+            maxLength: 200,
+            "x-sand-label": "文件名",
+            "x-sand-widget": "text",
+          },
+          size: {
+            type: "integer",
+            minimum: 0,
+            maximum: Number.MAX_SAFE_INTEGER,
+            "x-sand-label": "大小（字节）",
+            "x-sand-widget": "integer",
+            "x-sand-hidden": true,
+          },
+          crop: {
+            ...MEDIA_CROP_SCHEMA,
+            "x-sand-label": "裁剪范围",
+            "x-sand-widget": "list",
+            "x-sand-hidden": true,
+            properties: Object.fromEntries(
+              Object.entries(MEDIA_CROP_SCHEMA.properties).map(
+                ([key, schema]) => [
+                  key,
+                  {
+                    ...schema,
+                    "x-sand-label":
+                      mediaCropLabels[key as keyof typeof mediaCropLabels],
+                    "x-sand-widget": "number",
+                  },
+                ],
+              ),
+            ),
           },
           caption: {
             type: "string",
@@ -626,6 +600,7 @@ export const basePack: PackSpec = {
         material: "media",
         defaultSize: { width: 280, height: 180 },
         summary: ["caption", "mime"],
+        view: "media",
       },
     },
     {
