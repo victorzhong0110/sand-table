@@ -34,7 +34,7 @@ const globals = globalThis as typeof globalThis & {
   sandTableGraphLayout?: typeof import("@dagrejs/dagre");
   sandTablePdf?: { getDocument: typeof getDocument };
   sandTableChart?: unknown;
-  sandTableReact: {
+  sandTableReact?: {
     Fragment: typeof Fragment;
     jsx: typeof jsx;
     jsxs: typeof jsxs;
@@ -47,16 +47,6 @@ const globals = globalThis as typeof globalThis & {
   [
     K in keyof ViewModules as (typeof COMPONENT_RESOURCES)[K]["global"]
   ]?: ViewModules[K];
-};
-
-globals.sandTableReact = {
-  Fragment,
-  jsx,
-  jsxs,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
 };
 
 export function createComponentRuntime(read: ChunkRead) {
@@ -208,6 +198,17 @@ export function useViewModule<K extends keyof ViewModules>(name: K) {
   const [error, setError] = useState("");
   useEffect(() => {
     if (!runtime) return;
+    // Bind to the renderer that mounted this view. PDF-only callers may bundle
+    // the resource loader independently inside the same document.
+    globals.sandTableReact ??= {
+      Fragment,
+      jsx,
+      jsxs,
+      useEffect,
+      useMemo,
+      useRef,
+      useState,
+    };
     const controller = new AbortController();
     void runtime.loadComponentResource(name, controller.signal).then(
       () => {

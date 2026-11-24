@@ -109,7 +109,7 @@ export function MediaView({
         <ImageView
           src={image}
           alt={typeof data.alt === "string" ? data.alt : label}
-          crop={readOnly ? undefined : (data.crop as MediaCrop | undefined)}
+          crop={previewCrop(data.crop)}
           readOnly={readOnly}
           onCrop={saveCrop}
         />
@@ -146,6 +146,19 @@ export function MediaView({
       {problem && <p role="alert">{problem}</p>}
     </div>
   );
+}
+
+function previewCrop(value: unknown): MediaCrop | undefined {
+  if (!value || typeof value !== "object") return;
+  const crop = value as MediaCrop;
+  // A read-only object can still expose data written by a newer schema.
+  // Only use coordinates that produce finite, positive display dimensions.
+  if (
+    [crop.x, crop.y, crop.w, crop.h].every(Number.isFinite) &&
+    crop.w > 0 &&
+    crop.h > 0
+  )
+    return crop;
 }
 
 function Video({ src, label }: { src: string; label: string }) {

@@ -5524,6 +5524,31 @@ try {
     importedMedia.workspaceId &&
       importedMedia.workspaceId !== mediaWorkspace.id,
   );
+  const mediaDb = new DatabaseSync(
+    join(root, "workspaces", importedMedia.workspaceId, "workspace.db"),
+  );
+  try {
+    mediaDb
+      .prepare(
+        "UPDATE objects SET type_version = 1, data = json_set(data, '$.crop', json(?), '$.caption', 42) WHERE id = ?",
+      )
+      .run(JSON.stringify({ x: 0.5, y: 0, w: 0.5, h: 1 }), beforeCrop.id);
+  } finally {
+    mediaDb.close();
+  }
+  assert.ok((await mediaRead("image.png")).migrationError);
+  await page.reload();
+  await pastedImage.locator(".media-image .media-cropped").waitFor();
+  await pastedImage
+    .getByRole("button", { name: "查看图片", exact: true })
+    .dblclick();
+  await viewer.waitFor();
+  assert.equal(
+    await viewer.getByRole("button", { name: "裁剪图片", exact: true }).count(),
+    0,
+  );
+  await page.keyboard.press("Escape");
+  await viewer.waitFor({ state: "hidden" });
   rmSync(
     join(
       root,
