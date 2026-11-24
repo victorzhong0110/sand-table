@@ -377,14 +377,20 @@ async function mount(cycle: number) {
     if (contents.length !== 1 || contents[0].type !== "resource")
       return { isError: true };
     const resource = contents[0].resource;
-    if (!("text" in resource) || resource.mimeType !== "application/json")
-      return { isError: true };
-    const blob = new Blob([resource.text], { type: "application/json" });
+    const blob = new Blob(
+      [
+        "blob" in resource
+          ? Uint8Array.from(atob(resource.blob), (char) => char.charCodeAt(0))
+          : resource.text,
+      ],
+      { type: resource.mimeType ?? "application/octet-stream" },
+    );
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download =
-      new URL(resource.uri).pathname.split("/").pop() || "sand-table.json";
+    link.download = decodeURIComponent(
+      new URL(resource.uri).pathname.split("/").pop() || "sand-table.json",
+    );
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
     return {};

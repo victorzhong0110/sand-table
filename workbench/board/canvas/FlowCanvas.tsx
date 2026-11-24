@@ -26,6 +26,7 @@ import {
 } from "../compare/commands.ts";
 import { HistoryComparison } from "../compare/HistoryComparison.tsx";
 import { blocksCanvasShortcut } from "../keyboard.ts";
+import { prepareMediaDrop } from "../media/drop.ts";
 import type { Board } from "../data-client/model.ts";
 import {
   CLONE_SCOPE_MESSAGE,
@@ -312,6 +313,7 @@ function FlowSurface({
     token: 0,
   });
   const shortcutRef = useRef<(event: KeyboardEvent) => void>(() => {});
+  const pasteRef = useRef<(event: ClipboardEvent) => void>(() => {});
   const pendingMotion = useRef<{
     from: Viewport;
     to: Viewport;
@@ -871,8 +873,13 @@ function FlowSurface({
       }
       shortcutRef.current(event);
     };
+    const paste = (event: ClipboardEvent) => pasteRef.current(event);
     window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
+    window.addEventListener("paste", paste);
+    return () => {
+      window.removeEventListener("keydown", key);
+      window.removeEventListener("paste", paste);
+    };
   }, []);
 
   useEffect(() => () => clearTimeout(nudgeState.current.timer), []);
@@ -1248,6 +1255,12 @@ function FlowSurface({
         ? { detail }
         : {}),
       ...(accent ? { accent } : {}),
+      ...(instance.appearance?.coverBlob
+        ? {
+            coverBlob: instance.appearance.coverBlob,
+            coverCrop: instance.appearance.coverCrop,
+          }
+        : {}),
     };
     return {
       objectId: instance.objectId,
@@ -1447,6 +1460,47 @@ function FlowSurface({
     void operate({ kind: "select", ids });
   };
 
+  const pasteComponents = (mode: "reference" | "clone") => {
+    const clipboard = readClipboard();
+    if (!clipboard?.items.length) {
+      showNotice(EMPTY_CLIPBOARD_MESSAGE);
+      return;
+    }
+    void ensureWorkspace().then((workspaceId) => {
+      if (!workspaceId) {
+        showNotice("还不知道当前是哪个工作空间，粘贴已取消。请稍后再试。");
+        return;
+      }
+      if (clipboard.workspaceId !== workspaceId) {
+        clearClipboard();
+        showNotice(OTHER_WORKSPACE_MESSAGE);
+        return;
+      }
+      const origin = pointerClient.current
+        ? flow.screenToFlowPosition(pointerClient.current)
+        : { x: 48, y: 48 };
+      void writePaste(mode, layoutAt(clipboard.items, origin));
+    });
+  };
+
+  pasteRef.current = (event) => {
+    if (blocksCanvasShortcut(event) || !view || !canvas.current) return;
+    event.preventDefault();
+    const files = Array.from(event.clipboardData?.files ?? []);
+    if (!files.length) {
+      pasteComponents("reference");
+      return;
+    }
+    const bounds = canvas.current.getBoundingClientRect();
+    void addMediaFiles(
+      files,
+      pointerClient.current ?? {
+        x: bounds.left + bounds.width / 2,
+        y: bounds.top + bounds.height / 2,
+      },
+    );
+  };
+
   const runShortcut = (id: ShortcutId, event: KeyboardEvent) => {
     switch (id) {
       case "delete":
@@ -1505,30 +1559,9 @@ function FlowSurface({
       }
       case "paste-reference":
       case "paste-clone": {
+        if (id === "paste-reference" && event.isTrusted) return;
         event.preventDefault();
-        const clipboard = readClipboard();
-        if (!clipboard?.items.length) {
-          showNotice(EMPTY_CLIPBOARD_MESSAGE);
-          return;
-        }
-        void ensureWorkspace().then((workspaceId) => {
-          if (!workspaceId) {
-            showNotice("还不知道当前是哪个工作空间，粘贴已取消。请稍后再试。");
-            return;
-          }
-          if (clipboard.workspaceId !== workspaceId) {
-            clearClipboard();
-            showNotice(OTHER_WORKSPACE_MESSAGE);
-            return;
-          }
-          const origin = pointerClient.current
-            ? flow.screenToFlowPosition(pointerClient.current)
-            : { x: 48, y: 48 };
-          void writePaste(
-            id === "paste-clone" ? "clone" : "reference",
-            layoutAt(clipboard.items, origin),
-          );
-        });
+        pasteComponents(id === "paste-clone" ? "clone" : "reference");
         return;
       }
       case "nudge":
@@ -2340,6 +2373,35 @@ function FlowSurface({
     applyPlan(plan);
   };
 
+  async function addMediaFiles(files: File[], point: { x: number; y: number }) {
+    const workspaceId = b.workspaceId;
+    const boardId = view?.spaceId;
+    if (!workspaceId || !boardId) {
+      showNotice("白板还在加载。请稍后再放入附件。");
+      return;
+    }
+    try {
+      const commands = await prepareMediaDrop(
+        files,
+        flow.screenToFlowPosition(point),
+        {
+          workspaceId,
+          boardId,
+          current: () =>
+            boardRef.current.workspaceId === workspaceId &&
+            boardRef.current.views[viewId]?.spaceId === boardId,
+        },
+        call,
+      );
+      await call("app_edit", { workspaceId, commands });
+      clearFilters();
+    } catch (error) {
+      showNotice(
+        error instanceof Error ? error.message : "附件没有放入白板。请重试。",
+      );
+    }
+  }
+
   if (!view)
     return (
       <section className="canvas">
@@ -2399,6 +2461,7 @@ function FlowSurface({
             aria-label="项目白板"
             onDragOver={(event) => {
               if (
+                event.dataTransfer.types.includes("Files") ||
                 [...event.dataTransfer.types].includes(
                   "application/x-sand-component",
                 )
@@ -2408,6 +2471,15 @@ function FlowSurface({
               }
             }}
             onDrop={(event) => {
+              const files = Array.from(event.dataTransfer.files);
+              if (files.length) {
+                event.preventDefault();
+                void addMediaFiles(files, {
+                  x: event.clientX,
+                  y: event.clientY,
+                });
+                return;
+              }
               const raw = event.dataTransfer.getData(
                 "application/x-sand-component",
               );

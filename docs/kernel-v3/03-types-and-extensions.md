@@ -259,7 +259,7 @@ v1 清单（`{version: 1, id, name, components: [...]}`）导入时自动转换�
 | `base.relation_graph` | 关系图 | 否 | `depth`（1–3，默认 1）、`kinds?`（未设或空数组显示所有声明关系）、`layout`（分层或放射，默认分层） |
 | `base.heading` | 标题 | 否 | `text`、`level`（1–3，`x-sand-default: 1`） |
 | `base.link` | 超链接 | 否 | `url`、`description` |
-| `base.media` | 图片 / 音频 / 视频 | 否 | `blob`、`mime`、`caption`、`alt` |
+| `base.media` | 图片 / 音频 / 视频 / 文件 | 否 | v2 `blob`、`mime`、`caption`、`alt`，可选 `filename`、`size` 和 `crop` |
 | `base.code_snippet` | 代码片段 | 否 | `language`（`x-sand-default: "text"`）、`text` |
 | `base.metric` | 指标 | 否 | v2 `column?`、`aggregate?`、`unit?`、`legacy?`，默认统计可见行 |
 | `base.filter` | 筛选器 | 否 | `kind`、`column`、`op`、`value?`、`upper?`，未配置时不筛选 |

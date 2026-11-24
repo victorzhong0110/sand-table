@@ -15,7 +15,7 @@ import {
 } from "react";
 import { Icon } from "../Icon.tsx";
 import { CommentBadge } from "../comments/CommentBadge.tsx";
-import { ContextPanel } from "../context/ContextPanel.tsx";
+import { ContextPanel } from "../context/ContextViews.tsx";
 import { v3DataOf, v3TypeOf } from "../data-client/adapter.ts";
 import { peekContent } from "../data-client/content.ts";
 import type { Board } from "../data-client/model.ts";
@@ -487,6 +487,7 @@ export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
             }),
           }))}
           coverBlob={instance.appearance?.coverBlob}
+          coverCrop={instance.appearance?.coverCrop}
           call={api.call}
           editor={editor ?? undefined}
           editingField={editingHere?.field}

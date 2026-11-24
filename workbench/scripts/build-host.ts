@@ -40,6 +40,12 @@ for (const [name, entry] of Object.entries(COMPONENT_RESOURCES)) {
     format: "iife",
     minify: true,
     logLevel: "error",
+    ...("react" in entry && {
+      alias: {
+        react: "./scripts/entries/shared-react.js",
+        "react/jsx-runtime": "./scripts/entries/shared-jsx-runtime.js",
+      },
+    }),
   });
   await checkSize(outfile, 1_600_000, 450_000);
 }

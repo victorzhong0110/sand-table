@@ -10,6 +10,7 @@ import { historyKind, recordHistory } from "./history-record.ts";
 import { newId } from "./ids.ts";
 import { makeLabel, type LabelLookup } from "./labels.ts";
 import { migrateData } from "./migrate.ts";
+import { isValidCoverCrop } from "./media-crop.ts";
 import { isPackEnabled } from "./packs-state.ts";
 import { createRegistry, PackSpecError, type Registry } from "./registry.ts";
 import { toObjectRow, toPresentationRow, toRelationRow } from "./rows.ts";
@@ -698,6 +699,7 @@ function createPresentation(
   const appearance = command.appearance ?? {};
   if (!plain(appearance))
     throw new CommandError("INVALID_DATA", "外观必须是对象。", index);
+  assertCoverCrop(appearance.coverCrop, appearance.coverBlob, index);
   const id = newId();
   ctx.db
     .prepare(
@@ -782,11 +784,21 @@ function updatePresentation(
   if (command.appearance !== undefined) {
     if (!plain(command.appearance))
       throw new CommandError("INVALID_DATA", "外观必须是对象。", index);
+    assertCoverCrop(
+      command.appearance.coverCrop,
+      command.appearance.coverBlob,
+      index,
+    );
     sets.appearance = JSON.stringify(command.appearance);
   }
   const before = snapshotPresentation(ctx.db, row.id);
   assign(ctx.db, "presentations", "id", row.id, sets);
   pushChange(ctx, "presentations", row.id, before);
+}
+
+function assertCoverCrop(crop: unknown, blob: unknown, index: number) {
+  if (!isValidCoverCrop(crop, blob))
+    throw new CommandError("INVALID_DATA", "封面裁剪须位于封面图片内。", index);
 }
 
 function deletePresentation(

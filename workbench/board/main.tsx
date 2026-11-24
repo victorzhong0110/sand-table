@@ -391,7 +391,7 @@ function Workbench() {
           action: "read",
           sha256: sha,
         });
-        const mime = v3AssetMime(sha);
+        const mime = read.mime ?? v3AssetMime(sha);
         return {
           id: sha,
           name: sha,
@@ -785,11 +785,11 @@ function Workbench() {
     if (kind === "create" && !store.workspaceId)
       throw Error("工作空间尚未准备好，请重新打开白板后再试。");
     if (
-      kind === "create" &&
+      (kind === "create" || kind === "media-cover") &&
       ((operation.workspaceId && operation.workspaceId !== store.workspaceId) ||
         (operation.boardId && operation.boardId !== store.cache.boardId))
     )
-      throw Error("白板已切换，请在当前白板重新添加组件。");
+      throw Error("白板已切换，请在当前白板重试。");
     const commands = toCommands(operation, {
       boardId: store.cache.boardId,
       objects: store.cache.objects,
@@ -801,7 +801,7 @@ function Workbench() {
     const send = (ops: any[]) =>
       callTool("app_edit", {
         ...(intentId ? { intentId: String(intentId) } : {}),
-        ...(kind === "create" && store.workspaceId
+        ...((kind === "create" || kind === "media-cover") && store.workspaceId
           ? { workspaceId: store.workspaceId }
           : {}),
         commands: ops,
@@ -1205,7 +1205,7 @@ function Workbench() {
         call={call}
         operate={operate}
         openLink={(url) => void app?.openLink({ url })}
-        downloadFile={async (filename, text) => {
+        downloadFile={async (filename, content) => {
           if (!app) throw Error("尚未连接宿主。");
           const result = await app.downloadFile({
             contents: [
@@ -1213,8 +1213,9 @@ function Workbench() {
                 type: "resource",
                 resource: {
                   uri: `file:///${encodeURIComponent(filename)}`,
-                  mimeType: "application/json",
-                  text,
+                  ...(typeof content === "string"
+                    ? { mimeType: "application/json", text: content }
+                    : content),
                 },
               },
             ],

@@ -124,6 +124,7 @@ export type Presentation = {
     icon?: string;
     detail?: "full" | "label" | "icon";
     coverBlob?: string;
+    coverCrop?: import("../../kernel/media-crop.ts").MediaCrop;
   };
   /** 未绑定对象时的本地标题。 */
   title: string;

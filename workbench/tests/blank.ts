@@ -5301,6 +5301,266 @@ try {
     .getByRole("region", { name: "参与的交叉情境" })
     .getByRole("button", { name: "林舟 × 第五章", exact: true })
     .waitFor();
+  const mediaWorkspace = await call("app_workspace", {
+    action: "create",
+    id: "media-verify",
+    title: "媒体附件验收",
+  });
+  await call("app_workspace", { action: "switch", id: mediaWorkspace.id });
+  await page.reload();
+  const mediaCanvas = frame.getByLabel("项目白板", { exact: true });
+  await frame.getByRole("heading", { name: "从一块空白开始" }).waitFor();
+  await browserContext.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 200;
+    canvas.height = 100;
+    const paint = canvas.getContext("2d")!;
+    paint.fillStyle = "green";
+    paint.fillRect(0, 0, 200, 100);
+    paint.fillStyle = "gold";
+    paint.fillRect(100, 0, 100, 100);
+    const blob = await new Promise<Blob>((resolve) => {
+      canvas.toBlob((png) => resolve(png!));
+    });
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+  });
+  await mediaCanvas.click({ position: { x: 300, y: 240 } });
+  await page.keyboard.press(primaryModifier + "+v");
+  const pastedImage = frame
+    .locator(".component-card")
+    .filter({ hasText: "image.png" });
+  const mediaImage = pastedImage.getByRole("img", {
+    name: "image.png",
+    exact: true,
+  });
+  await mediaImage.waitFor();
+  assert.equal(
+    await mediaImage.evaluate(async (img: HTMLImageElement) => {
+      await img.decode();
+      return img.naturalWidth;
+    }),
+    200,
+  );
+  const mediaRead = async (title: string) => {
+    const found = (
+      await call("sand_query", { types: ["base.media"], text: title })
+    ).rows;
+    assert.equal(found.length, 1);
+    return (await call("sand_read", { ids: [found[0].id] })).objects[0];
+  };
+  const beforeCrop = await mediaRead("image.png");
+  await pastedImage
+    .getByRole("button", { name: "查看图片", exact: true })
+    .dblclick();
+  const viewer = frame.getByRole("dialog", { name: "图片查看器", exact: true });
+  await viewer.getByRole("button", { name: "放大", exact: true }).click();
+  await viewer.getByRole("button", { name: "裁剪图片", exact: true }).click();
+  const range = await viewer.locator(".media-sheet").boundingBox();
+  assert.ok(range);
+  await page.mouse.move(
+    range.x + range.width * 0.5,
+    range.y + range.height * 0.15,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    range.x + range.width * 0.9,
+    range.y + range.height * 0.85,
+    { steps: 6 },
+  );
+  await page.mouse.up();
+  await viewer.getByRole("button", { name: "保存裁剪", exact: true }).click();
+  await pastedImage.locator(".media-image .media-cropped").waitFor();
+  const afterCrop = await mediaRead("image.png");
+  assert.equal(afterCrop.data.blob, beforeCrop.data.blob);
+  assert.ok(afterCrop.data.crop.w < 0.5 && afterCrop.data.crop.x >= 0.45);
+  await viewer.getByRole("button", { name: "恢复原图", exact: true }).click();
+  await pastedImage
+    .locator(".media-image .media-cropped")
+    .waitFor({ state: "detached" });
+  assert.equal((await mediaRead("image.png")).data.crop, undefined);
+  await page.keyboard.press("Escape");
+  await viewer.waitFor({ state: "hidden" });
+
+  const exportedMedia = await call("app_workspace", { action: "export" });
+  const importedMedia = await call("app_workspace", {
+    action: "import",
+    json: exportedMedia.json,
+  });
+  await call("app_workspace", {
+    action: "switch",
+    id: importedMedia.workspaceId,
+  });
+  const importedBlob = await call("app_asset", {
+    action: "read",
+    sha256: beforeCrop.data.blob,
+  });
+  assert.equal(importedBlob.sha256, beforeCrop.data.blob);
+  assert.equal((await mediaRead("image.png")).data.blob, beforeCrop.data.blob);
+  await page.reload();
+  await mediaImage.waitFor();
+
+  await mediaCanvas.dispatchEvent("drop", {
+    clientX: 660,
+    clientY: 495,
+    dataTransfer: await mediaCanvas.evaluateHandle(() => {
+      const transfer = new DataTransfer();
+      transfer.items.add(
+        new File(["sand attachment"], "附件演示.txt", { type: "text/plain" }),
+      );
+      return transfer;
+    }),
+  });
+  const fileCard = frame
+    .locator(".component-card")
+    .filter({ hasText: "附件演示.txt" });
+  await fileCard
+    .getByText("附件演示.txt · text/plain · 15 字节", { exact: true })
+    .waitFor();
+  const [downloaded] = await Promise.all([
+    page.waitForEvent("download"),
+    fileCard.getByRole("button", { name: "下载附件", exact: true }).click(),
+  ]);
+  assert.equal(downloaded.suggestedFilename(), "附件演示.txt");
+  assert.equal(
+    readFileSync((await downloaded.path())!, "utf8"),
+    "sand attachment",
+  );
+
+  const videoPayload = await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 80;
+    canvas.height = 44;
+    const paint = canvas.getContext("2d")!;
+    const stream = canvas.captureStream(15);
+    const recorder = new MediaRecorder(stream, {
+      mimeType: "video/webm;codecs=vp8",
+    });
+    const bits: Blob[] = [];
+    recorder.ondataavailable = (event) => bits.push(event.data);
+    const recorded = new Promise<Blob>((resolve) => {
+      recorder.onstop = () => resolve(new Blob(bits, { type: "video/webm" }));
+    });
+    recorder.start();
+    let frame = 0;
+    const timer = window.setInterval(() => {
+      paint.fillStyle = frame++ % 2 ? "blue" : "gold";
+      paint.fillRect(0, 0, canvas.width, canvas.height);
+    }, 60);
+    await new Promise((resolve) => setTimeout(resolve, 950));
+    clearInterval(timer);
+    recorder.stop();
+    const blob = await recorded;
+    stream.getTracks().forEach((track) => track.stop());
+    return new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1]);
+      reader.readAsDataURL(blob);
+    });
+  });
+  const clip = await call("app_asset", {
+    action: "upload",
+    name: "视频演示.webm",
+    mime: "video/webm",
+    base64: videoPayload,
+  });
+  const mediaHome = (await call("sand_status")).homeBoardId;
+  const videoCreated = await call("app_edit", {
+    commands: [
+      {
+        op: "object.create",
+        ref: "clip",
+        type: "base.media",
+        title: "视频演示",
+        data: { blob: clip.sha256, mime: "video/webm" },
+      },
+      {
+        op: "presentation.create",
+        ref: "videoCard",
+        objectId: "@clip",
+        boardId: mediaHome,
+        x: 700,
+        y: 200,
+        width: 300,
+        height: 240,
+      },
+    ],
+  });
+  const video = frame
+    .locator(".component-card")
+    .filter({ hasText: "视频演示" })
+    .locator("video");
+  await video.locator("xpath=self::*[@poster]").waitFor();
+  assert.deepEqual(
+    await video.evaluate((item: HTMLVideoElement) => [
+      item.paused,
+      item.autoplay,
+      item.currentTime,
+    ]),
+    [true, false, 0],
+  );
+  const videoBox = await video.boundingBox();
+  assert.ok(videoBox);
+  await video.click({ position: { x: 24, y: videoBox.height - 48 } });
+  await video.evaluate((item: HTMLVideoElement) => {
+    if (!item.paused || item.currentTime > 0) return;
+    return new Promise<void>((resolve) => {
+      item.addEventListener("play", () => resolve(), { once: true });
+      setTimeout(resolve, 1500);
+    });
+  });
+  assert.ok(
+    await video.evaluate(
+      (item: HTMLVideoElement) => !item.paused || item.currentTime > 0,
+    ),
+  );
+  const mediaBoard = await call("app_board", { boardId: mediaHome });
+  const videoPosition = mediaBoard.presentations.find(
+    (row: { id: string }) => row.id === videoCreated.created.videoCard,
+  );
+  assert.deepEqual([videoPosition.x, videoPosition.y], [700, 200]);
+
+  assert.ok(
+    importedMedia.workspaceId &&
+      importedMedia.workspaceId !== mediaWorkspace.id,
+  );
+  const mediaDb = new DatabaseSync(
+    join(root, "workspaces", importedMedia.workspaceId, "workspace.db"),
+  );
+  try {
+    mediaDb
+      .prepare(
+        "UPDATE objects SET type_version = 1, data = json_set(data, '$.crop', json(?), '$.caption', 42) WHERE id = ?",
+      )
+      .run(JSON.stringify({ x: 0.5, y: 0, w: 0.5, h: 1 }), beforeCrop.id);
+  } finally {
+    mediaDb.close();
+  }
+  assert.ok((await mediaRead("image.png")).migrationError);
+  await page.reload();
+  await pastedImage.locator(".media-image .media-cropped").waitFor();
+  await pastedImage
+    .getByRole("button", { name: "查看图片", exact: true })
+    .dblclick();
+  await viewer.waitFor();
+  assert.equal(
+    await viewer.getByRole("button", { name: "裁剪图片", exact: true }).count(),
+    0,
+  );
+  await page.keyboard.press("Escape");
+  await viewer.waitFor({ state: "hidden" });
+  rmSync(
+    join(
+      root,
+      "workspaces",
+      importedMedia.workspaceId,
+      "blobs",
+      beforeCrop.data.blob,
+    ),
+  );
+  await page.reload();
+  await pastedImage.getByText("附件缺失", { exact: true }).waitFor();
+  assert.equal((await mediaRead("image.png")).id, beforeCrop.id);
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",

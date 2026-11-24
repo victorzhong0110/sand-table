@@ -39,7 +39,9 @@ import { TableView } from "../data/TableView.tsx";
 import { RelationGraphView } from "../graph/GraphView.tsx";
 import { TimelineView } from "../timeline/TimelineView.tsx";
 import type { Dimension } from "../timeline/scale.ts";
-import { CompareView } from "../compare/CompareView.tsx";
+import { CompareComponent } from "../compare/CompareComponent.tsx";
+import { MediaComponent, LinkComponent } from "../media/MediaComponent.tsx";
+import type { DownloadFile } from "../media/host.ts";
 import type { TableData } from "../data/table-model.ts";
 
 export type WidgetProps = {
@@ -101,7 +103,8 @@ export const ViewRuntimeContext = createContext<{
   store: V3Store;
   call: V3Tool;
   focusObject?: (objectId: string) => Promise<boolean>;
-  downloadFile?: (filename: string, text: string) => Promise<void>;
+  downloadFile?: DownloadFile;
+  openLink?: (url: string) => void;
 } | null>(null);
 export function useViewRuntime() {
   return useContext(ViewRuntimeContext);
@@ -114,7 +117,9 @@ export const customViews: Record<string, (props: ViewProps) => JSX.Element> = {
   metric: MetricView,
   "relation-graph": RelationGraphView,
   timeline: TimelineView,
-  comparison: CompareView,
+  comparison: CompareComponent,
+  media: MediaComponent,
+  link: LinkComponent,
 };
 
 export function customView(name: string | undefined) {

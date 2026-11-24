@@ -1,5 +1,6 @@
 import type { JsonSchema } from "./types.ts";
 import { RESOURCE_REF_SCHEMA } from "./resource.ts";
+import { MEDIA_CROP_SCHEMA } from "./media-crop.ts";
 const text = { type: "string", minLength: 1 },
   version = { type: "integer", minimum: 1 };
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -41,6 +42,7 @@ Object.assign(source, {
 const appearance = obj({
   detail: { enum: ["full", "label", "icon"] },
   coverBlob: text,
+  coverCrop: MEDIA_CROP_SCHEMA,
   accent: { type: "string" },
 });
 const op = (

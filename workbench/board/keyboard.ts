@@ -1,4 +1,6 @@
-export function blocksCanvasShortcut(e: KeyboardEvent): boolean {
+export function blocksCanvasShortcut(
+  e: Event & { isComposing?: boolean },
+): boolean {
   const target = e.target instanceof HTMLElement ? e.target : null;
   return (
     e.defaultPrevented ||

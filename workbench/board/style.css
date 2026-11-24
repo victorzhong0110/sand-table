@@ -2645,6 +2645,71 @@ main.canvas-app {
   object-fit: cover;
   border-radius: 4px;
 }
+.media-view {
+  max-height: 100%;
+  overflow: auto;
+  padding-top: 26px;
+}
+.media-view audio,
+.media-view video,
+.media-image {
+  width: 100%;
+}
+.media-image img,
+.media-sheet img {
+  display: block;
+  max-width: 100%;
+  max-height: 55vh;
+  margin: auto;
+}
+.media-cropped {
+  position: relative;
+  display: block;
+  width: 100%;
+  overflow: hidden;
+}
+.media-cropped img {
+  object-fit: fill;
+}
+.media-dialog {
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  width: min(92vw, 920px);
+}
+.media-dialog::backdrop {
+  background: #0008;
+}
+.media-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.media-stage {
+  display: grid;
+  place-items: center;
+  height: min(62vh, 600px);
+  overflow: hidden;
+}
+.media-sheet {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  min-width: min(300px, 60vw);
+  touch-action: none;
+  cursor: crosshair;
+  user-select: none;
+}
+.media-sheet img {
+  width: 100%;
+}
+.media-selection {
+  position: absolute;
+  pointer-events: none;
+  outline: 2px solid #fff;
+  box-shadow: 0 0 0 100vmax #0006;
+}
 .widget {
   display: flex;
   flex-wrap: wrap;

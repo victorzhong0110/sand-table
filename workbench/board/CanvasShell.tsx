@@ -1,4 +1,5 @@
 import type { HostBridge } from "../core/host-bridge.ts";
+import type { DownloadFile } from "./media/host.ts";
 import { ViewRuntimeContext, useViewRuntime } from "./views/registry.tsx";
 import { initialData } from "./domain-ui.ts";
 import {
@@ -31,7 +32,7 @@ import { coerceTheme, type Theme } from "./theme/tokens.ts";
 import { ThemeSettings } from "./theme/ThemeSettings.tsx";
 import { PackManager } from "./packs/PackManager.tsx";
 import { CreateObjectDialog } from "./packs/CreateObjectDialog.tsx";
-import { ContextPanel } from "./context/ContextPanel.tsx";
+import { ContextPanel } from "./context/ContextViews.tsx";
 import { readParticipants, type Participant } from "./context/defaults.ts";
 import type { JsonSchema } from "./views/format.ts";
 import { Inspector } from "./views/Inspector.tsx";
@@ -109,7 +110,7 @@ export function CanvasShell({
   workspacePanel?: WorkspacePanelProps;
   hostEvents?: HostTaskEvent[];
   onCancelHostTask?: HostBridge["cancelTask"];
-  downloadFile: (filename: string, text: string) => Promise<void>;
+  downloadFile: DownloadFile;
 }) {
   const [mode, setMode] = useState("browse"),
     [focusRevision, setFocusRevision] = useState(0),
@@ -734,7 +735,9 @@ export function CanvasShell({
           </div>
           <ViewRuntimeContext.Provider
             value={
-              viewRuntime ? { ...viewRuntime, focusObject, downloadFile } : null
+              viewRuntime
+                ? { ...viewRuntime, focusObject, downloadFile, openLink }
+                : null
             }
           >
             <FlowCanvas

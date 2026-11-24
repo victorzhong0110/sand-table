@@ -48,7 +48,7 @@ export type V3PresentationRow = {
   height: number;
   z: number;
   locked: boolean;
-  appearance: { detail?: string; coverBlob?: string; accent?: string };
+  appearance: import("../../kernel/types.ts").Appearance;
   version: number;
   updatedAt: number;
   updatedBy: string;

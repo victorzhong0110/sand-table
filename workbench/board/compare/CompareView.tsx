@@ -1,15 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BindingItem } from "../../kernel/index.ts";
-import { useComponentRuntime } from "../runtime/resources.ts";
-import { useViewRuntime, type ViewProps } from "../views/registry.tsx";
+import type { V3Tool } from "../data-client/store.ts";
+import type { ViewProps } from "../views/registry.tsx";
 import { imageDataUrl } from "../views/format.ts";
-import type { compareBoundTables, compareText, LinePair } from "./diff.ts";
+import { compareBoundTables, compareText, type LinePair } from "./diff.ts";
 import { useComparisonSide } from "./use-comparison-side.ts";
 
-type Diff = {
-  compareBoundTables: typeof compareBoundTables;
-  compareText: typeof compareText;
-};
 const sideNames = { left: "左侧", right: "右侧" } as const;
 const plain = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -44,10 +40,17 @@ function isImage(entry: BindingItem) {
   );
 }
 
-function ComparisonImage({ entry }: { entry: BindingItem }) {
-  const runtime = useViewRuntime();
-  const read = useRef(runtime?.call);
-  read.current = runtime?.call;
+function ComparisonImage({
+  entry,
+  call,
+  workspaceId,
+}: {
+  entry: BindingItem;
+  call?: V3Tool;
+  workspaceId: string;
+}) {
+  const read = useRef(call);
+  read.current = call;
   const blob = typeof entry.data.blob === "string" ? entry.data.blob : "";
   const mime = String(entry.data.mime);
   const [error, setError] = useState(false);
@@ -56,7 +59,7 @@ function ComparisonImage({ entry }: { entry: BindingItem }) {
     if (!read.current || !blob) return;
     let active = true;
     void read
-      .current("app_asset", { action: "read", sha256: blob })
+      .current("app_asset", { action: "read", sha256: blob, workspaceId })
       .then((asset) => {
         if (!active) return;
         const data = plain(asset).base64;
@@ -73,7 +76,7 @@ function ComparisonImage({ entry }: { entry: BindingItem }) {
     return () => {
       active = false;
     };
-  }, [blob, mime]);
+  }, [blob, mime, workspaceId]);
   return src ? (
     <img src={src} alt={String(entry.data.alt || entry.title)} />
   ) : (
@@ -83,15 +86,19 @@ function ComparisonImage({ entry }: { entry: BindingItem }) {
   );
 }
 
-export function CompareView({ bindings, object, actions }: ViewProps) {
+export function CompareView({
+  bindings,
+  object,
+  actions,
+  call,
+  workspaceId,
+}: ViewProps & { call?: V3Tool }) {
   const pins = plain(object.data.pinnedVersions);
   const legacy = plain(object.data.legacy);
   const leftPin = typeof pins.left === "number" ? pins.left : undefined;
   const rightPin = typeof pins.right === "number" ? pins.right : undefined;
   const left = useComparisonSide(bindings, "left", leftPin);
   const right = useComparisonSide(bindings, "right", rightPin);
-  const runtime = useComponentRuntime();
-  const [diff, setDiff] = useState<Diff>();
   const [problem, setProblem] = useState("");
   const leftEntry = left.error ? undefined : left.entry;
   const rightEntry = right.error ? undefined : right.entry;
@@ -103,42 +110,17 @@ export function CompareView({ bindings, object, actions }: ViewProps) {
   const code =
     leftEntry?.type === "base.code_snippet" ||
     rightEntry?.type === "base.code_snippet";
-  const needsDiff = bothTables || bothText;
-  useEffect(() => {
-    if (!needsDiff || diff) return;
-    if (!runtime) {
-      setProblem("此宿主暂时不能加载差异组件。");
-      return;
-    }
-    const controller = new AbortController();
-    void runtime
-      .loadComponentResource("compare", controller.signal)
-      .then(() => {
-        if (controller.signal.aborted) return;
-        const installed = (globalThis as { sandTableCompare?: Diff })
-          .sandTableCompare;
-        if (!installed) throw Error("差异组件未能注册。");
-        setDiff(installed);
-      })
-      .catch((reason: unknown) => {
-        if (!controller.signal.aborted)
-          setProblem(
-            reason instanceof Error ? reason.message : "暂时无法生成差异。",
-          );
-      });
-    return () => controller.abort();
-  }, [runtime, needsDiff, diff]);
   const textDiff = useMemo(
     () =>
-      diff && leftText !== undefined && rightText !== undefined
-        ? diff.compareText(leftText, rightText, !code)
+      leftText !== undefined && rightText !== undefined
+        ? compareText(leftText, rightText, !code)
         : undefined,
-    [diff, leftText, rightText, code],
+    [leftText, rightText, code],
   );
   const tableDiff = useMemo(() => {
-    if (!diff || !bothTables || !leftEntry || !rightEntry) return;
-    return diff.compareBoundTables(leftEntry, rightEntry);
-  }, [diff, bothTables, leftEntry, rightEntry]);
+    if (!bothTables || !leftEntry || !rightEntry) return;
+    return compareBoundTables(leftEntry, rightEntry);
+  }, [bothTables, leftEntry, rightEntry]);
   const [tablePage, setTablePage] = useState(0);
   const pages = Math.max(1, Math.ceil((tableDiff?.rows.length ?? 0) / 30));
   const page = Math.min(tablePage, pages - 1);
@@ -201,6 +183,8 @@ export function CompareView({ bindings, object, actions }: ViewProps) {
                   state.entry.data.mime,
                 ])}
                 entry={state.entry}
+                call={call}
+                workspaceId={workspaceId}
               />
             )}
             {(!bothText || !textDiff || textDiff.unsupported) &&
@@ -242,7 +226,6 @@ export function CompareView({ bindings, object, actions }: ViewProps) {
         {side("right")}
       </div>
       {problem && <p role="status">{problem}</p>}
-      {needsDiff && !diff && !problem && <p role="status">正在生成差异…</p>}
       {textDiff?.unsupported && <p role="status">{textDiff.unsupported}</p>}
       {textDiff && !textDiff.unsupported && (
         <div aria-label="逐行差异">

@@ -1,6 +1,7 @@
 import Ajv2020 from "ajv/dist/2020.js";
 import type { ValidateFunction } from "ajv";
 import { PACK_SCHEMA } from "./pack-schema.ts";
+import { isMediaCrop } from "./media-crop.ts";
 import { ajvErrorsToFieldErrors, type SchemaProblem } from "./messages.ts";
 import type {
   JsonSchema,
@@ -214,7 +215,17 @@ export function createRegistry(): Registry {
           ok: false,
           errors: [{ path: "", message: `没有这个类型「${type}」。` }],
         };
-      if (validate(data)) return { ok: true };
+      if (validate(data)) {
+        if (type === "base.media") {
+          const crop = (data as Record<string, unknown>).crop;
+          if (crop !== undefined && !isMediaCrop(crop))
+            return {
+              ok: false,
+              errors: [{ path: "/crop", message: "裁剪范围须位于原图内。" }],
+            };
+        }
+        return { ok: true };
+      }
       return {
         ok: false,
         errors: ajvErrorsToFieldErrors(validate.errors, spec.schema),

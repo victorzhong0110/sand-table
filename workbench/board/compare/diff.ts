@@ -1,5 +1,5 @@
 import { diffLines, diffWordsWithSpace } from "diff";
-import { migrateTable } from "../../packs/base/index.ts";
+import { migrateTable } from "../../packs/base/migrations.ts";
 import { cellValue, tableOf, type TableData } from "../data/table-model.ts";
 
 const maxText = 20_000;

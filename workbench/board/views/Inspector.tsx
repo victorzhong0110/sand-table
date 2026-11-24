@@ -2,7 +2,7 @@ import type { Board } from "../data-client/model.ts";
 import type { ComponentInstance } from "../data-client/spaces.ts";
 import { TypeCatalogProvider } from "./catalog.tsx";
 import { GenericForm } from "./GenericForm.tsx";
-import { ParticipantContexts } from "../context/ContextPanel.tsx";
+import { ParticipantContexts } from "../context/ContextViews.tsx";
 
 /** 侧边属性：选中的展示用通用表单编辑。 */
 export function Inspector({

@@ -12,6 +12,7 @@ export type ClipboardAppearance = {
   detail?: "full" | "label" | "icon";
   accent?: string;
   coverBlob?: string;
+  coverCrop?: import("../../kernel/media-crop.ts").MediaCrop;
 };
 
 export type ClipboardItem = {
