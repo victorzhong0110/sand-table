@@ -21,6 +21,8 @@ const TIPS = [
 const BOARD_LIMIT = 50;
 const QUERY_DEFAULT = 20;
 const QUERY_MAX = 50;
+export const INTERSECTION_QUERY_DEFAULT = 50;
+export const INTERSECTION_QUERY_MAX = 200;
 const READ_MAX = 20;
 const TEXT_DEFAULT = 8000;
 const TEXT_MAX = 20_000;
@@ -94,6 +96,7 @@ export type QueryFilter = {
   types?: string[];
   text?: string;
   relatedTo?: { id: string; kind?: string; direction?: "out" | "in" | "both" };
+  relatedToAll?: string[];
   order?: "updated" | "title";
   limit?: number;
   cursor?: string;
@@ -106,6 +109,14 @@ export type QueryRow = {
   summary: string;
   version: number;
   updatedAt: number;
+  participantRelations?: {
+    participantId: string;
+    title: string;
+    kind: string;
+    label: string;
+    direction: "in" | "out";
+    status: "confirmed" | "inferred";
+  }[];
   /** 数据迁移后的类型版本。 */
   typeVersion: number;
   typeAvailable: boolean;
@@ -348,8 +359,10 @@ export function query(
   filter: QueryFilter,
 ): { rows: QueryRow[]; nextCursor: string | null; total: number } {
   return readOnly(db, () => {
-    const limit = pageLimit(filter.limit);
-    const offset = decodeCursor(filter.cursor);
+    const intersection = filter.relatedToAll !== undefined;
+    const limit = pageLimit(filter.limit, intersection);
+    const offset = intersection ? 0 : decodeCursor(filter.cursor);
+    const after = intersection && filter.cursor ? [filter.cursor] : [];
     const { where, params, orderSql } = objectFilter(filter);
     const total = Number(
       (
@@ -358,13 +371,18 @@ export function query(
           .get(...params) as { n: number }
       ).n,
     );
-    const rows = (
-      db
-        .prepare(
-          `SELECT * FROM objects WHERE ${where} ORDER BY ${orderSql} LIMIT ? OFFSET ?`,
-        )
-        .all(...params, limit, offset) as Record<string, unknown>[]
-    ).map((raw) => {
+    const requestedRows = db
+      .prepare(
+        `SELECT * FROM objects WHERE ${where}${after.length ? " AND id > ?" : ""}
+           ORDER BY ${orderSql} LIMIT ? OFFSET ?`,
+      )
+      .all(
+        ...params,
+        ...after,
+        intersection ? limit + 1 : limit,
+        offset,
+      ) as Record<string, unknown>[];
+    const rows = requestedRows.slice(0, limit).map((raw) => {
       const row = toObjectRow(raw);
       const migrated = migrateData(registry, row);
       return {
@@ -380,13 +398,29 @@ export function query(
         updatedAt: row.updatedAt,
         typeVersion: migrated.typeVersion,
         typeAvailable: typeAvailable(db, registry, row.type),
+        ...(filter.relatedToAll
+          ? {
+              participantRelations: participantRelations(
+                db,
+                registry,
+                row.id,
+                filter.relatedToAll,
+              ),
+            }
+          : {}),
         ...(migrated.error ? { migrationError: migrated.error } : {}),
       };
     });
     const next = offset + rows.length;
     return {
       rows,
-      nextCursor: next < total ? encodeCursor(next) : null,
+      nextCursor: intersection
+        ? requestedRows.length > limit
+          ? rows.at(-1)!.id
+          : null
+        : next < total
+          ? encodeCursor(next)
+          : null,
       total,
     };
   });
@@ -1043,6 +1077,35 @@ function objectFilter(filter: QueryFilter) {
       add("target_id", "source_id");
     clauses.push(`(${parts.join(" OR ")})`);
   }
+  if (filter.relatedToAll !== undefined) {
+    if (filter.relatedToAll.length > INTERSECTION_QUERY_MAX)
+      throw new CommandError("LIMIT", "最多查询 200 个参与对象。", null);
+    const participants = [...new Set(filter.relatedToAll)];
+    if (participants.length < 2 || participants.some((id) => !id))
+      throw new CommandError(
+        "INVALID_DATA",
+        "请选择至少两个不同的参与对象。",
+        null,
+      );
+    const ids = JSON.stringify(participants);
+    clauses.push(
+      `objects.type <> 'base.context'
+       AND objects.id NOT IN (SELECT value FROM json_each(?))
+       AND NOT EXISTS (
+         SELECT 1 FROM json_each(?) AS participant
+         WHERE NOT EXISTS (
+           SELECT 1 FROM relations
+           WHERE deleted_rev IS NULL
+             AND source_id = objects.id AND target_id = participant.value
+         ) AND NOT EXISTS (
+           SELECT 1 FROM relations
+           WHERE deleted_rev IS NULL
+             AND target_id = objects.id AND source_id = participant.value
+         )
+       )`,
+    );
+    params.push(ids, ids);
+  }
   const order = filter.order ?? "updated";
   if (order !== "updated" && order !== "title")
     throw new CommandError(
@@ -1053,9 +1116,46 @@ function objectFilter(filter: QueryFilter) {
   return {
     where: clauses.join(" AND "),
     params,
-    orderSql:
-      order === "title" ? "title ASC, id ASC" : "updated_at DESC, id ASC",
+    orderSql: filter.relatedToAll
+      ? "id ASC"
+      : order === "title"
+        ? "title ASC, id ASC"
+        : "updated_at DESC, id ASC",
   };
+}
+
+function participantRelations(
+  db: Db,
+  registry: Registry,
+  id: string,
+  participants: string[],
+) {
+  const rows = db
+    .prepare(
+      `WITH matches AS (
+       SELECT id, kind, status, target_id AS participantId, 'out' AS direction
+       FROM relations WHERE source_id = ? AND deleted_rev IS NULL
+       UNION ALL
+       SELECT id, kind, status, source_id AS participantId, 'in' AS direction
+       FROM relations WHERE target_id = ? AND deleted_rev IS NULL
+     ), ranked AS (
+       SELECT *, ROW_NUMBER() OVER (
+         PARTITION BY participantId ORDER BY status <> 'confirmed', id
+       ) AS rank
+       FROM matches WHERE participantId IN (SELECT value FROM json_each(?))
+     )
+     SELECT participantId, objects.title AS title, kind, direction, status
+     FROM ranked JOIN objects ON objects.id = ranked.participantId
+     WHERE rank = 1 ORDER BY participantId`,
+    )
+    .all(id, id, JSON.stringify(participants)) as NonNullable<
+    QueryRow["participantRelations"]
+  >;
+  return rows.map((row) => {
+    const spec = registry.getRelationKind(row.kind);
+    const label = row.direction === "out" ? spec?.title : spec?.inverseTitle;
+    return { ...row, label: label ?? row.kind };
+  });
 }
 
 function presentationsOf(db: Db, objectId: string) {
@@ -1313,18 +1413,20 @@ function changedRows(db: Db, sql: string, rev: number) {
   return db.prepare(sql).all(rev) as Record<string, unknown>[];
 }
 
-function pageLimit(value: number | undefined) {
-  if (value === undefined) return QUERY_DEFAULT;
+function pageLimit(value: number | undefined, intersection: boolean) {
+  if (value === undefined)
+    return intersection ? INTERSECTION_QUERY_DEFAULT : QUERY_DEFAULT;
   if (!Number.isInteger(value) || value < 1)
     throw new CommandError(
       "INVALID_DATA",
       "每页数量必须是正整数。请改好后再查。",
       null,
     );
-  if (value > QUERY_MAX)
+  const max = intersection ? INTERSECTION_QUERY_MAX : QUERY_MAX;
+  if (value > max)
     throw new CommandError(
       "LIMIT",
-      "每页最多 50 条。请把数量调到 50 以内再查。",
+      `每页最多 ${max} 条。请减少每页数量再查。`,
       null,
     );
   return value;

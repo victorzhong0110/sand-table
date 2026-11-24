@@ -6,7 +6,12 @@ import {
 } from "./domains.ts";
 export type { Presentation, Rect } from "./objects.ts";
 export type Camera = { x: number; y: number; zoom: number };
-export type Space = { id: string; title: string; parentId?: string };
+export type Space = {
+  id: string;
+  title: string;
+  parentId?: string;
+  kernelType?: string;
+};
 /**
  * 展示实例：对象在某白板上的一次呈现。
  * 内容由被绑定的对象提供，布局与展示状态由实例自己持有。

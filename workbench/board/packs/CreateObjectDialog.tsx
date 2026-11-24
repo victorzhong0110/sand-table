@@ -1,24 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import { fieldLabel, type JsonSchema } from "../views/format.ts";
 import { widgetFor } from "../views/registry.tsx";
+import type { Participant } from "../context/defaults.ts";
 
 export function CreateObjectDialog({
   title,
   schema,
   initial,
+  associations,
   onCreate,
   onCancel,
 }: {
   title: string;
   schema: JsonSchema;
   initial: Record<string, unknown>;
-  onCreate: (data: Record<string, unknown>) => Promise<string | undefined>;
+  associations?: Participant[];
+  onCreate: (
+    data: Record<string, unknown>,
+    associationIds: string[],
+  ) => Promise<string | undefined>;
   onCancel: () => void;
 }) {
   const [values, setValues] = useState(initial);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const dialog = useRef<HTMLDivElement>(null);
+  const dialog = useRef<HTMLFormElement>(null);
   const fields = Object.entries(schema.properties ?? {}).filter(
     ([, field]) => !field["x-sand-hidden"],
   );
@@ -45,7 +51,10 @@ export function CreateObjectDialog({
     setBusy(true);
     setError("");
     try {
-      const failure = await onCreate(values);
+      const form = dialog.current;
+      if (!form) return;
+      const choices = new FormData(form).getAll("context-related") as string[];
+      const failure = await onCreate(values, choices);
       if (failure) setError(failure);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -54,8 +63,9 @@ export function CreateObjectDialog({
     }
   }
   return (
-    <div
+    <form
       ref={dialog}
+      onSubmit={(event) => event.preventDefault()}
       className="arrange-confirm create-object-dialog"
       role="dialog"
       aria-modal="true"
@@ -89,7 +99,22 @@ export function CreateObjectDialog({
       }}
     >
       <h2>填写{title}</h2>
-      <p>先填写创建组件需要的内容。</p>
+      {associations && associations.length > 0 && (
+        <fieldset>
+          <legend>将关联到</legend>
+          {associations.map(({ id, title }) => (
+            <label key={id}>
+              <input
+                type="checkbox"
+                name="context-related"
+                value={id}
+                defaultChecked
+              />
+              {title}
+            </label>
+          ))}
+        </fieldset>
+      )}
       {fields.map(([key, field]) => {
         const Editor = widgetFor(field).Editor;
         const label = fieldLabel(key, field);
@@ -114,7 +139,7 @@ export function CreateObjectDialog({
           </label>
         );
       })}
-      {!fields.length && (
+      {!fields.length && !associations?.length && (
         <p>这个组件没有提供可填写的字段，请联系组件包作者。</p>
       )}
       {error && <p role="alert">{error}</p>}
@@ -124,12 +149,12 @@ export function CreateObjectDialog({
         </button>
         <button
           type="button"
-          disabled={busy || !fields.length}
+          disabled={busy || (!fields.length && !associations?.length)}
           onClick={() => void submit()}
         >
           创建组件
         </button>
       </div>
-    </div>
+    </form>
   );
 }

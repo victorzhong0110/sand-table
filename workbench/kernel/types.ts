@@ -239,7 +239,7 @@ export type ToolRegistrar = {
   tool(
     name: string,
     description: string,
-    shape: Record<string, unknown>,
+    shape: Record<string, unknown> | { readonly "~standard": unknown },
     handler: (
       args: any,
       ctx: { actor: Actor; db: Db; registry: Registry },

@@ -69,6 +69,8 @@ export {
   boardContents,
   changesSince,
   context,
+  INTERSECTION_QUERY_DEFAULT,
+  INTERSECTION_QUERY_MAX,
   listActivities,
   listTypes,
   query,

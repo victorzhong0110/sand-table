@@ -266,6 +266,33 @@ export const basePack: PackSpec = {
       },
     },
     {
+      type: "base.context",
+      title: "交叉情境",
+      description: "围绕多个参与对象可进入的白板。",
+      icon: "board",
+      version: 1,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {},
+      },
+      capabilities: { container: true },
+      display: {
+        material: "container",
+        defaultSize: { width: 300, height: 160 },
+        summary: [],
+      },
+      relationSlots: [
+        {
+          key: "participants",
+          label: "参与对象",
+          kind: "base.involves",
+          direction: "out",
+          many: true,
+        },
+      ],
+    },
+    {
       type: "base.frame",
       title: "框",
       description: "画布上的一块框，用来给对象分组。",
@@ -1352,6 +1379,13 @@ export const basePack: PackSpec = {
       title: "图中心",
       inverseTitle: "所在关系图",
       sourceTypes: ["base.relation_graph"],
+      allowsInferred: false,
+    },
+    {
+      kind: "base.involves",
+      title: "交叉情境参与者",
+      inverseTitle: "参与的交叉情境",
+      sourceTypes: ["base.context"],
       allowsInferred: false,
     },
     {
