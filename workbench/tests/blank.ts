@@ -1601,13 +1601,40 @@ try {
       relationCommitted,
       "Connecting two cards and choosing 相关 creates base.related.",
     );
-    await frame.getByRole("button", { name: "缩小", exact: true }).click();
-    await frame.getByRole("button", { name: "缩小", exact: true }).click();
-    await page.waitForTimeout(1200);
-    const zoomLabel = (await frame.locator(".zoom span").innerText()).trim();
+    const zoom = frame.locator(".zoom");
+    const priorZoom = Number.parseInt(
+      await zoom.locator("span").innerText(),
+      10,
+    );
+    assert.ok(priorZoom > 5);
+    await zoom.getByRole("button", { name: "缩小", exact: true }).click();
+    const zoomLabel = `${Math.max(5, priorZoom - 10)}%`;
+    await zoom.getByText(zoomLabel, { exact: true }).waitFor();
+    let storedZoom = "";
+    let storedCamera: { x: number; y: number; zoom: number } | undefined;
+    for (let i = 0; i < 60; i++) {
+      const savedView = await call("app_view", {
+        action: "get",
+        viewId: "local-human",
+      });
+      storedZoom = `${Math.round(savedView.camera.zoom * 100)}%`;
+      if (storedZoom === zoomLabel) {
+        storedCamera = savedView.camera;
+        break;
+      }
+      await page.waitForTimeout(100);
+    }
+    assert.equal(storedZoom, zoomLabel, "Zoom change is saved before reload.");
+    await call("app_view", {
+      action: "select",
+      viewId: "local-human",
+      selection: [farId],
+    });
     await page.reload();
-    await frame.locator(".zoom span").waitFor();
-    await frame.locator(".component-card").first().waitFor({ timeout: 30000 });
+    await frame
+      .locator(`.component-card.selected[data-instance-id="${farId}"]`)
+      .waitFor();
+    await frame.locator('.flow-canvas:not([data-nav-playing="1"])').waitFor();
     let restored = "";
     for (let i = 0; i < 40; i++) {
       restored = (await frame.locator(".zoom span").innerText()).trim();
@@ -1619,6 +1646,12 @@ try {
       zoomLabel,
       "Reopening the board restores the viewport.",
     );
+    const reopenedView = await call("app_view", {
+      action: "get",
+      viewId: "local-human",
+    });
+    assert.deepEqual(reopenedView.camera, storedCamera);
+    await page.keyboard.press("Escape");
     await page.setViewportSize({ width: 1440, height: 1000 });
     /* T31：复制、粘贴、再放一份、方向键。正文修改是另一步历史，
        所以「撤销一次去掉两份新展示」放在改正文之前。 */
@@ -1741,17 +1774,25 @@ try {
       }
     };
     const selectPair = async () => {
+      const expected = [idA, idB].sort();
       for (let attempt = 0; attempt < 3; attempt += 1) {
         await page.keyboard.press("Escape");
         await clickCard(cardA);
         await clickCard(cardB, { modifiers: [primaryModifier] });
         for (let i = 0; i < 25; i += 1) {
-          if ((await frame.locator(".component-card.selected").count()) === 2)
-            return;
+          const shown = await frame
+            .locator(".component-card.selected")
+            .evaluateAll((cards) =>
+              cards.map((card) => card.getAttribute("data-instance-id")).sort(),
+            );
+          if (shown.join("|") === expected.join("|")) {
+            const saved = (await v3View()).selection.slice().sort();
+            if (saved.join("|") === expected.join("|")) return;
+          }
           await new Promise((resolve) => setTimeout(resolve, 60));
         }
       }
-      await untilUiSelection(2);
+      throw new Error("复制操作前未能选中甲、乙两张卡片");
     };
     await selectPair();
     const beforePaste = await read();
@@ -2174,6 +2215,17 @@ try {
         });
         await card.and(frame.locator(".selected")).waitFor();
         await untilUiSelection(index + 1);
+        const expected = ids
+          .slice(0, index + 1)
+          .sort()
+          .join("|");
+        let saved = "";
+        for (let attempt = 0; attempt < 60; attempt++) {
+          saved = (await v3View()).selection.slice().sort().join("|");
+          if (saved === expected) break;
+          await page.waitForTimeout(100);
+        }
+        assert.equal(saved, expected, "The menu uses the saved selection.");
       }
     };
     const screenBoxes = async (ids: string[]) => {
@@ -2539,24 +2591,38 @@ try {
       }
       assert.equal(seen, id);
     };
+    const nearCamera = (
+      left: Awaited<ReturnType<typeof viewCamera>>,
+      right: Awaited<ReturnType<typeof viewCamera>>,
+    ) =>
+      Math.abs(left.x - right.x) < 1 &&
+      Math.abs(left.y - right.y) < 1 &&
+      Math.abs(left.zoom - right.zoom) < 0.01;
     const waitNavIdle = async () => {
-      for (let i = 0; i < 30; i += 1) {
-        if ((await navCanvas.getAttribute("data-nav-playing")) !== "1") break;
-        await page.waitForTimeout(50);
-      }
-      let previous = await viewCamera();
-      for (let i = 0; i < 20; i += 1) {
-        await page.waitForTimeout(150);
-        const next = await viewCamera();
+      const viewport = navCanvas.locator(".react-flow__viewport.world");
+      let previous: Awaited<ReturnType<typeof viewCamera>> | undefined;
+      let rendered;
+      let saved;
+      for (let i = 0; i < 80; i += 1) {
+        rendered = await viewport.evaluate((element) => {
+          const matrix = new DOMMatrixReadOnly(
+            getComputedStyle(element).transform,
+          );
+          return { x: matrix.e, y: matrix.f, zoom: matrix.a };
+        });
+        saved = await viewCamera();
         if (
-          Math.abs(next.x - previous.x) < 1 &&
-          Math.abs(next.y - previous.y) < 1 &&
-          Math.abs(next.zoom - previous.zoom) < 0.01
-        )
-          return next;
-        previous = next;
+          (await navCanvas.getAttribute("data-nav-playing")) !== "1" &&
+          nearCamera(rendered, saved)
+        ) {
+          if (previous && nearCamera(previous, saved)) return saved;
+          previous = saved;
+        } else previous = undefined;
+        await page.waitForTimeout(100);
       }
-      return previous;
+      throw Error(
+        `The rendered viewport did not settle at the saved camera: ${JSON.stringify({ rendered, saved })}`,
+      );
     };
     await page.keyboard.press("Escape");
     const homeBefore = await viewBoardId();
@@ -2598,10 +2664,22 @@ try {
     await frame.locator(`[data-instance-id="${nearId}"]`).waitFor();
     await frame.locator(`[data-instance-id="${nearId}"]`).focus();
     await page.keyboard.press("Space");
+    for (let i = 0; i < 60 && !(await viewSelection()).includes(nearId); i++) {
+      await page.waitForTimeout(100);
+    }
+    assert.ok((await viewSelection()).includes(nearId));
     const cameraBefore = await waitNavIdle();
     const selectionBefore = await viewSelection();
     await enterCard(nearId);
     await waitUntilBoard(innerId);
+    const savedParent = (await liveView()).navStack.at(-1);
+    assert.ok(
+      nearCamera(savedParent.camera, cameraBefore),
+      JSON.stringify({
+        savedParent: savedParent.camera,
+        cameraBefore,
+      }),
+    );
     await frame
       .locator(".breadcrumbs")
       .getByRole("button", { name: "返回", exact: true })
@@ -4044,26 +4122,28 @@ try {
   assert.equal(savedTable.title, "并发重命名的测量日志");
   assert.equal(savedTable.data.rows[0].cells.y, 34);
   const originalRows = savedTable.data.rows;
-  await tableCard.getByText("表格分析", { exact: true }).click();
+  await tableCard.getByText("表格分析", { exact: true }).press("Enter");
   await tableCard.getByLabel("筛选列", { exact: true }).selectOption("y");
   await tableCard.getByLabel("筛选条件", { exact: true }).selectOption("gt");
   await tableCard.getByLabel("筛选值", { exact: true }).fill("20");
   const unfiltered = await chartBytes();
   await tableCard
     .getByRole("button", { name: "添加筛选条件", exact: true })
-    .click();
+    .press("Enter");
+  await tableCard
+    .getByText("表格分析（1 个筛选条件）", { exact: true })
+    .waitFor();
+  await tableCard
+    .getByLabel("第 2 行 测量值", { exact: true })
+    .waitFor({ state: "detached" });
   const afterFilter = await changedChart(unfiltered, 34);
   assert.deepEqual((await tableObject()).data.rows, originalRows);
-  assert.equal(
-    await tableCard.getByLabel("第 2 行 测量值", { exact: true }).count(),
-    0,
-  );
   const csvMenu = tableCard.getByText("CSV 导入与导出", { exact: true });
-  await csvMenu.click();
+  await csvMenu.press("Enter");
   async function exportedCsv(name: string) {
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      tableCard.getByRole("button", { name, exact: true }).click(),
+      tableCard.getByRole("button", { name, exact: true }).press("Enter"),
     ]);
     return readFileSync(await download.path(), "utf8");
   }
@@ -4072,10 +4152,10 @@ try {
     await exportedCsv("导出全部数据"),
     "组别,测量值\r\n甲,34\r\n乙,12\r\n",
   );
-  await csvMenu.click();
+  await csvMenu.press("Enter");
   await tableCard
     .getByRole("button", { name: "清除筛选", exact: true })
-    .click();
+    .press("Enter");
   await changedChart(afterFilter, 34);
   await tableCard.getByLabel("第 2 行 测量值", { exact: true }).waitFor();
   const indicator = await call("app_edit", {
@@ -4325,24 +4405,24 @@ try {
   );
   const tableAnalysis = tableCard.getByText(/^表格分析/);
   if (!(await tableCard.getByLabel("计算列名称", { exact: true }).isVisible()))
-    await tableAnalysis.click();
+    await tableAnalysis.press("Enter");
   await tableCard.getByLabel("计算列名称", { exact: true }).fill("金额");
   await tableCard.getByLabel("计算列公式", { exact: true }).fill("[测量值]*2");
   await tableCard
     .getByRole("button", { name: "添加计算列", exact: true })
-    .click();
+    .press("Enter");
   const computed = tableCard.getByLabel("第 1 行 金额", { exact: true });
   await computed.filter({ hasText: /^68$/ }).waitFor();
   const originalCalculation = (await tableObject()).data.view.calculated[0].key;
   await tableCard
     .getByRole("button", { name: "编辑计算列「金额」", exact: true })
-    .click();
+    .press("Enter");
   const formulaInput = tableCard.getByLabel("计算列公式", { exact: true });
   assert.equal(await formulaInput.inputValue(), "[测量值]*2");
   await formulaInput.fill("[测量值]*3");
   await tableCard
     .getByRole("button", { name: "保存计算列", exact: true })
-    .click();
+    .press("Enter");
   await computed.filter({ hasText: /^102$/ }).waitFor();
   assert.equal(
     (await tableObject()).data.view.calculated[0].key,
@@ -4350,8 +4430,8 @@ try {
   );
   await cell.fill("");
   await computed.filter({ hasText: /^计算需要的单元格为空。$/ }).waitFor();
-  await tableCard.getByText(/^表格分析/).click();
-  await tableCard.getByText("CSV 导入与导出", { exact: true }).click();
+  await tableCard.getByText(/^表格分析/).press("Enter");
+  await tableCard.getByText("CSV 导入与导出", { exact: true }).press("Enter");
   await tableCard.getByLabel("选择 CSV 或 TSV 文件").setInputFiles({
     name: "导入记录.csv",
     mimeType: "text/csv",
@@ -4363,7 +4443,15 @@ try {
   const findImportedTable = () =>
     call("sand_query", { text: "导入记录", types: ["base.table"] });
   assert.equal((await findImportedTable()).rows.length, 0);
-  await csvPreview.getByRole("button", { name: "确认新建表格" }).click();
+  const confirmCsv = csvPreview.getByRole("button", {
+    name: "确认新建表格",
+    exact: true,
+  });
+  await confirmCsv.waitFor();
+  await confirmCsv.evaluate((button: HTMLButtonElement) => {
+    if (button.disabled) throw new Error("CSV 确认按钮未就绪");
+    button.click();
+  });
   await tableCard
     .getByText("已新建表格「导入记录」。", { exact: true })
     .waitFor();
@@ -4480,7 +4568,7 @@ try {
   await call("app_edit", {
     commands: [{ op: "relation.delete", id: graphFixture.created.remove }],
   });
-  await third.waitFor({ state: "detached", timeout: 2000 });
+  await third.waitFor({ state: "detached" });
   assert.equal(await graph.locator(".react-flow__edge").count(), 1);
   await second.click();
   await frame
@@ -4489,12 +4577,13 @@ try {
     )
     .waitFor();
   await call("app_history", { action: "undo" });
-  await third.waitFor({ timeout: 2000 });
+  await third.waitFor();
   await third.click();
   await graph.locator(".graph-object-detail").getByText("关闭详情").waitFor();
   await graph.getByRole("button", { name: "关闭详情" }).press("Enter");
-  await third.dblclick();
-  await third.locator(".graph-center").waitFor({ timeout: 2000 });
+  await graph.locator(".graph-object-detail").waitFor({ state: "hidden" });
+  await third.dispatchEvent("dblclick", { detail: 2, bubbles: true });
+  await third.locator(".graph-center").waitFor();
   assert.equal(
     (await readGraph()).nodes.find(
       (node: any) => node.id === graphFixture.created.person2,
@@ -4577,6 +4666,7 @@ try {
     join(root, "workspaces/timeline-verify/workspace.db"),
   );
   try {
+    timeDb.exec("PRAGMA busy_timeout = 5000");
     timeDb
       .prepare("UPDATE objects SET type_version = 1 WHERE id = ?")
       .run(timeFixture.created.entry3);
@@ -4636,6 +4726,131 @@ try {
     names = await order();
   }
   assert.deepEqual(names, ["丙", "甲", "乙"]);
+  await call("app_workspace", {
+    action: "create",
+    id: "comments-verify",
+    title: "评论验收",
+  });
+  await call("app_workspace", { action: "switch", id: "comments-verify" });
+  const commentHome = (await call("sand_status")).homeBoardId;
+  const comments = await call("app_edit", {
+    commands: [
+      {
+        op: "object.create",
+        ref: "note",
+        type: "base.note",
+        title: "双处展示的便签",
+      },
+      {
+        op: "object.create",
+        ref: "otherBoard",
+        type: "base.board",
+        title: "第二块评论白板",
+      },
+      {
+        op: "presentation.create",
+        ref: "first",
+        boardId: commentHome,
+        objectId: "@note",
+        x: 110,
+        y: 165,
+      },
+      {
+        op: "presentation.create",
+        ref: "link",
+        boardId: commentHome,
+        objectId: "@otherBoard",
+        x: 500,
+        y: 165,
+      },
+      {
+        op: "presentation.create",
+        ref: "second",
+        boardId: "@otherBoard",
+        objectId: "@note",
+        x: 140,
+        y: 170,
+      },
+    ],
+  });
+  await page.goto(c.url);
+  const commentCard = (id: string) =>
+    frame.locator(`[data-instance-id="${id}"]`);
+  const firstBadge = commentCard(comments.created.first).locator(
+    ".comment-badge",
+  );
+  const secondBadge = commentCard(comments.created.second).locator(
+    ".comment-badge",
+  );
+  const thread = frame.getByRole("dialog", {
+    name: "评论 · 双处展示的便签",
+    exact: true,
+  });
+  await firstBadge.click();
+  const body = thread.getByRole("textbox", { name: "评论正文" });
+  const postComment = thread.getByRole("button", {
+    name: "发布评论",
+    exact: true,
+  });
+  const longComment = `两处展示都能读到${"，保留完整内容".repeat(40)}\n完整评论末尾`;
+  await body.fill(longComment);
+  await postComment.click();
+  await thread
+    .locator("article")
+    .getByText(longComment, { exact: true })
+    .waitFor();
+  await thread.getByRole("checkbox", { name: "仅此处", exact: true }).check();
+  await body.fill("两处中的第一处批注");
+  await postComment.click();
+  const localComment = thread
+    .locator("article")
+    .filter({ hasText: "两处中的第一处批注" });
+  await localComment.waitFor();
+  await localComment.getByRole("button", { name: "回复", exact: true }).click();
+  await body.fill("本地批注的回复");
+  await thread.getByRole("button", { name: "发送回复", exact: true }).click();
+  await thread
+    .locator("article")
+    .getByText("本地批注的回复", { exact: true })
+    .waitFor();
+  await firstBadge
+    .and(frame.getByRole("button", { name: "评论（3 条未解决）", exact: true }))
+    .waitFor();
+  await thread.getByRole("button", { name: "关闭评论", exact: true }).click();
+  await commentCard(comments.created.link)
+    .getByRole("button", { name: "进入白板", exact: true })
+    .click();
+  await secondBadge.click();
+  await thread
+    .locator("article")
+    .getByText(longComment, { exact: true })
+    .waitFor();
+  assert.equal(
+    await thread.getByText("两处中的第一处批注", { exact: true }).count(),
+    0,
+  );
+  assert.equal(
+    await thread.getByText("本地批注的回复", { exact: true }).count(),
+    0,
+  );
+  await thread.getByRole("button", { name: "标记已解决", exact: true }).click();
+  await secondBadge
+    .and(frame.getByRole("button", { name: "评论", exact: true }))
+    .waitFor();
+  await call("app_history", { action: "undo" });
+  await secondBadge
+    .and(frame.getByRole("button", { name: "评论（1 条未解决）", exact: true }))
+    .waitFor();
+  await call("app_edit", {
+    commands: [{ op: "presentation.delete", id: comments.created.first }],
+  });
+  await thread.getByText("其他位置的批注", { exact: true }).click();
+  await thread.getByText("两处中的第一处批注", { exact: true }).waitFor();
+  await thread.getByText("本地批注的回复", { exact: true }).waitFor();
+  await thread
+    .getByText(/原展示已移除/)
+    .first()
+    .waitFor();
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",

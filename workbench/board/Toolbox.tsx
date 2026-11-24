@@ -57,6 +57,7 @@ export function Toolbox({
       .includes(query.trim().toLocaleLowerCase());
   const palette = catalog.types.filter(
     (item) =>
+      item.type !== "base.comment" &&
       (query.trim().length > 0 || item.pack === group) &&
       matching(item.title, item.description),
   );

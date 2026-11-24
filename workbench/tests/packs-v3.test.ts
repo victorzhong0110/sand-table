@@ -63,6 +63,11 @@ const samples: {
     bad: [{ body: 42 }, { text: "旧字段名" }],
   },
   {
+    type: "base.comment",
+    ok: [{ body: "正文" }, { body: "已处理的批注", resolved: true }],
+    bad: [{}, { body: "" }, { body: "正文", resolved: "true" }],
+  },
+  {
     type: "base.heading",
     ok: [{ text: "第一节", level: 1 }, { level: 3 }],
     bad: [{ level: 4 }, { level: 0 }, { text: 1 }],

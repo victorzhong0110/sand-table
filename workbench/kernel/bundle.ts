@@ -19,6 +19,10 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  commentAttributeProblem,
+  isCommentRelation,
+} from "./comment-contract.ts";
+import {
   getMeta,
   openWorkspaceDb,
   setMeta,
@@ -306,7 +310,19 @@ function readBundle(
       null,
     );
   const presentations = livePresentations(db);
-  const relations = liveRelations(db);
+  const liveEdges = liveRelations(db);
+  const commentStates = commentChainStates(
+    new Map(
+      liveEdges
+        .filter((edge) => isCommentRelation(edge.kind))
+        .map((edge) => [edge.sourceId, edge]),
+    ),
+  );
+  const relations = liveEdges.filter(
+    (edge) =>
+      edge.kind !== "base.reply_to" ||
+      commentStates.get(edge.sourceId) !== "orphan",
+  );
   const settings = liveSettings(db);
   const packs = livePacks(db);
   const blobMeta = blobTable(db);
@@ -1187,17 +1203,67 @@ function assertGraph(
   }
   assertParentAcyclic(presentations);
   assertBoardAcyclic(presentations, objectById, known.containers);
+  const commentOwners = new Map<string, BundleRelation>();
   for (const relation of relations) {
-    if (
-      !objectById.has(relation.sourceId) ||
-      !objectById.has(relation.targetId)
-    )
+    const source = objectById.get(relation.sourceId);
+    const target = objectById.get(relation.targetId);
+    if (!source || !target)
       throw new CommandError(
         "INVALID_DATA",
         `关系「${relation.id}」的端点不在这份文件里，没有导入。请重新导出一份完整的文件。`,
         null,
       );
+    if (!isCommentRelation(relation.kind)) continue;
+    const issue = commentAttributeProblem(relation.kind, relation.attributes);
+    const placement = presentationById.get(
+      String(relation.attributes.presentationId ?? ""),
+    );
+    if (
+      issue ||
+      source.type !== "base.comment" ||
+      (relation.kind === "base.reply_to" && target.type !== "base.comment") ||
+      relation.status !== "confirmed" ||
+      (placement && placement.objectId !== target.id) ||
+      commentOwners.has(source.id)
+    )
+      throw new CommandError(
+        "INVALID_DATA",
+        `评论关系「${relation.id}」有误，${issue ?? "请检查范围、端点和回复归属。"}`,
+        null,
+      );
+    commentOwners.set(source.id, relation);
   }
+  for (const state of commentChainStates(commentOwners).values()) {
+    if (state === "cyclic")
+      throw new CommandError("CYCLE", "评论回复套成了环，没有导入。", null);
+    if (state === "orphan")
+      throw new CommandError(
+        "INVALID_DATA",
+        "评论回复缺少根评论，没有导入。",
+        null,
+      );
+  }
+}
+
+function commentChainStates(commentOwners: Map<string, BundleRelation>) {
+  const states = new Map<string, "rooted" | "orphan" | "cyclic">();
+  for (const start of commentOwners.keys()) {
+    const path = new Set<string>();
+    let id = start;
+    let state = states.get(id);
+    while (!state) {
+      const edge = commentOwners.get(id);
+      if (!edge || edge.kind !== "base.reply_to" || path.has(id)) {
+        state = path.has(id) ? "cyclic" : edge ? "rooted" : "orphan";
+        break;
+      }
+      path.add(id);
+      id = edge.targetId;
+      state = states.get(id);
+    }
+    for (const member of path) states.set(member, state);
+  }
+  return states;
 }
 
 function assertParentAcyclic(presentations: BundlePresentation[]): void {
