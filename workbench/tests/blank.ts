@@ -2215,6 +2215,17 @@ try {
         });
         await card.and(frame.locator(".selected")).waitFor();
         await untilUiSelection(index + 1);
+        const expected = ids
+          .slice(0, index + 1)
+          .sort()
+          .join("|");
+        let saved = "";
+        for (let attempt = 0; attempt < 60; attempt++) {
+          saved = (await v3View()).selection.slice().sort().join("|");
+          if (saved === expected) break;
+          await page.waitForTimeout(100);
+        }
+        assert.equal(saved, expected, "The menu uses the saved selection.");
       }
     };
     const screenBoxes = async (ids: string[]) => {
@@ -2580,26 +2591,38 @@ try {
       }
       assert.equal(seen, id);
     };
+    const nearCamera = (
+      left: Awaited<ReturnType<typeof viewCamera>>,
+      right: Awaited<ReturnType<typeof viewCamera>>,
+    ) =>
+      Math.abs(left.x - right.x) < 1 &&
+      Math.abs(left.y - right.y) < 1 &&
+      Math.abs(left.zoom - right.zoom) < 0.01;
     const waitNavIdle = async () => {
-      for (let i = 0; i < 30; i += 1) {
-        if ((await navCanvas.getAttribute("data-nav-playing")) !== "1") break;
-        await page.waitForTimeout(50);
-      }
-      let previous = await viewCamera();
-      let stable = 0;
-      for (let i = 0; i < 20; i += 1) {
-        await page.waitForTimeout(150);
-        const next = await viewCamera();
+      const viewport = navCanvas.locator(".react-flow__viewport.world");
+      let previous: Awaited<ReturnType<typeof viewCamera>> | undefined;
+      let rendered;
+      let saved;
+      for (let i = 0; i < 80; i += 1) {
+        rendered = await viewport.evaluate((element) => {
+          const matrix = new DOMMatrixReadOnly(
+            getComputedStyle(element).transform,
+          );
+          return { x: matrix.e, y: matrix.f, zoom: matrix.a };
+        });
+        saved = await viewCamera();
         if (
-          Math.abs(next.x - previous.x) < 1 &&
-          Math.abs(next.y - previous.y) < 1 &&
-          Math.abs(next.zoom - previous.zoom) < 0.01
+          (await navCanvas.getAttribute("data-nav-playing")) !== "1" &&
+          nearCamera(rendered, saved)
         ) {
-          if (++stable >= 3) return next;
-        } else stable = 0;
-        previous = next;
+          if (previous && nearCamera(previous, saved)) return saved;
+          previous = saved;
+        } else previous = undefined;
+        await page.waitForTimeout(100);
       }
-      return previous;
+      throw Error(
+        `The rendered viewport did not settle at the saved camera: ${JSON.stringify({ rendered, saved })}`,
+      );
     };
     await page.keyboard.press("Escape");
     const homeBefore = await viewBoardId();
@@ -2649,6 +2672,14 @@ try {
     const selectionBefore = await viewSelection();
     await enterCard(nearId);
     await waitUntilBoard(innerId);
+    const savedParent = (await liveView()).navStack.at(-1);
+    assert.ok(
+      nearCamera(savedParent.camera, cameraBefore),
+      JSON.stringify({
+        savedParent: savedParent.camera,
+        cameraBefore,
+      }),
+    );
     await frame
       .locator(".breadcrumbs")
       .getByRole("button", { name: "返回", exact: true })
