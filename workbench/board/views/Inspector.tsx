@@ -2,6 +2,7 @@ import type { Board } from "../data-client/model.ts";
 import type { ComponentInstance } from "../data-client/spaces.ts";
 import { TypeCatalogProvider } from "./catalog.tsx";
 import { GenericForm } from "./GenericForm.tsx";
+import { ParticipantContexts } from "../context/ContextPanel.tsx";
 
 /** 侧边属性：选中的展示用通用表单编辑。 */
 export function Inspector({
@@ -66,6 +67,14 @@ function InspectorBody({
             onOpenSettings={onOpenSettings}
             onOpenLink={onOpenLink}
           />
+          {instance.objectId && (
+            <ParticipantContexts
+              objectId={instance.objectId}
+              revision={board.contentRevision}
+              call={call}
+              onOpen={(spaceId) => void operate({ kind: "navigate", spaceId })}
+            />
+          )}
           <button
             type="button"
             onClick={() =>

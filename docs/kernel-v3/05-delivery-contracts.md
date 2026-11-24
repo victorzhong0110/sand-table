@@ -26,7 +26,7 @@ DSH 插件组合与迁移同时遵循 [06-plugin-composition.md](06-plugin-compo
 
 id `人物/林#a%b` 必须写成 `[标题](sand://object/%E4%BA%BA%E7%89%A9%2F%E6%9E%97%23a%25b)`。`/`、`#`、`%`、中文都在这一次编码里。解码一次得到原 id，不能再解码。`%ZZ`、末尾单独的 `%` 这类非法编码保留原文，不转成链接。不要写成未编码的 `sand://object/<id>`。
 
-base.about 保持便签/讲解用途；base.note.about 为单值，不将其扩成任意对象的通用关系。T60 新内容的多方默认关联用 base.related；context → participants 用 base.involves。默认关联明确显示且允许删除；推测关系在结果里标明，不当作已确认事实。
+base.about 保持便签/讲解用途；base.note.about 为单值，不将其扩成任意对象的通用关系。T60 新内容的多方默认关联用 base.related；context → participants 用 base.involves。默认关联明确显示且允许删除，和新对象、展示一次提交。交叉建议基于已有的直接关系，推测关系在结果里标明。拖入建议仅写入原对象的新展示。
 
 T51 注册 base.comment（body Markdown、resolved 可选布尔，未设按未解决显示）、base.comments_on（comment → 任意对象）、base.reply_to（comment → comment）。根评论只有一条 comments_on，回复只有一条 reply_to，不同时有两种。内核校验数量、无回复环，回复继承根范围。comments_on.attributes 为 `{scope?: "object"|"presentation", presentationId?: string, anchor?: { fragment: string, version?: string, fingerprint?: string }}`；省略 scope 按 object；presentation scope 必须引用目标对象的展示。presentationId 是关系上的定位元数据，不能作为独立语义关系或写入对象 data。anchor 只描述对象内部位置，不写 uri，不写对象 id。T51 负责实现校验；T53 扩展 anchor 的 fragment 格式校验。删除展示保留局部批注，标“原展示已移除”；复制展示不复制局部批注；删除目标仍按 01 §8 软删除关联关系；评论及回复对象保留。详情可通过带删除标记的关系墓碑显示失效记录，不能把墓碑当有效绑定；撤销可恢复。
 

@@ -15,6 +15,7 @@ import {
 } from "react";
 import { Icon } from "../Icon.tsx";
 import { CommentBadge } from "../comments/CommentBadge.tsx";
+import { ContextPanel } from "../context/ContextPanel.tsx";
 import { v3DataOf, v3TypeOf } from "../data-client/adapter.ts";
 import { peekContent } from "../data-client/content.ts";
 import type { Board } from "../data-client/model.ts";
@@ -517,6 +518,13 @@ export function CardNode({ id, selected, data }: NodeProps<CardNodeType>) {
                       ids: [route.presentationId],
                     });
                 }}
+              />
+            ) : kernelType === "base.context" && instance.objectId ? (
+              <ContextPanel
+                workspaceId={api.board.workspaceId}
+                objectId={instance.objectId}
+                revision={api.board.contentRevision}
+                call={api.call}
               />
             ) : undefined
           }

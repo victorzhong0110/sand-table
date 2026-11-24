@@ -25,6 +25,11 @@ const samples: {
     bad: [{ title: "框" }],
   },
   {
+    type: "base.context",
+    ok: [{}],
+    bad: [{ participants: ["参与对象通过关系保存"] }],
+  },
+  {
     type: "base.resource_reference",
     ok: [{}, { note: "本地说明" }],
     bad: [

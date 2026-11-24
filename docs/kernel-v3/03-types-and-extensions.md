@@ -252,6 +252,7 @@ v1 清单（`{version: 1, id, name, components: [...]}`）导入时自动转换�
 | 类型 | 说明 | container | 主要字段 |
 |---|---|---|---|
 | `base.board` | 白板 | 是 | 无（标题即白板名） |
+| `base.context` | 交叉情境 | 是 | 无，`participants` 多值槽经 `base.involves` 指向参与对象 |
 | `base.frame` | 画布上的框，用来分组 | 否 | 无 |
 | `base.note` | 便签 / 文字 | 否 | `body`（markdown） |
 | `base.timeline` | 时间轴 | 否 | `dimension`（显式数值或 ISO 日期字段）、`tracks`（按类型或单轨） |

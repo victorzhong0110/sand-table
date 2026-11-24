@@ -5114,6 +5114,193 @@ try {
     .getByText("这份图片暂时不可读。", { exact: true })
     .waitFor();
   assert.equal(await preview.count(), 0);
+  await call("app_workspace", {
+    action: "create",
+    id: "intersection-verify",
+    title: "交叉情境验收",
+  });
+  const intersectionHome = (await call("sand_status")).homeBoardId;
+  const contextFixture = await call("app_edit", {
+    commands: [
+      { op: "object.create", ref: "lin", type: "base.note", title: "林舟" },
+      {
+        op: "object.create",
+        ref: "chapter",
+        type: "base.note",
+        title: "第五章",
+      },
+      {
+        op: "object.create",
+        ref: "scene",
+        type: "base.note",
+        title: "两方交叉事件",
+      },
+      {
+        op: "object.create",
+        ref: "partial",
+        type: "base.note",
+        title: "单方事件",
+      },
+      ...["lin", "chapter"].map((ref, index) => ({
+        op: "presentation.create",
+        ref: `${ref}Card`,
+        boardId: intersectionHome,
+        objectId: `@${ref}`,
+        x: 380 + index * 320,
+        y: 180,
+        width: 240,
+        height: 160,
+      })),
+      {
+        op: "relation.create",
+        kind: "base.related",
+        sourceId: "@scene",
+        targetId: "@lin",
+      },
+      {
+        op: "relation.create",
+        kind: "base.related",
+        sourceId: "@chapter",
+        targetId: "@scene",
+      },
+      {
+        op: "relation.create",
+        kind: "base.related",
+        sourceId: "@partial",
+        targetId: "@lin",
+      },
+    ],
+  });
+  await page.reload();
+  const contextCardAt = (id: string) =>
+    frame.locator(`[data-instance-id="${id}"]`);
+  await contextCardAt(contextFixture.created.linCard).press("Space");
+  for (let i = 0; i < 60; i++) {
+    const selected = (
+      await call("app_view", {
+        action: "get",
+        viewId: "local-human",
+      })
+    ).selection;
+    if (
+      selected.some(
+        (item: any) => item.presentationId === contextFixture.created.linCard,
+      )
+    )
+      break;
+    await page.waitForTimeout(100);
+  }
+  await untilUiSelection(1);
+  await contextCardAt(contextFixture.created.chapterCard).press(
+    `${primaryModifier}+Space`,
+  );
+  await untilUiSelection(2);
+  const toolRail = frame
+    .locator(".app-rail")
+    .getByRole("button", { name: "组件", exact: true });
+  const toolsPanel = frame.getByRole("complementary", { name: "组件工具箱" });
+  if (!(await toolsPanel.isVisible())) await toolRail.click();
+  await toolsPanel
+    .getByRole("button", { name: "交叉情境", exact: true })
+    .click();
+  const contextCard = frame
+    .locator(".component-card")
+    .filter({ hasText: "林舟 × 第五章" });
+  await contextCard.waitFor();
+  const contextId = (await contextCard.getAttribute("data-object-id"))!;
+  const contextPresentation =
+    await contextCard.getAttribute("data-instance-id");
+  const contextRead = await call("sand_read", {
+    ids: [contextId],
+    include: ["relations"],
+  });
+  assert.deepEqual(
+    contextRead.objects[0].relations
+      .filter((link: any) => link.kind === "base.involves")
+      .map((link: any) => link.otherId)
+      .sort(),
+    [contextFixture.created.lin, contextFixture.created.chapter].sort(),
+  );
+  await toolsPanel
+    .getByRole("button", { name: "收起面板", exact: true })
+    .click();
+  await contextCard
+    .getByRole("button", { name: "进入白板", exact: true })
+    .evaluate((button: HTMLButtonElement) => button.click());
+  const suggestions = frame.getByRole("complementary", {
+    name: "符合这次交叉的内容",
+  });
+  const suggested = suggestions.getByRole("button", {
+    name: "两方交叉事件",
+    exact: true,
+  });
+  await suggested.waitFor();
+  const contextView = await call("app_view", {
+    action: "get",
+    viewId: "local-human",
+  });
+  assert.equal(contextView.navStack.at(-1)?.boardId, intersectionHome);
+  assert.equal(contextView.navStack.at(-1)?.enteredFrom, contextPresentation);
+  assert.equal(
+    await suggestions.getByText("单方事件", { exact: true }).count(),
+    0,
+  );
+  const readScene = async () =>
+    (
+      await call("sand_read", {
+        ids: [contextFixture.created.scene],
+        include: ["relations", "presentations"],
+      })
+    ).objects[0];
+  const beforeDrop = await readScene();
+  const drop = frame.locator(".flow-canvas");
+  const target = await drop.boundingBox();
+  assert.ok(target);
+  await suggested.dragTo(drop, {
+    targetPosition: { x: target.width * 0.6, y: 260 },
+  });
+  await frame
+    .locator(`[data-object-id="${contextFixture.created.scene}"]`)
+    .waitFor();
+  const placedScene = await readScene();
+  assert.deepEqual(placedScene.relations, beforeDrop.relations);
+  assert.ok(
+    placedScene.presentations.some((entry: any) => entry.boardId === contextId),
+  );
+  await toolRail.click();
+  await toolsPanel.getByRole("button", { name: "便签", exact: true }).click();
+  const noteDraft = frame.getByRole("dialog", { name: /填写.*便签/ });
+  await noteDraft.getByRole("checkbox", { name: "林舟", exact: true }).check();
+  await noteDraft
+    .getByRole("checkbox", { name: "第五章", exact: true })
+    .uncheck();
+  await noteDraft
+    .getByRole("button", { name: "创建组件", exact: true })
+    .click();
+  await noteDraft.waitFor({ state: "hidden" });
+  const added = (
+    await call("sand_query", {
+      boardId: contextId,
+      types: ["base.note"],
+    })
+  ).rows.find((row: any) => row.id !== contextFixture.created.scene);
+  assert.ok(added);
+  const addedRead = (
+    await call("sand_read", { ids: [added.id], include: ["relations"] })
+  ).objects[0];
+  assert.deepEqual(
+    addedRead.relations.map((link: any) => [link.kind, link.otherId]),
+    [["base.related", contextFixture.created.lin]],
+  );
+  await frame
+    .locator(".breadcrumbs")
+    .getByRole("button", { name: "返回", exact: true })
+    .click();
+  await contextCardAt(contextFixture.created.chapterCard).press("Space");
+  await frame
+    .getByRole("region", { name: "参与的交叉情境" })
+    .getByRole("button", { name: "林舟 × 第五章", exact: true })
+    .waitFor();
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",

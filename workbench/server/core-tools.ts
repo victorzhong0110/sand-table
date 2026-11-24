@@ -9,6 +9,8 @@ import {
   CommandError,
   context,
   historyList,
+  INTERSECTION_QUERY_DEFAULT,
+  INTERSECTION_QUERY_MAX,
   jump,
   listTypes,
   parsePublicCommands,
@@ -82,27 +84,43 @@ export function registerCoreTools(
   registrar.tool(
     "sand_query",
     "Find objects by board, type, text or relation. Returns short rows with ids; use sand_read for full content.",
-    {
-      boardId: z.string().min(1).optional(),
-      types: z.array(z.string().min(1)).max(20).optional(),
-      text: z.string().optional(),
-      relatedTo: z
-        .object({
-          id: z.string().min(1),
-          kind: z.string().min(1).optional(),
-          direction: z.enum(["out", "in", "both"]).optional(),
-        })
-        .optional(),
-      order: z.enum(["updated", "title"]).optional(),
-      limit: z.number().int().min(1).max(50).optional(),
-      cursor: z.string().min(1).optional(),
-    },
+    z
+      .object({
+        boardId: z.string().min(1).optional(),
+        types: z.array(z.string().min(1)).max(20).optional(),
+        text: z.string().optional(),
+        relatedTo: z
+          .object({
+            id: z.string().min(1),
+            kind: z.string().min(1).optional(),
+            direction: z.enum(["out", "in", "both"]).optional(),
+          })
+          .optional(),
+        relatedToAll: z
+          .array(z.string().min(1))
+          .min(2)
+          .max(INTERSECTION_QUERY_MAX)
+          .optional(),
+        order: z.enum(["updated", "title"]).optional(),
+        limit: z.number().int().min(1).max(INTERSECTION_QUERY_MAX).optional(),
+        cursor: z.string().min(1).optional(),
+      })
+      .refine(
+        ({ relatedToAll, limit }) =>
+          relatedToAll !== undefined || limit === undefined || limit <= 50,
+        { path: ["limit"], message: "普通查询每页最多 50 条。" },
+      )
+      .meta({
+        if: { not: { required: ["relatedToAll"] } },
+        then: { properties: { limit: { maximum: 50 } } },
+      }),
     (args, ctx) =>
       fitQuery(ctx.db, ctx.registry, {
         ...(args.boardId ? { boardId: args.boardId } : {}),
         ...(args.types ? { types: args.types } : {}),
         ...(args.text ? { text: args.text } : {}),
         ...(args.relatedTo ? { relatedTo: args.relatedTo } : {}),
+        ...(args.relatedToAll ? { relatedToAll: args.relatedToAll } : {}),
         ...(args.order ? { order: args.order } : {}),
         ...(args.limit ? { limit: args.limit } : {}),
         ...(args.cursor ? { cursor: args.cursor } : {}),
@@ -262,7 +280,9 @@ function fitQuery(
   registry: Parameters<typeof query>[1],
   filter: Parameters<typeof query>[2],
 ) {
-  let limit = filter.limit ?? QUERY_DEFAULT_LIMIT;
+  let limit =
+    filter.limit ??
+    (filter.relatedToAll ? INTERSECTION_QUERY_DEFAULT : QUERY_DEFAULT_LIMIT);
   let result = query(db, registry, { ...filter, limit });
   while (limit > 1 && overBudget(modelText(result))) {
     limit = Math.max(1, Math.floor(limit / 2));

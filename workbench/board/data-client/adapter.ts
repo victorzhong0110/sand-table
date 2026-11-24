@@ -55,7 +55,11 @@ import type {
   V3PresentationRow,
   V3RelationRow,
 } from "./store.ts";
-import { detachChildren, type ArrangeItem } from "../canvas/arrange.ts";
+import {
+  ARRANGE_COMMAND_LIMIT,
+  detachChildren,
+  type ArrangeItem,
+} from "../canvas/arrange.ts";
 
 /** v3 类型 → 现有组件类型。 */
 const V2_TYPE_BY_V3: Record<string, string> = {
@@ -73,6 +77,7 @@ const V2_TYPE_BY_V3: Record<string, string> = {
   "base.reasoning": "reasoning",
   "base.comparison": "comparison",
   "base.board": "board",
+  "base.context": "board",
   "novel.character": "character",
   "novel.event": "event",
   "novel.chapter": "chapter",
@@ -161,6 +166,7 @@ const FIELD_V2_TO_V3: Record<string, Record<string, string>> = {
  */
 export const V3_FIELDS: Record<string, string[]> = {
   "base.board": [],
+  "base.context": [],
   "base.frame": [],
   "base.note": ["body"],
   "base.heading": ["level", "text"],
@@ -279,7 +285,7 @@ export function v2DataOf(
   if (v3Type === "base.media") {
     if (typeof out.blob === "string") out.assetId = out.blob;
   }
-  if (v3Type === "base.board" && objectId) {
+  if (isBoardType(v3Type) && objectId) {
     /* 现有界面用 spaceId 找到「进入白板」要去的那块白板。 */
     out.spaceId = objectId;
   }
@@ -311,8 +317,8 @@ export function v3DataOf(
   return out;
 }
 
-/** 白板对象（base.board）是不是一块可以进入的白板。 */
-const isBoardType = (type: string) => type === "base.board";
+const isBoardType = (type: string) =>
+  type === "base.board" || type === "base.context";
 
 /** 一行对象 → 现有的内容对象。 */
 function toContentObject(row: V3ObjectRow): WorkspaceObject {
@@ -552,7 +558,14 @@ export function toBoard(
   const addSpace = (id: string, title: string, parentId?: string) => {
     if (spaceIds.has(id)) return;
     spaceIds.add(id);
-    spaces.push({ id, title, ...(parentId ? { parentId } : {}) });
+    spaces.push({
+      id,
+      title,
+      ...(cache.objects.get(id)?.type === "base.context"
+        ? { kernelType: "base.context" }
+        : {}),
+      ...(parentId ? { parentId } : {}),
+    });
   };
   /* 摆放着某个白板对象的那块白板，就是它的父白板。 */
   const parentOf = (objectId: string): string | undefined => {
@@ -840,6 +853,29 @@ export function toCommands(op: any, ctx: WriteContext): V3Command[] {
       /* 展示也要一个 ref：内核回传 created 的时候才知道新卡片的编号，
          选中要的是展示编号（v2 里建完就选中，属性面板会打开）。 */
       commands.push(place("@new", ctx.boardId, "newP"));
+      const addContextLinks = (targetIds: unknown, kind: string) => {
+        if (!Array.isArray(targetIds)) return;
+        for (const targetId of new Set(targetIds)) {
+          if (
+            typeof targetId !== "string" ||
+            !targetId ||
+            targetId.startsWith("@")
+          )
+            throw Error("参与对象无效，请重新选择。");
+          commands.push({
+            op: "relation.create",
+            sourceId: "@new",
+            targetId,
+            kind,
+          });
+        }
+      };
+      if (v3Type === "base.context")
+        addContextLinks(op.contextParticipants, "base.involves");
+      if (ctx.objects.get(ctx.boardId)?.type === "base.context")
+        addContextLinks(op.contextDefaults, "base.related");
+      if (commands.length > ARRANGE_COMMAND_LIMIT)
+        throw Error(ARRANGE_LIMIT_MESSAGE);
       /* 新建的白板里先放预设内容：预设也是对象与展示。 */
       if (v2Type === "board") {
         const definitions = BOARD_PRESETS[String(data.preset ?? "")] ?? [];

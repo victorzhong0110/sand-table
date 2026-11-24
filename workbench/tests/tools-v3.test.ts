@@ -285,6 +285,27 @@ test("app_bindings 逐次验证工作空间、关系槽和目标", async () => {
   }
 });
 
+test("多方交叉查询独立使用 200 条的分页上限", async () => {
+  const { client, close } = await open();
+  try {
+    const { tools } = await client.listTools();
+    const schema = tools.find(({ name }) => name === "sand_query")?.inputSchema;
+    assert.deepEqual(schema?.then, { properties: { limit: { maximum: 50 } } });
+    const normal = await client.callTool({
+      name: "sand_query",
+      arguments: { limit: 51 },
+    });
+    assert.equal(normal.isError, true);
+    const intersection = await call(client, "sand_query", {
+      relatedToAll: ["first", "second"],
+      limit: 200,
+    });
+    assert.equal(intersection.isError, false, intersection.text);
+  } finally {
+    await close();
+  }
+});
+
 test("完整流程：状态、类型、写入、查询、读回、撤销、重做", async () => {
   const session = await open();
   try {

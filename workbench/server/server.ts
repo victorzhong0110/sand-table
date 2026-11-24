@@ -113,7 +113,10 @@ export function createServerV3(options: ServerOptions) {
             destructiveHint: toolOptions?.readOnly !== true,
             openWorldHint: false,
           },
-          inputSchema: z.object(shape as z.ZodRawShape),
+          inputSchema:
+            shape instanceof z.ZodObject
+              ? shape
+              : z.object(shape as z.ZodRawShape),
           _meta: Object.keys(ui).length > 0 ? { ui } : {},
         },
         async (args) => {

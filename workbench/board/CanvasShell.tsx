@@ -19,7 +19,7 @@ import type {
 import type { HistorySnapshot } from "./data-client/history.ts";
 import { safeUrl, findComponentSpec } from "./data-client/spaces.ts";
 import { v3TypeOf } from "./data-client/adapter.ts";
-import { FlowCanvas } from "./canvas/FlowCanvas.tsx";
+import { FlowCanvas, type CanvasActions } from "./canvas/FlowCanvas.tsx";
 import { Toolbox } from "./Toolbox.tsx";
 import {
   systemPrefersReducedMotion,
@@ -31,6 +31,8 @@ import { coerceTheme, type Theme } from "./theme/tokens.ts";
 import { ThemeSettings } from "./theme/ThemeSettings.tsx";
 import { PackManager } from "./packs/PackManager.tsx";
 import { CreateObjectDialog } from "./packs/CreateObjectDialog.tsx";
+import { ContextPanel } from "./context/ContextPanel.tsx";
+import { readParticipants, type Participant } from "./context/defaults.ts";
 import type { JsonSchema } from "./views/format.ts";
 import { Inspector } from "./views/Inspector.tsx";
 import { ChangePanel } from "./ChangePanel.tsx";
@@ -123,9 +125,11 @@ export function CanvasShell({
     [source, setSource] = useState<any>(),
     [shell, setShell] = useState<HostShellMessage>(EMPTY_SHELL),
     [creationError, setCreationError] = useState(""),
+    [hideSuggestions, setHideSuggestions] = useState(false),
     [pendingCreate, setPendingCreate] = useState<{
       operation: any;
       schema: JsonSchema;
+      associations?: Participant[];
     }>();
   const [aiFocus, setAIFocus] = useState<{ scope: AIScope; seq: number }>({
     scope: "board",
@@ -137,13 +141,7 @@ export function CanvasShell({
     applyNav(null);
   };
   const panelRef = useRef<HTMLElement | null>(null);
-  const centerPositionRef = useRef<
-    | ((size: {
-        width: number;
-        height: number;
-      }) => { x: number; y: number } | undefined)
-    | null
-  >(null);
+  const canvasActions = useRef<CanvasActions>(null);
   const railRefs = useRef<Partial<Record<NavId, HTMLButtonElement | null>>>({});
   const navRef = useRef(nav);
   const createSequence = useRef(0);
@@ -157,6 +155,11 @@ export function CanvasShell({
   const view = b.views[viewId],
     selected = b.instances.find((c) => c.id === view?.selection.at(-1)),
     object = b.objects.find((o) => o.id === selected?.objectId);
+  const contextBoard = b.spaces.find(
+    (space) =>
+      space.id === view?.spaceId && space.kernelType === "base.context",
+  );
+  const showContext = Boolean(contextBoard && !hideSuggestions && !nav);
   const shownWidth = nav === "settings" ? Math.max(width, 420) : width;
   useEffect(() => {
     createSequence.current += 1;
@@ -286,14 +289,46 @@ export function CanvasShell({
   const requestCreate = (operation: any, requiresFields: boolean) => {
     const sequence = ++createSequence.current;
     setCreationError("");
-    if (!requiresFields || operation.objectId) {
+    const type = v3TypeOf(operation.type, operation.data ?? {});
+    if (operation.objectId) {
+      void operate(operation);
+      return;
+    }
+    if (type === "base.context") {
+      const participants = new Map<string, string>();
+      const ids = new Set(
+        canvasActions.current?.selectedIds() ?? view?.selection ?? [],
+      );
+      const selectedInstances = b.instances.filter((item) => ids.has(item.id));
+      selectedInstances.sort(
+        (left, right) =>
+          left.rect.x - right.rect.x || left.rect.y - right.rect.y,
+      );
+      for (const instance of selectedInstances) {
+        if (instance.objectId)
+          participants.set(instance.objectId, instance.title || "未命名");
+      }
+      const title = Array.from([...participants.values()].join(" × "))
+        .slice(0, 300)
+        .join("");
+      operation = {
+        ...operation,
+        title: title || "交叉情境",
+        contextParticipants: [...participants.keys()],
+      };
+    }
+    if (!requiresFields && !contextBoard) {
       void operate(operation);
       return;
     }
     void (async () => {
       try {
-        const type = v3TypeOf(operation.type, operation.data ?? {});
-        const result = await call("sand_types", { types: [type] });
+        const [result, associations] = await Promise.all([
+          call("sand_types", { types: [type] }),
+          contextBoard
+            ? readParticipants(call, b.workspaceId, contextBoard.id)
+            : undefined,
+        ]);
         if (sequence !== createSequence.current) return;
         if (
           operation.workspaceId !== createScope.current.workspaceId ||
@@ -305,7 +340,15 @@ export function CanvasShell({
         );
         if (!spec?.schema)
           throw Error("组件类型已不可用，请检查组件包后重试。");
-        setPendingCreate({ operation, schema: spec.schema });
+        if (!requiresFields && !associations?.length) {
+          await operate(operation);
+          return;
+        }
+        setPendingCreate({
+          operation,
+          schema: spec.schema,
+          associations,
+        });
       } catch (e) {
         if (sequence === createSequence.current)
           setCreationError(e instanceof Error ? e.message : String(e));
@@ -332,7 +375,7 @@ export function CanvasShell({
       width: size?.width || size_?.width || 280,
       height: size?.height || size_?.height || 180,
     };
-    const centered = centerPositionRef.current?.(componentSize);
+    const centered = canvasActions.current?.centerPosition(componentSize);
     requestCreate(
       {
         kind: "create",
@@ -384,7 +427,10 @@ export function CanvasShell({
       setFocusRevision((n) => n + 1);
       return true;
     }
-    if (objectRow?.type === "base.board") {
+    if (
+      objectRow?.type === "base.board" ||
+      objectRow?.type === "base.context"
+    ) {
       await operate({ kind: "navigate", spaceId: objectId });
       return true;
     }
@@ -680,6 +726,11 @@ export function CanvasShell({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
+            {contextBoard && !showContext && !nav && (
+              <button type="button" onClick={() => setHideSuggestions(false)}>
+                交叉建议
+              </button>
+            )}
           </div>
           <ViewRuntimeContext.Provider
             value={
@@ -694,12 +745,12 @@ export function CanvasShell({
               edgePan={edgePan}
               edgeSpeed={edgeSpeed}
               motionPaused={nav === "settings"}
-              centerPositionRef={centerPositionRef}
+              actionsRef={canvasActions}
               requestCreate={requestCreate}
               insets={shellOcclusion({
                 panelWidth: nav ? shownWidth : null,
                 inspectorRight: Boolean(panel),
-                contextLeft: false,
+                contextLeft: showContext,
               })}
               query={query}
               kind="all"
@@ -715,6 +766,17 @@ export function CanvasShell({
               }}
             />
           </ViewRuntimeContext.Provider>
+          {contextBoard && showContext && (
+            <ContextPanel
+              key={`${b.workspaceId}:${contextBoard.id}`}
+              workspaceId={b.workspaceId}
+              objectId={contextBoard.id}
+              revision={b.contentRevision}
+              call={call}
+              onClose={() => setHideSuggestions(true)}
+              onPlace={(row) => create(row.type, row.title, {}, row.id)}
+            />
+          )}
           {view &&
             !b.instances.some((c) => c.spaceId === view.spaceId) &&
             !query && (
@@ -890,11 +952,13 @@ export function CanvasShell({
             title={pendingCreate.operation.title}
             schema={pendingCreate.schema}
             initial={pendingCreate.operation.data ?? {}}
+            associations={pendingCreate.associations}
             onCancel={() => setPendingCreate(undefined)}
-            onCreate={async (data) => {
+            onCreate={async (data, associationIds) => {
               const result = await operate({
                 ...pendingCreate.operation,
                 data,
+                contextDefaults: associationIds,
                 reportError: true,
               });
               if (result?.error)

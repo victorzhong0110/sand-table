@@ -223,6 +223,7 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
   types?: string[];          // ≤20
   text?: string;             // 在标题和数据的文字里查找，不区分大小写
   relatedTo?: { id: string; kind?: string; direction?: "out" | "in" | "both" };
+  relatedToAll?: string[];   // 2 到 200 个参与对象，按 id 去重
   order?: "updated" | "title"; // 缺省 updated（最近修改在前）
   limit?: number;            // 缺省 20，最大 50
   cursor?: string;           // 上一页返回的 nextCursor
@@ -230,6 +231,8 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
 ```
 
 输出：`{ rows: [{id, type, title, summary, version, updatedAt, typeVersion, typeAvailable, migrationError?}], nextCursor: string | null, total: number }`。`summary` 取类型 `display.summary` 的第一个有值字段，用迁移后的数据，去掉 Markdown 标记后截取 160 字。`typeVersion` 是数据结构版本，不是对象的编辑版本 `version`。迁移失败时带 `migrationError`，`typeVersion` 仍是库里的旧版本。
+
+指定 `relatedToAll` 时，每条结果与每个参与对象都有未删除的直接关系，方向和类型不限。参与对象自身及交叉情境不出现在结果中。按对象 id 排序并使用上一页末项的 id 作游标，默认每页 50 条，最大 200 条。每条结果附 `participantRelations: [{ participantId, title, kind, label, direction, status }]`，每位参与者选取一条关系作为查询依据，优先显示已确认关系，再按关系 id 排序。label 为对应方向的关系名称，只有推测关系时保留推测状态。
 
 #### `sand_read`
 
