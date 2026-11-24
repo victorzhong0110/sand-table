@@ -32,7 +32,12 @@ export {
   readComments,
   type CommentEntry,
 } from "./comments.ts";
-export { expandBindings, readBindings, readObjectVersion } from "./bindings.ts";
+export {
+  expandBindings,
+  listObjectVersions,
+  readBindings,
+  readObjectVersion,
+} from "./bindings.ts";
 export type {
   ExpandedBindings,
   GraphEdge,

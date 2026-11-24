@@ -201,6 +201,46 @@ export function migrateChart(
   return { ...rest, ...(points === undefined ? {} : { legacyPoints: points }) };
 }
 
+export function migrateComparison(
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  const { left, right, legacy, ...rest } = data;
+  if (left === undefined && right === undefined) return data;
+  const previous =
+    legacy && typeof legacy === "object" && !Array.isArray(legacy)
+      ? legacy
+      : {};
+  return {
+    ...rest,
+    legacy: {
+      ...previous,
+      ...(left === undefined ? {} : { left }),
+      ...(right === undefined ? {} : { right }),
+    },
+  };
+}
+
+const comparisonSide = (label: string) => ({
+  type: "object",
+  additionalProperties: false,
+  "x-sand-label": label,
+  "x-sand-widget": "list",
+  properties: {
+    title: {
+      type: "string",
+      maxLength: 200,
+      "x-sand-label": "方案名称",
+      "x-sand-widget": "text",
+    },
+    text: {
+      type: "string",
+      maxLength: 2000,
+      "x-sand-label": "方案内容",
+      "x-sand-widget": "markdown",
+    },
+  },
+});
+
 export const basePack: PackSpec = {
   id: "base",
   title: "基础",
@@ -1125,52 +1165,43 @@ export const basePack: PackSpec = {
     {
       type: "base.comparison",
       title: "比较",
-      description: "两个方案和一句结论。",
+      description: "并排对照绑定对象或它们的指定版本。",
       icon: "comparison",
-      version: 1,
+      version: 2,
       schema: {
         type: "object",
         additionalProperties: false,
         properties: {
-          left: {
+          legacy: {
             type: "object",
             additionalProperties: false,
-            properties: {
-              title: {
-                type: "string",
-                maxLength: 200,
-                "x-sand-label": "方案名称",
-                "x-sand-widget": "text",
-              },
-              text: {
-                type: "string",
-                maxLength: 2000,
-                "x-sand-label": "方案内容",
-                "x-sand-widget": "markdown",
-              },
-            },
-            "x-sand-label": "方案一",
+            "x-sand-label": "已有内联内容",
             "x-sand-widget": "list",
+            properties: {
+              left: comparisonSide("方案一"),
+              right: comparisonSide("方案二"),
+            },
           },
-          right: {
+          pinnedVersions: {
             type: "object",
             additionalProperties: false,
+            "x-sand-label": "固定版本",
+            "x-sand-widget": "list",
+            "x-sand-hidden": true,
             properties: {
-              title: {
-                type: "string",
-                maxLength: 200,
-                "x-sand-label": "方案名称",
-                "x-sand-widget": "text",
+              left: {
+                type: "integer",
+                minimum: 1,
+                "x-sand-label": "左侧版本",
+                "x-sand-widget": "integer",
               },
-              text: {
-                type: "string",
-                maxLength: 2000,
-                "x-sand-label": "方案内容",
-                "x-sand-widget": "markdown",
+              right: {
+                type: "integer",
+                minimum: 1,
+                "x-sand-label": "右侧版本",
+                "x-sand-widget": "integer",
               },
             },
-            "x-sand-label": "方案二",
-            "x-sand-widget": "list",
           },
           conclusion: {
             type: "string",
@@ -1182,9 +1213,27 @@ export const basePack: PackSpec = {
       },
       display: {
         material: "paper",
-        defaultSize: { width: 340, height: 220 },
-        summary: ["left", "right"],
+        defaultSize: { width: 620, height: 365 },
+        summary: ["legacy", "conclusion"],
+        view: "comparison",
       },
+      relationSlots: [
+        {
+          key: "left",
+          label: "左侧",
+          kind: "base.compare_left",
+          direction: "out",
+          many: false,
+        },
+        {
+          key: "right",
+          label: "右侧",
+          kind: "base.compare_right",
+          direction: "out",
+          many: false,
+        },
+      ],
+      migrations: [{ from: 1, migrate: migrateComparison }],
     },
     {
       type: "base.tour",
@@ -1268,6 +1317,20 @@ export const basePack: PackSpec = {
       allowsInferred: false,
       sourceTypes: ["base.chart"],
       targetTypes: ["base.chart"],
+    },
+    {
+      kind: "base.compare_left",
+      title: "左侧比较对象",
+      inverseTitle: "作为比较左侧",
+      allowsInferred: false,
+      sourceTypes: ["base.comparison"],
+    },
+    {
+      kind: "base.compare_right",
+      title: "右侧比较对象",
+      inverseTitle: "作为比较右侧",
+      allowsInferred: false,
+      sourceTypes: ["base.comparison"],
     },
     {
       kind: "base.timeline_item",

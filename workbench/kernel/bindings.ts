@@ -465,25 +465,9 @@ export function readObjectVersion(
       return { revision: currentRevision, ok: false, reason: unavailable };
     if (current.version === input.version)
       return { revision: currentRevision, ok: true, row: current };
-    const candidates: HistoricalObjectRow[] = [];
-    const history = db
-      .prepare("SELECT changes FROM history ORDER BY seq")
-      .all() as { changes: string }[];
-    for (const entry of history)
-      for (const change of JSON.parse(entry.changes) as Change[]) {
-        if (change.table !== "objects" || change.id !== input.targetId)
-          continue;
-        for (const snapshot of [change.before, change.after]) {
-          const row = fromSnapshot(snapshot);
-          if (
-            row &&
-            !row.deleted &&
-            row.id === input.targetId &&
-            row.version === input.version
-          )
-            candidates.push(row);
-        }
-      }
+    const candidates = [...objectHistory(db, input.targetId)].filter(
+      (row) => row.version === input.version,
+    );
     if (!candidates.length)
       return {
         revision: currentRevision,
@@ -501,5 +485,52 @@ export function readObjectVersion(
         reason: "这个版本存在不一致的历史记录，无法确定内容。",
       };
     return { revision: currentRevision, ok: true, row: candidates[0]! };
+  });
+}
+
+function* objectHistory(db: Db, id: string) {
+  const history = db
+    .prepare("SELECT changes FROM history ORDER BY seq")
+    .iterate() as Iterable<{ changes: string }>;
+  for (const entry of history)
+    for (const change of JSON.parse(entry.changes) as Change[]) {
+      if (change.table !== "objects" || change.id !== id) continue;
+      for (const snapshot of [change.before, change.after]) {
+        const row = fromSnapshot(snapshot);
+        if (row && !row.deleted && row.id === id) yield row;
+      }
+    }
+}
+
+export function listObjectVersions(
+  db: Db,
+  registry: Registry,
+  objectId: string,
+) {
+  return readOnly(db, () => {
+    const current = targets(db, registry, objectId, "self").get(objectId);
+    if (!current)
+      throw new CommandError("NOT_FOUND", "找不到要比较的对象。", null);
+    const unavailable = available(db, registry, current);
+    if (unavailable) throw new CommandError("NOT_FOUND", unavailable, null);
+    const known = new Map<number, HistoricalObjectRow>();
+    const ambiguous = new Set<number>();
+    for (const row of objectHistory(db, objectId)) {
+      const previous = known.get(row.version);
+      if (previous && !isDeepStrictEqual(previous, row))
+        ambiguous.add(row.version);
+      else known.set(row.version, row);
+    }
+    const versions = [...known.values()]
+      .filter(
+        (row) => row.version !== current.version && !ambiguous.has(row.version),
+      )
+      .map((row) => ({ version: row.version, at: row.updatedAt }))
+      .sort((a, b) => b.version - a.version);
+    return {
+      current: current.version,
+      truncated: versions.length > 100,
+      versions: versions.slice(0, 100),
+    };
   });
 }

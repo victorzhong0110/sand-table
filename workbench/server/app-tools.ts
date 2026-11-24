@@ -17,6 +17,7 @@ import {
   historyList,
   jump,
   listActivities,
+  listObjectVersions,
   parsePublicCommands,
   readView,
   readBindings,
@@ -265,13 +266,25 @@ export function registerAppTools(
 
   registrar.tool(
     "app_history",
-    "The person's undo, redo and jump along the board history.",
+    "Inspect board or object history and move the history cursor.",
     {
-      action: z.enum(["list", "undo", "redo", "jump"]),
+      action: z.enum(["list", "undo", "redo", "jump", "object-versions"]),
+      workspaceId: z.string().min(1).optional(),
+      objectId: z.string().min(1).optional(),
       entryId: z.string().min(1).optional(),
       limit: z.number().int().min(1).max(100).optional(),
     },
     (args, ctx) => {
+      if (args.action === "object-versions") {
+        if (!args.workspaceId || !args.objectId)
+          throw new CommandError(
+            "INVALID_DATA",
+            "请选择要查版本的工作空间和对象。",
+            null,
+          );
+        assertSameWorkspace(host.session().workspaceId, args.workspaceId);
+        return listObjectVersions(ctx.db, ctx.registry, args.objectId);
+      }
       if (args.action === "list") return historyList(ctx.db, args.limit ?? 20);
       if (args.action === "undo")
         return navigate(() => undo(ctx.db, ctx.actor));

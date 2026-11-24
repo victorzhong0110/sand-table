@@ -13,6 +13,11 @@ import {
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { ShortcutHelp } from "../ShortcutHelp.tsx";
 import { CommentProvider } from "../comments/CommentBadge.tsx";
+import {
+  comparisonCommands,
+  type ComparisonSource,
+} from "../compare/commands.ts";
+import { HistoryComparison } from "../compare/HistoryComparison.tsx";
 import { blocksCanvasShortcut } from "../keyboard.ts";
 import type { Board } from "../data-client/model.ts";
 import {
@@ -269,6 +274,12 @@ function FlowSurface({
   const [editing, setEditing] = useState<InlineEdit>();
   const [notice, setNotice] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
+  const [compareHistory, setCompareHistory] = useState<{
+    workspace: string;
+    board: string;
+    source: ComparisonSource;
+    position: { x: number; y: number };
+  }>();
   const [menu, setMenu] = useState<{
     x: number;
     y: number;
@@ -1872,6 +1883,30 @@ function FlowSurface({
     setMenu({ x: point.x, y: point.y, targetId: id, ids });
   };
 
+  const comparisonSources = (ids: string[]) => {
+    const boardById = new Map(boardItems.map((item) => [item.id, item]));
+    const selected = ids
+      .flatMap((id) => {
+        const instance = b.instances.find(
+          (item) => item.id === id && item.spaceId === view.spaceId,
+        );
+        return instance?.objectId
+          ? [{ objectId: instance.objectId, ...boardOrigin(id, boardById) }]
+          : [];
+      })
+      .sort(
+        (a, b) =>
+          a.x - b.x || a.y - b.y || a.objectId.localeCompare(b.objectId),
+      );
+    const objectIds = new Set(selected.map(({ objectId }) => objectId));
+    return [...objectIds].flatMap((id) => {
+      const object = b.contentObjects.find((item) => item.id === id);
+      return object && typeof object.version === "number"
+        ? [{ id, title: object.title, version: object.version }]
+        : [];
+    });
+  };
+
   const performMenu = (action: MenuAction) => {
     const current = menu;
     if (!current || !view) return;
@@ -1925,6 +1960,45 @@ function FlowSurface({
         }).catch((error) =>
           showNotice(error instanceof Error ? error.message : "图表未能生成。"),
         );
+        return;
+      }
+      case "compare-selection": {
+        const [left, right, extra] = comparisonSources(ids);
+        if (!left || !right || extra) {
+          showNotice("请选择两个不同的对象。");
+          return;
+        }
+        const position = flow.screenToFlowPosition({
+          x: current.x + 20,
+          y: current.y + 20,
+        });
+        void call("app_edit", {
+          workspaceId: b.workspaceId,
+          commands: comparisonCommands({
+            boardId: view.spaceId,
+            left,
+            right,
+            position,
+          }),
+        }).catch((reason) =>
+          showNotice(
+            reason instanceof Error ? reason.message : "无法创建比较。",
+          ),
+        );
+        return;
+      }
+      case "compare-history": {
+        const [source] = comparisonSources(ids);
+        if (!source || ids.length !== 1 || !b.workspaceId) return;
+        setCompareHistory({
+          workspace: b.workspaceId,
+          board: view.spaceId,
+          source,
+          position: flow.screenToFlowPosition({
+            x: current.x + 20,
+            y: current.y + 20,
+          }),
+        });
         return;
       }
       case "edit": {
@@ -2283,6 +2357,10 @@ function FlowSurface({
           targetIsTable:
             b.instances.find((item) => item.id === menu.targetId)
               ?.kernelType === "base.table",
+          comparePair:
+            menu.ids.length === 2 && comparisonSources(menu.ids).length === 2,
+          compareHistory:
+            menu.ids.length === 1 && comparisonSources(menu.ids).length === 1,
           canFrame: framePlan(boardItems, menu.ids) !== null,
         })
       : paneMenu();
@@ -2647,6 +2725,28 @@ function FlowSurface({
           />
         )}
         {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
+        {compareHistory?.workspace === b.workspaceId &&
+          compareHistory?.board === view.spaceId && (
+            <HistoryComparison
+              key={compareHistory.source.id}
+              source={compareHistory.source}
+              workspaceId={compareHistory.workspace}
+              call={call}
+              create={(source, pinnedVersions) =>
+                call("app_edit", {
+                  workspaceId: compareHistory.workspace,
+                  commands: comparisonCommands({
+                    boardId: compareHistory.board,
+                    left: source,
+                    right: source,
+                    position: compareHistory.position,
+                    pinnedVersions,
+                  }),
+                })
+              }
+              close={() => setCompareHistory(undefined)}
+            />
+          )}
       </CanvasApiProvider>
     </TypeCatalogProvider>
   );

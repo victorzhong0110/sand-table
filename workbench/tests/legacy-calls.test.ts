@@ -104,6 +104,56 @@ test("人物姓名写到标题上，不把 name 交给内核", () => {
   ]);
 });
 
+test("旧比较卡的单侧更新保留另一侧", () => {
+  const object: V3ObjectRow = {
+    id: "o1",
+    type: "base.comparison",
+    typeVersion: 2,
+    title: "比较",
+    version: 5,
+    source: null,
+    createdAt: 0,
+    createdBy: "human",
+    updatedAt: 0,
+    updatedBy: "human",
+    rev: 0,
+    deleted: false,
+    data: {
+      legacy: { left: { text: "旧左侧" }, right: { text: "保留右侧" } },
+      conclusion: "保留结论",
+    },
+  };
+  const presentation = {
+    id: "p1",
+    objectId: "o1",
+    boardId: "overview",
+  } as V3PresentationRow;
+  const result = toCommands(
+    {
+      kind: "update",
+      instanceId: "p1",
+      expectedVersion: 5,
+      baseData: { left: { text: "旧左侧" } },
+      data: { left: { text: "改动左侧" } },
+    },
+    {
+      boardId: "overview",
+      objects: new Map([[object.id, object]]),
+      presentations: new Map([[presentation.id, presentation]]),
+    },
+  );
+  assert.deepEqual(result, [
+    {
+      op: "object.update",
+      id: "o1",
+      expectedVersion: 5,
+      set: {
+        legacy: { left: { text: "改动左侧" }, right: { text: "保留右侧" } },
+      },
+    },
+  ]);
+});
+
 test("一次移除多份展示合成一批删除", () => {
   const presentations = new Map([
     ["p1", { id: "p1" } as V3PresentationRow],

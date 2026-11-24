@@ -323,7 +323,7 @@ boardContents 和 changesSince 的 revision 必须与返回内容来自同一只
 | `app_changes` | `{ since }` | 返回 `changesSince`（对象数据是迁移后的投影），界面每秒调用一次 |
 | `app_bindings` | `{ action: "read" \| "version" \| "expand", workspaceId, objectId, slot, ids?, fields?, limit?, cursor?, targetId?, version? }` | 读取组件声明的槽中已绑定对象或其中一个对象的指定版本。读取版本须给 `targetId` 和 `version`。工作空间、槽和目标逐次校验，`self` 只指读取组件自身。展开仅接受内置关系图的 `focus`，按持久配置返回节点、边、修订号和截断标记 |
 | `app_edit` | 同 `sand_edit` | 人的写入，`actor` 为 human |
-| `app_history` | 同 `sand_history` | 人的撤销、重做、跳转 |
+| `app_history` | 同 `sand_history`，或 `{ action: "object-versions", workspaceId, objectId }` | 人的撤销、重做、跳转，或读取单个对象的当前版本号及最近 100 个可比较历史版本的元数据。历史内容通过比较组件的绑定槽读取 |
 | `app_view` | `{ action: "get" \| "select" \| "camera" \| "navigate", viewId, boardId?, ... }` | 视角、选区、进入或返回白板；不进历史。`get` 返回 `navStack`；`select` 与 `camera` 也接受 `boardId`，第一次调用就能登记视角，不用先 `navigate` 一次 |
 | `app_asset` | `{ action: "upload", name, mime, base64 }` / `{ action: "read", sha256 }` | 上传返回 sha256；建 `base.media` 对象由界面再调 `app_edit` |
 | `app_workspace` | `{ action: "list" \| "create" \| "switch" \| "rename" \| "delete" \| "export" \| "import", ... }` | 管理工作空间。`export`、`import` 由 T25 实现，T20 只做前五个 |

@@ -406,6 +406,9 @@ function Workbench() {
       case "app_pack":
       case "app_resource":
         return callTool(name, args);
+      case "app_history":
+        if (args.action === "object-versions") return callTool(name, args);
+        throw Error("请选择要查看版本的对象。");
       case "app_edit": {
         const result = await callTool("app_edit", args);
         await storeRef.current?.sync();
