@@ -18,7 +18,7 @@ import { createTaskChannel } from "./tasks.js";
 import { ARTIFACT_TOOL } from "./projection.js";
 import { createArtifactWriter } from "../server/host/artifacts.ts";
 import { artifact } from "../server/host/contracts.ts";
-import { migrateChart, migrateMetric, migrateTable } from "../packs/base/index.ts";
+import { migrateChart, migrateComparison, migrateMetric, migrateTable } from "../packs/base/index.ts";
 import { applyResources } from "./resources.js";
 import { registerDrawing } from "./drawing/host.js";
 import { spawn } from "node:child_process";
@@ -344,6 +344,11 @@ function mapContentData(type, data, current) {
       ("value" in next || "description" in next)) {
     const { legacy, aggregate, ...data } = migrateMetric(next);
     return { ...data, aggregate: next.aggregate ?? current?.aggregate ?? aggregate, legacy: { ...current?.legacy, ...legacy } };
+  }
+  if ((type === "comparison" || type === "base.comparison") &&
+      ("left" in next || "right" in next)) {
+    const { legacy, ...data } = migrateComparison(next);
+    return { ...data, legacy: { ...migrateComparison(current ?? {}).legacy, ...legacy } };
   }
   if (
     (type === "text" || type === "base.note") &&

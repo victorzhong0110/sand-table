@@ -268,7 +268,7 @@ v1 清单（`{version: 1, id, name, components: [...]}`）导入时自动转换�
 | `base.events` | 事件流 | 否 | `events` |
 | `base.task` | 任务清单 | 否 | `goal`、`items` |
 | `base.reasoning` | 推理 | 否 | `question`、`evidence`、`options`、`decision`、`unknowns` |
-| `base.comparison` | 比较 | 否 | `left`、`right`、`conclusion` |
+| `base.comparison` | 比较 | 否 | `legacy`（v1 的内联两侧）、`conclusion`、`pinnedVersions`（左、右侧可选版本号） |
 | `base.tour` | 导览 | 否 | `purpose`（markdown）。每一站是一条 `base.tour_stop` 关系（导览 → 站点对象），`attributes` 里存 `order`、`title`、`explanation` |
 
 关系类型：`base.related`（相关）、`base.depends_on`（依赖）、`base.supports`（支持，`requiresBasis`）、`base.compares`（比较）、`base.belongs_to`（从属）、`base.about`（关于，用于便签和讲解指向被讲解对象）、`base.tour_stop`（导览站点，`attributes.order` 为整数，`attributes.title`、`attributes.explanation` 为字符串）。
@@ -295,6 +295,8 @@ v1 清单（`{version: 1, id, name, components: [...]}`）导入时自动转换�
 ## 9. 功能组件的受控绑定（组件阶段验收）
 
 `base.comment` 以 `body` 保存 Markdown，省略 `resolved` 表示待解决。新评论随一条 `base.comments_on` 或 `base.reply_to` 在同一事务写入。范围存于根评论关系，回复继承。移除展示后局部批注保留在原对象下，详情显示原展示已移除。
+
+比较组件以 `base.compare_left` 与 `base.compare_right` 分别绑定左、右源对象。未固定版本的侧面随对象更新，固定版本通过该侧的受控槽读取；找不到时显示不可用。旧内联内容迁到 `legacy` 并保留展示。
 
 `base.data_source` 从 `base.chart` 或 `base.metric` 指向 `base.table`。`source` 槽最多绑定一个表格，图表的 `mapping.x` 与 `mapping.y` 保存列 key。没有绑定时，v1 的图表数据从 `legacyPoints` 读取。表格的行和列重命名不改变 key，清空的单元格保存为 `null`。
 

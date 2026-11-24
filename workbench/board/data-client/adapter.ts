@@ -8,7 +8,7 @@
 // base.code_snippet → code，novel.* / research.* 走现有的领域兜底分支，
 // 其余未知类型走现有的「未知组件」占位。
 
-import { migrateMetric } from "../../packs/base/index.ts";
+import { migrateComparison, migrateMetric } from "../../packs/base/index.ts";
 import type { Activity, Board, ComponentPack, SpaceActivity } from "./model.ts";
 import { componentTypes, defaultData } from "./spaces.ts";
 import type {
@@ -174,7 +174,7 @@ export const V3_FIELDS: Record<string, string[]> = {
   "base.events": ["events"],
   "base.task": ["goal", "items"],
   "base.reasoning": ["decision", "evidence", "options", "question", "unknowns"],
-  "base.comparison": ["conclusion", "left", "right"],
+  "base.comparison": ["conclusion", "legacy", "pinnedVersions"],
   "base.tour": ["legacySteps", "purpose"],
   "novel.character": ["age", "arc", "goal", "role", "traits"],
   "novel.event": ["narrativeOrder", "place", "storyTime", "summary"],
@@ -300,7 +300,8 @@ export function v3DataOf(
     data = migrateMetric(data);
   const allowed = V3_FIELDS[v3Type];
   const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(data ?? {})) {
+  const fields = v3Type === "base.comparison" ? migrateComparison(data) : data;
+  for (const [key, value] of Object.entries(fields ?? {})) {
     const name = v3FieldOf(v3Type, key);
     if (allowed && !allowed.includes(name)) continue;
     /* 现有界面这一项的类型与内核不一样：内核会整条拒绝，这一项先不写。 */
@@ -888,6 +889,17 @@ export function toCommands(op: any, ctx: WriteContext): V3Command[] {
         for (const key of Object.keys(next)) {
           /* 只写真正改动的字段：别人同时改过的字段不能被这一笔盖掉。 */
           if (JSON.stringify(base[key]) === JSON.stringify(next[key])) continue;
+          if (
+            object.type === "base.comparison" &&
+            (key === "left" || key === "right")
+          ) {
+            const prior = set.legacy ?? migrateComparison(object.data).legacy;
+            set.legacy = {
+              ...(prior as Record<string, unknown> | undefined),
+              [key]: next[key],
+            };
+            continue;
+          }
           const mapped = v3FieldOf(object.type, key);
           if (allowed && !allowed.includes(mapped)) {
             if (

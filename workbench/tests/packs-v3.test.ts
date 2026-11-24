@@ -179,12 +179,19 @@ const samples: {
     type: "base.comparison",
     ok: [
       {
-        left: { title: "方案 A", text: "内容" },
-        right: { title: "方案 B", text: "内容" },
+        legacy: {
+          left: { title: "方案 A", text: "内容" },
+          right: { title: "方案 B", text: "内容" },
+        },
         conclusion: "A 更稳",
       },
+      { pinnedVersions: { left: 1, right: 3 } },
     ],
-    bad: [{ left: { title: 1, text: "内容" } }, { conclusion: 12 }],
+    bad: [
+      { legacy: { left: { title: 1, text: "内容" } } },
+      { conclusion: 12 },
+      { pinnedVersions: { left: 0 } },
+    ],
   },
   {
     type: "base.tour",
@@ -589,6 +596,7 @@ test("每个字段都有中文标签和控件，摘要只取可见字段", () =>
         "base.metric": "metric",
         "base.relation_graph": "relation-graph",
         "base.timeline": "timeline",
+        "base.comparison": "comparison",
       };
       assert.equal(
         type.display.view,

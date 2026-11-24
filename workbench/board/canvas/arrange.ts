@@ -429,6 +429,8 @@ export function unframeCommandCount(
 export type MenuAction =
   | "edit"
   | "generate-chart"
+  | "compare-selection"
+  | "compare-history"
   | "duplicate"
   | "clone"
   | "align-left"
@@ -474,6 +476,8 @@ export function componentMenu(input: {
   targetLocked: boolean;
   targetIsFrame: boolean;
   targetIsTable?: boolean;
+  comparePair?: boolean;
+  compareHistory?: boolean;
   canFrame: boolean;
 }): MenuEntry[] {
   const distribute: MenuEntry[] = [
@@ -499,6 +503,12 @@ export function componentMenu(input: {
       : []),
     { id: "duplicate", label: "再放一份" },
     { id: "clone", label: "复制为独立对象" },
+    ...(input.comparePair
+      ? [{ id: "compare-selection" as const, label: "比较这两个" }]
+      : []),
+    ...(input.compareHistory
+      ? [{ id: "compare-history" as const, label: "比较历史版本" }]
+      : []),
     ...(input.alignCount >= 2 ? [...ALIGN_ENTRIES, ...distribute] : []),
     { id: "front", label: "置顶" },
     { id: "back", label: "置底" },

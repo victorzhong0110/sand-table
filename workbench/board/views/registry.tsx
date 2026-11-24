@@ -39,6 +39,7 @@ import { TableView } from "../data/TableView.tsx";
 import { RelationGraphView } from "../graph/GraphView.tsx";
 import { TimelineView } from "../timeline/TimelineView.tsx";
 import type { Dimension } from "../timeline/scale.ts";
+import { CompareView } from "../compare/CompareView.tsx";
 import type { TableData } from "../data/table-model.ts";
 
 export type WidgetProps = {
@@ -113,6 +114,7 @@ export const customViews: Record<string, (props: ViewProps) => JSX.Element> = {
   metric: MetricView,
   "relation-graph": RelationGraphView,
   timeline: TimelineView,
+  comparison: CompareView,
 };
 
 export function customView(name: string | undefined) {

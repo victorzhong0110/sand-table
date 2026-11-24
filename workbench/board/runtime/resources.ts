@@ -29,6 +29,7 @@ export function createComponentRuntime(read: ChunkRead) {
     sandTableGraphLayout?: typeof import("@dagrejs/dagre");
     sandTablePdf?: { getDocument: typeof getDocument };
     sandTableChart?: unknown;
+    sandTableCompare?: unknown;
   };
 
   function startLoad(name: ComponentResource, uri: string) {

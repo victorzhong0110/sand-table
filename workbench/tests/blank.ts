@@ -4851,6 +4851,269 @@ try {
     .getByText(/原展示已移除/)
     .first()
     .waitFor();
+  await call("app_workspace", {
+    action: "create",
+    id: "compare-verify",
+    title: "比较验收",
+  });
+  await call("app_workspace", { action: "switch", id: "compare-verify" });
+  const compareHome = (await call("sand_status")).homeBoardId;
+  const comparisonFixture = await call("app_edit", {
+    commands: [
+      {
+        op: "object.create",
+        ref: "leftNote",
+        type: "base.note",
+        title: "左侧便签",
+        data: { body: "初始左稿" },
+      },
+      {
+        op: "object.create",
+        ref: "rightNote",
+        type: "base.note",
+        title: "右侧便签",
+        data: { body: "初始右稿" },
+      },
+      {
+        op: "object.create",
+        ref: "oldCompare",
+        type: "base.comparison",
+        title: "旧比较稿",
+      },
+      {
+        op: "presentation.create",
+        ref: "leftCard",
+        boardId: compareHome,
+        objectId: "@leftNote",
+        x: 80,
+        y: 160,
+      },
+      {
+        op: "presentation.create",
+        ref: "rightCard",
+        boardId: compareHome,
+        objectId: "@rightNote",
+        x: 430,
+        y: 160,
+      },
+      {
+        op: "presentation.create",
+        ref: "oldCard",
+        boardId: compareHome,
+        objectId: "@oldCompare",
+        x: 80,
+        y: 430,
+      },
+    ],
+  });
+  const oldComparisonDb = new DatabaseSync(
+    join(root, "workspaces/compare-verify/workspace.db"),
+  );
+  try {
+    oldComparisonDb
+      .prepare("UPDATE objects SET type_version = 1, data = ? WHERE id = ?")
+      .run(
+        JSON.stringify({
+          left: { text: "旧左方案" },
+          right: { text: "旧右方案" },
+        }),
+        comparisonFixture.created.oldCompare,
+      );
+  } finally {
+    oldComparisonDb.close();
+  }
+  await page.goto(c.url);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const closeCompareTools = frame
+    .getByRole("complementary", { name: "组件工具箱" })
+    .getByRole("button", { name: "收起面板", exact: true });
+  if (await closeCompareTools.isVisible()) await closeCompareTools.click();
+  const closeCompareInspector = frame
+    .getByRole("complementary", { name: "组件详情", exact: true })
+    .getByRole("button", { name: "关闭详情", exact: true });
+  const compareCard = (id: string) =>
+    frame.locator(`[data-instance-id="${id}"]`);
+  const leftNote = compareCard(comparisonFixture.created.leftCard);
+  const rightNote = compareCard(comparisonFixture.created.rightCard);
+  const oldCompare = compareCard(comparisonFixture.created.oldCard);
+  const openComparisonMenu = (card: ReturnType<typeof compareCard>) =>
+    card.evaluate((element) => {
+      const { left, top } = element.getBoundingClientRect();
+      element.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: left + 15,
+          clientY: top + 15,
+          button: 2,
+        }),
+      );
+    });
+  await oldCompare.getByText("旧左方案", { exact: true }).waitFor();
+  await oldCompare.getByText("旧右方案", { exact: true }).waitFor();
+  await leftNote.press("Space");
+  await leftNote.and(frame.locator(".selected")).waitFor();
+  await rightNote.press(`${primaryModifier}+Space`);
+  await rightNote.and(frame.locator(".selected")).waitFor();
+  if (await closeCompareInspector.isVisible())
+    await closeCompareInspector.click();
+  await openComparisonMenu(leftNote);
+  await frame
+    .getByRole("menuitem", { name: "比较这两个", exact: true })
+    .click();
+  const currentCompare = frame
+    .locator(".component-card")
+    .filter({ hasText: "左侧便签 与 右侧便签" });
+  await currentCompare
+    .getByLabel("逐行差异", { exact: true })
+    .getByText("初始左稿", { exact: true })
+    .waitFor();
+  await call("app_edit", {
+    commands: [
+      {
+        op: "object.update",
+        id: comparisonFixture.created.rightNote,
+        set: { body: "更新右稿" },
+      },
+    ],
+  });
+  await currentCompare
+    .getByLabel("逐行差异", { exact: true })
+    .getByText("更新右稿", { exact: true })
+    .waitFor();
+  const { objects: comparedNotes } = await call("sand_read", {
+    ids: [
+      comparisonFixture.created.leftNote,
+      comparisonFixture.created.rightNote,
+    ],
+  });
+  assert.deepEqual(
+    comparedNotes.map((item: { data: { body: string } }) => item.data.body),
+    ["初始左稿", "更新右稿"],
+  );
+  await page.keyboard.press("Escape");
+  await untilUiSelection(0);
+  await rightNote.press("Space");
+  await rightNote.and(frame.locator(".selected")).waitFor();
+  if (await closeCompareInspector.isVisible())
+    await closeCompareInspector.click();
+  await openComparisonMenu(rightNote);
+  await frame
+    .getByRole("menuitem", { name: "比较历史版本", exact: true })
+    .click();
+  const historyCompare = frame.getByRole("dialog", {
+    name: "比较历史版本",
+    exact: true,
+  });
+  await historyCompare
+    .getByLabel("左侧版本", { exact: true })
+    .selectOption("1");
+  await historyCompare
+    .getByRole("button", { name: "创建比较", exact: true })
+    .click();
+  const pinnedComparison = frame
+    .locator(".component-card")
+    .filter({ hasText: "右侧便签 · 版本比较" });
+  await pinnedComparison.getByText("版本 1（固定）", { exact: true }).waitFor();
+  await call("app_edit", {
+    commands: [
+      {
+        op: "object.update",
+        id: comparisonFixture.created.rightNote,
+        set: { body: "第三次修改" },
+      },
+    ],
+  });
+  await pinnedComparison.getByText("版本 3（当前）", { exact: true }).waitFor();
+  await pinnedComparison
+    .getByLabel("逐行差异", { exact: true })
+    .getByText("初始右稿", { exact: true })
+    .waitFor();
+  await pinnedComparison
+    .getByLabel("逐行差异", { exact: true })
+    .getByText("第三次修改", { exact: true })
+    .waitFor();
+  const imageAsset = await call("app_asset", {
+    action: "upload",
+    name: "比较样本.png",
+    mime: "image/png",
+    base64:
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC",
+  });
+  const mediaFixture = await call("app_edit", {
+    commands: [
+      {
+        op: "object.create",
+        ref: "image",
+        type: "base.media",
+        title: "图片来源",
+        data: {
+          mime: "image/png",
+          blob: imageAsset.sha256,
+          alt: "比较样本图片",
+        },
+      },
+      {
+        op: "object.create",
+        ref: "audio",
+        type: "base.media",
+        title: "音频来源",
+        data: { mime: "audio/wav", caption: "音频版本说明" },
+      },
+      {
+        op: "object.create",
+        ref: "compare",
+        type: "base.comparison",
+        title: "混合媒体比较",
+      },
+      {
+        op: "relation.create",
+        kind: "base.compare_left",
+        sourceId: "@compare",
+        targetId: "@image",
+      },
+      {
+        op: "relation.create",
+        kind: "base.compare_right",
+        sourceId: "@compare",
+        targetId: "@audio",
+      },
+      {
+        op: "presentation.create",
+        ref: "card",
+        boardId: compareHome,
+        objectId: "@compare",
+        x: 80,
+        y: 730,
+      },
+    ],
+  });
+  const mediaComparison = compareCard(mediaFixture.created.card);
+  const preview = mediaComparison.getByRole("img", {
+    name: "比较样本图片",
+    exact: true,
+  });
+  await preview.waitFor();
+  assert.equal(
+    await preview.evaluate(async (element) => {
+      const image = element as HTMLImageElement;
+      await image.decode();
+      return image.naturalWidth;
+    }),
+    1,
+  );
+  const changedFields = mediaComparison.getByLabel("字段差异", { exact: true });
+  await changedFields.getByText("audio/wav", { exact: true }).waitFor();
+  await changedFields.getByText("音频版本说明", { exact: true }).waitFor();
+  await call("app_edit", {
+    commands: [
+      { op: "object.update", id: mediaFixture.created.image, unset: ["blob"] },
+    ],
+  });
+  await mediaComparison
+    .getByText("这份图片暂时不可读。", { exact: true })
+    .waitFor();
+  assert.equal(await preview.count(), 0);
   assert.deepEqual(errors, []);
   console.log(
     "BLANK CANVAS PASSED: no workspace required, zero initial components, palette drag/drop and editing, drag without the arrange mode, resize and Delete and Escape on a selected card, inline editing, save-on-stop, undo/redo/jump through MCP, edge pan off by default, the zoom bar across sizes and levels, component pack import, nested boards, capability-gated AI/shared MCP composition, optional human repository import, source reading, custom theme and narrow-screen layout.",
